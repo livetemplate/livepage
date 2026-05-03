@@ -436,9 +436,16 @@ func (c *Config) ValidateWebhooks() error {
 
 // SiteConfig holds site-level configuration
 type SiteConfig struct {
-	Home       string `yaml:"home"`        // Homepage markdown file (e.g., "index.md")
-	Logo       string `yaml:"logo"`        // Logo path (e.g., "/assets/logo.svg")
-	Repository string `yaml:"repository"`  // GitHub repository URL
+	Home       string `yaml:"home"`       // Homepage markdown file (e.g., "index.md")
+	Logo       string `yaml:"logo"`       // Logo path (e.g., "/assets/logo.svg")
+	Repository string `yaml:"repository"` // GitHub repository URL
+
+	// URL is the canonical absolute base URL of the deployed site
+	// (e.g., "https://livetemplate.fly.dev"), with NO trailing slash.
+	// When set, sitemap.xml emits absolute URLs and OpenGraph meta tags
+	// include og:url. When empty, sitemap entries use relative paths and
+	// og:url is omitted.
+	URL string `yaml:"url,omitempty"`
 }
 
 // NavSection represents a navigation section with pages

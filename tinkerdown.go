@@ -8,6 +8,8 @@ import "github.com/livetemplate/tinkerdown/internal/schedule"
 type Page struct {
 	ID                string
 	Title             string
+	Description       string // From frontmatter; used for <meta description> + og:description
+	Image             string // From frontmatter; used for og:image
 	Type              string // tutorial, guide, reference, playground
 	SourceFile        string // Absolute path to source .md file (for error messages)
 	SourceRepo        string // Origin GitHub repo URL from frontmatter (for edit link)
@@ -33,6 +35,12 @@ type Page struct {
 
 	// HasCharts indicates the page has chart annotations requiring Chart.js
 	HasCharts bool
+
+	// HasMermaid indicates the page contains ```mermaid fenced blocks
+	// requiring the Mermaid runtime (~3.3MB). Used by the server to
+	// conditionally inject the script and avoid penalising pages without
+	// any diagrams.
+	HasMermaid bool
 }
 
 // PageConfig contains configuration for a page.
