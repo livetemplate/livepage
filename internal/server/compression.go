@@ -8,11 +8,17 @@ import (
 	"sync"
 )
 
-// gzipResponseWriter wraps http.ResponseWriter to compress responses
+// gzipResponseWriter wraps http.ResponseWriter to compress responses.
+// gz is initialized lazily on the first Write so that handlers which
+// bypass this wrapper (via Unwrap) never trigger a gz.Close that would
+// flush an empty gzip stream into the real response body.
 type gzipResponseWriter struct {
+	gz          *gzip.Writer
+	target      http.ResponseWriter
+	gzReady     bool
+	wroteHeader bool
 	io.Writer
 	http.ResponseWriter
-	wroteHeader bool
 }
 
 func (w *gzipResponseWriter) WriteHeader(status int) {
@@ -24,7 +30,21 @@ func (w *gzipResponseWriter) Write(b []byte) (int, error) {
 	if !w.wroteHeader {
 		w.WriteHeader(http.StatusOK)
 	}
-	return w.Writer.Write(b)
+	if !w.gzReady {
+		w.gz.Reset(w.target)
+		w.gzReady = true
+	}
+	return w.gz.Write(b)
+}
+
+// Unwrap exposes the underlying ResponseWriter so handlers that must
+// bypass gzip wrapping (notably reverse-proxied responses, where the
+// upstream owns Content-Length / Content-Encoding) can write the raw
+// bytes without double-encoding. Callers should also clear any eager
+// `Content-Encoding: gzip` / `Vary: Accept-Encoding` headers the
+// middleware already set on the underlying writer.
+func (w *gzipResponseWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
 }
 
 // gzipWriterPool reuses gzip writers to reduce GC pressure
@@ -54,21 +74,24 @@ func compressionMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("Content-Encoding", "gzip")
 		w.Header().Add("Vary", "Accept-Encoding")
 
-		// Get gzip writer from pool
+		// Get gzip writer from pool. The writer is left pointing at
+		// io.Discard until the first body Write, so a handler that
+		// unwraps and never writes through gz produces a clean response
+		// (no trailing empty-stream bytes leaking into the wire).
 		gz := gzipWriterPool.Get().(*gzip.Writer)
-		defer func() {
-			gz.Close()
-			gz.Reset(io.Discard)
-			gzipWriterPool.Put(gz)
-		}()
-
-		gz.Reset(w)
-
-		// Wrap response writer
 		gzw := &gzipResponseWriter{
+			gz:             gz,
+			target:         w,
 			Writer:         gz,
 			ResponseWriter: w,
 		}
+		defer func() {
+			if gzw.gzReady {
+				gz.Close()
+			}
+			gz.Reset(io.Discard)
+			gzipWriterPool.Put(gz)
+		}()
 
 		next.ServeHTTP(gzw, r)
 	})

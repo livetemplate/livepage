@@ -73,6 +73,8 @@ func ParseFile(path string) (*Page, error) {
 	page.Type = fm.Type
 	page.StaticHTML = staticHTML
 	page.SourceFile = absPath // Track source file
+	page.SourceRepo = fm.SourceRepo
+	page.SourcePath = fm.SourcePath
 	page.Sidebar = fm.Sidebar // Page-level sidebar override
 	page.Config = PageConfig{
 		Persist:   fm.Persist,

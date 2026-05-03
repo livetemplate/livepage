@@ -47,6 +47,7 @@ type Server struct {
 	rateLimitDone      <-chan struct{}                        // Closed when rate limiter goroutine exits
 	recentSourceWrites map[string]time.Time                  // Files recently written by source actions
 	sourceWriteMu      sync.Mutex                            // Protects recentSourceWrites
+	proxyRoutes        []*proxyRoute                         // Custom routes that bypass markdown resolution and reverse-proxy to upstream
 }
 
 // New creates a new server for the given root directory.
@@ -75,6 +76,17 @@ func NewWithConfig(rootDir string, cfg *config.Config) *Server {
 	// Initialize site manager if in site mode
 	if cfg.IsSiteMode() {
 		srv.siteManager = site.New(rootDir, cfg)
+	}
+
+	// Build reverse-proxy routes from config. Bad entries are logged but
+	// do not abort startup — operator-friendly behaviour for misconfig.
+	if len(cfg.Routes) > 0 {
+		routes, errs := buildProxyRoutes(cfg.Routes)
+		srv.proxyRoutes = routes
+		for _, err := range errs {
+			log.Printf("[Routes] skipping invalid route: %v", err)
+		}
+		log.Printf("[Routes] loaded %d proxy route(s)", len(routes))
 	}
 
 	// Initialize playground handler
@@ -336,6 +348,28 @@ func (s *Server) Routes() []*Route {
 
 // ServeHTTP implements http.Handler.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Custom proxy routes match BEFORE we set our own security headers,
+	// so the upstream owns its full response surface (CSP, cookies, frame
+	// policy). Without this, our X-Frame-Options/CSP would override the
+	// upstream's intent — which breaks WebSocket apps that need their own
+	// connect-src and frame settings.
+	//
+	// Reverse-proxied responses also bypass our gzip middleware: upstreams
+	// own their own Content-Encoding/Content-Length, and double-encoding
+	// breaks browsers (Chrome reports ERR_CONTENT_DECODING_FAILED).
+	for _, pr := range s.proxyRoutes {
+		if pr.matches(r.URL.Path) {
+			rw := w
+			if u, ok := w.(interface{ Unwrap() http.ResponseWriter }); ok {
+				rw = u.Unwrap()
+				rw.Header().Del("Content-Encoding")
+				rw.Header().Del("Vary")
+			}
+			pr.handler.ServeHTTP(rw, r)
+			return
+		}
+	}
+
 	// Security headers applied via SecurityHeadersMiddleware on API routes.
 	// Apply same headers to all other routes for consistency.
 	w.Header().Set("X-Frame-Options", "DENY")
@@ -349,6 +383,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"font-src 'self' data:; "+
 			"connect-src 'self'; "+
 			"frame-ancestors 'none'")
+
+	// Strip the configured version prefix (if any) so the rest of routing
+	// can be prefix-agnostic. With prefix unset this is a no-op. Both
+	// Path and RawPath must be stripped so downstream handlers (e.g. the
+	// reverse-proxy Director, which preserves RawPath verbatim) don't
+	// see an out-of-sync original-prefixed path.
+	r.URL.Path = stripVersionPrefix(r.URL.Path, s.config.VersionPrefix)
+	if r.URL.RawPath != "" {
+		r.URL.RawPath = stripVersionPrefix(r.URL.RawPath, s.config.VersionPrefix)
+	}
 
 	// Health endpoint (always available, especially important in headless mode)
 	if r.URL.Path == "/health" {
@@ -647,6 +691,11 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
 	// Render code blocks with metadata for client discovery
 	content := s.renderContent(page)
 
+	// User-config styling overrides (primary color, font) and the initial
+	// theme selection for visitors with no localStorage value.
+	stylingOverrideCSS := buildStylingOverrideCSS(s.config.Styling)
+	defaultTheme := themeDefault(s.config.Styling)
+
 	// Determine effective sidebar setting (page-level overrides site-level)
 	showSidebar := s.config.Features.Sidebar
 	if page.Sidebar != nil {
@@ -667,6 +716,26 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
 		prevNextHTML = s.renderPrevNext(currentPath)
 	}
 
+	// Build the "Edit this page on GitHub" footer link, if configurable.
+	// Page frontmatter (source_repo + source_path) wins over site repo.
+	editLinkHTML := ""
+	siteRepo := ""
+	if s.config.Site != nil {
+		siteRepo = s.config.Site.Repository
+	}
+	pageRelPath := ""
+	if s.siteManager != nil {
+		if node, ok := s.siteManager.GetPage(currentPath); ok && node != nil {
+			pageRelPath = node.FilePath
+		}
+	}
+	if editURL := buildEditURL(siteRepo, page.SourceRepo, page.SourcePath, pageRelPath); editURL != "" {
+		editLinkHTML = fmt.Sprintf(
+			`<div class="page-edit-link"><a href="%s" target="_blank" rel="noopener">Edit this page on GitHub</a></div>`,
+			editURL,
+		)
+	}
+
 	// Wrap content with breadcrumbs and prev/next
 	contentWithNav := fmt.Sprintf(`
 		%s
@@ -674,7 +743,8 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
 			%s
 		</div>
 		%s
-	`, breadcrumbsHTML, content, prevNextHTML)
+		%s
+	`, breadcrumbsHTML, content, editLinkHTML, prevNextHTML)
 
 	// Build WebSocket URL from host with page path for multi-page routing
 	wsURL := fmt.Sprintf("ws://%s/ws?page=%s", host, url.QueryEscape(currentPath))
@@ -2059,6 +2129,7 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
             border-radius: 0.3em;
         }
     </style>
+    %s
 
     <!-- Prism.js for syntax highlighting (embedded) -->
     <link href="/assets/prism.css" rel="stylesheet" />
@@ -2113,9 +2184,9 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
             const STORAGE_KEY = 'tinkerdown-theme';
             const html = document.documentElement;
 
-            // Get current theme from localStorage or default to 'auto'
+            // Get current theme from localStorage or default from server config.
             function getStoredTheme() {
-                return localStorage.getItem(STORAGE_KEY) || 'auto';
+                return localStorage.getItem(STORAGE_KEY) || %q;
             }
 
             // Get system preference
@@ -2478,7 +2549,7 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
     </script>
 %s
 </body>
-</html>`, wsURL, showSidebar, page.Title, sidebar, contentWithNav, chartScript)
+</html>`, wsURL, showSidebar, page.Title, stylingOverrideCSS, sidebar, contentWithNav, defaultTheme, chartScript)
 
 	return html
 }

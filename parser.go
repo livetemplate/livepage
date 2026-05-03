@@ -104,6 +104,14 @@ type Frontmatter struct {
 	// Top-level convenience options
 	Sidebar *bool `yaml:"sidebar,omitempty"` // Show navigation sidebar (overrides features.sidebar)
 
+	// Source provenance — used to render an "Edit this page" link that
+	// points at the canonical source file in its origin repo. Useful when
+	// a page was synced from another repo and the docs site is not the
+	// canonical home of the content. Both default to "" (use site-level
+	// repository + the page's own relative path).
+	SourceRepo string `yaml:"source_repo,omitempty"` // e.g. "https://github.com/livetemplate/livetemplate"
+	SourcePath string `yaml:"source_path,omitempty"` // e.g. "docs/guides/progressive-complexity.md"
+
 	// Chart customization (keyed by heading slug)
 	Charts map[string]ChartOptions `yaml:"charts,omitempty"`
 
