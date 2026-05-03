@@ -170,7 +170,7 @@ func (h *PlaygroundHandler) HandlePreview(w http.ResponseWriter, r *http.Request
 	}
 
 	// Render the page
-	html := h.renderPage(session.Page, r.Host)
+	html := h.renderPage(session.Page, r.Host, detectWSScheme(r))
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write([]byte(html))
@@ -200,9 +200,9 @@ func (h *PlaygroundHandler) HandlePreviewWS(w http.ResponseWriter, r *http.Reque
 }
 
 // renderPage renders a page to HTML using the server's rendering logic.
-func (h *PlaygroundHandler) renderPage(page *tinkerdown.Page, host string) string {
+func (h *PlaygroundHandler) renderPage(page *tinkerdown.Page, host string, wsScheme string) string {
 	// Use the server's renderPage method for consistent output
-	return h.server.renderPage(page, "/playground/preview", host)
+	return h.server.renderPage(page, "/playground/preview", host, wsScheme)
 }
 
 // jsonError sends a JSON error response.
