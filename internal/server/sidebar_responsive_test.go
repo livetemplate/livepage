@@ -97,6 +97,31 @@ func TestSidebarRendersMobileToggleAndBackdrop(t *testing.T) {
 	}
 }
 
+// G16 sub-issue: pre-rendered mermaid SVGs come back from Kroki at native
+// pixel dimensions (e.g. 1681×585 for sequence diagrams). Without
+// `max-width: 100%; height: auto` on the SVG, mobile Safari forces a
+// horizontal scrollbar and auto-scales the whole page down to fit —
+// making text appear squeezed at ~55% width and the hamburger button
+// shrink to invisibility. Lock the responsive constraint.
+func TestPrerenderedMermaidIsResponsive(t *testing.T) {
+	body := renderHomeWithSidebar(t)
+
+	idx := strings.Index(body, ".mermaid-prerendered svg {")
+	if idx < 0 {
+		t.Fatal(".mermaid-prerendered svg CSS rule missing — diagrams will overflow mobile viewports")
+	}
+	window := body[idx:]
+	if len(window) > 300 {
+		window = window[:300]
+	}
+	if !strings.Contains(window, "max-width: 100%") {
+		t.Errorf(".mermaid-prerendered svg must declare max-width: 100%% to fit narrow viewports; rule:\n%s", window)
+	}
+	if !strings.Contains(window, "height: auto") {
+		t.Errorf(".mermaid-prerendered svg must declare height: auto so scaling stays proportional; rule:\n%s", window)
+	}
+}
+
 func TestSidebarToggleScriptIsBound(t *testing.T) {
 	body := renderHomeWithSidebar(t)
 	// The inline toggle script needs to be present and use the

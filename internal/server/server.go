@@ -1245,6 +1245,31 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
             height: auto !important;
         }
 
+        /* Pre-rendered mermaid SVGs (G16) come back from Kroki at native
+         * pixel dimensions (e.g. 1681×585 for sequence diagrams). Without
+         * a responsive constraint they overflow mobile viewports and
+         * iOS Safari auto-scales the WHOLE PAGE down to fit, making text
+         * + the hamburger button appear squeezed. Force the SVG to scale
+         * down to its container; container itself allows horizontal scroll
+         * as a fallback for diagrams too detailed to readably scale. */
+        .mermaid-prerendered {
+            margin: 1.25rem 0;
+            max-width: 100%%;
+            overflow-x: auto;
+        }
+        .mermaid-prerendered svg {
+            display: block;
+            max-width: 100%%;
+            height: auto;
+        }
+        /* Same defensive sizing for runtime-rendered .mermaid containers
+         * (Mermaid 11+ honors useMaxWidth, but pin it explicitly so any
+         * overflow path is covered). */
+        .mermaid > svg {
+            max-width: 100%%;
+            height: auto;
+        }
+
         .tinkerdown-chart-table {
             margin: 0.5rem 0 1.5rem;
             font-size: 0.875rem;
