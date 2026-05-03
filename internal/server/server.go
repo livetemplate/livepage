@@ -350,6 +350,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"connect-src 'self'; "+
 			"frame-ancestors 'none'")
 
+	// Strip the configured version prefix (if any) so the rest of routing
+	// can be prefix-agnostic. With prefix unset this is a no-op.
+	r.URL.Path = stripVersionPrefix(r.URL.Path, s.config.VersionPrefix)
+
 	// Health endpoint (always available, especially important in headless mode)
 	if r.URL.Path == "/health" {
 		s.serveHealth(w, r)

@@ -27,6 +27,13 @@ type Config struct {
 	API         *APIConfig              `yaml:"api,omitempty"`
 	Webhooks    map[string]*Webhook     `yaml:"webhooks,omitempty"`
 	Outputs     map[string]*OutputConfig `yaml:"outputs,omitempty"`
+
+	// VersionPrefix, when non-empty, becomes a URL path segment that is
+	// stripped from incoming requests before route resolution. Routes serve
+	// equivalently with or without the prefix; the prefix exists so that a
+	// future multi-version deployment can mount several site builds under
+	// distinct prefixes (e.g. /v0/, /latest/) without collision.
+	VersionPrefix string `yaml:"version_prefix,omitempty"`
 }
 
 // OutputConfig defines an output destination for notifications.
