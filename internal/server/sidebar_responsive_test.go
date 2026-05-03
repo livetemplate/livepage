@@ -43,6 +43,26 @@ func TestSidebarOverridesPicoFlex(t *testing.T) {
 	}
 }
 
+// PicoCSS sets `nav li { display: inline-block }` to lay out top-nav
+// items horizontally. The first sidebar fix overrode the UL but not
+// the LI, so list items continued packing inline-block in the sidebar
+// (~135px wide each, two-or-three short titles still fit on one line).
+// This locks the second-level override.
+func TestSidebarLiIsListItem(t *testing.T) {
+	body := renderHomeWithSidebar(t)
+	idx := strings.Index(body, ".nav-pages li {")
+	if idx < 0 {
+		t.Fatal(".nav-pages li CSS rule missing — without it, PicoCSS lays out items as inline-block")
+	}
+	window := body[idx:]
+	if len(window) > 500 {
+		window = window[:500]
+	}
+	if !strings.Contains(window, "display: list-item") && !strings.Contains(window, "display: block") {
+		t.Errorf(".nav-pages li must override PicoCSS's display: inline-block (use list-item or block); rule window:\n%s", window)
+	}
+}
+
 func TestSidebarRendersMobileToggleAndBackdrop(t *testing.T) {
 	body := renderHomeWithSidebar(t)
 
