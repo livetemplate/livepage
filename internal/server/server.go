@@ -647,6 +647,11 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
 	// Render code blocks with metadata for client discovery
 	content := s.renderContent(page)
 
+	// User-config styling overrides (primary color, font) and the initial
+	// theme selection for visitors with no localStorage value.
+	stylingOverrideCSS := buildStylingOverrideCSS(s.config.Styling)
+	defaultTheme := themeDefault(s.config.Styling)
+
 	// Determine effective sidebar setting (page-level overrides site-level)
 	showSidebar := s.config.Features.Sidebar
 	if page.Sidebar != nil {
@@ -811,6 +816,7 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
     <!-- PicoCSS - Semantic/Classless CSS Framework (embedded) -->
     <link rel="stylesheet" href="/assets/pico.css">
     <link rel="stylesheet" href="/assets/tinkerdown-client.css">
+    %s
     <style>
         /* Theme Variables */
         :root {
@@ -2113,9 +2119,9 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
             const STORAGE_KEY = 'tinkerdown-theme';
             const html = document.documentElement;
 
-            // Get current theme from localStorage or default to 'auto'
+            // Get current theme from localStorage or default from server config.
             function getStoredTheme() {
-                return localStorage.getItem(STORAGE_KEY) || 'auto';
+                return localStorage.getItem(STORAGE_KEY) || %q;
             }
 
             // Get system preference
@@ -2478,7 +2484,7 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
     </script>
 %s
 </body>
-</html>`, wsURL, showSidebar, page.Title, sidebar, contentWithNav, chartScript)
+</html>`, wsURL, showSidebar, page.Title, stylingOverrideCSS, sidebar, contentWithNav, defaultTheme, chartScript)
 
 	return html
 }
