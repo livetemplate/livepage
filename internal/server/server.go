@@ -1716,21 +1716,29 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
             top: 0.75rem;
             left: 0.75rem;
             z-index: 1100;
-            background: var(--card-bg);
-            color: var(--text-primary);
-            border: 1px solid var(--card-border);
-            border-radius: 6px;
-            padding: 0.5rem;
+            /* Use the brand accent for the background so the hamburger
+             * actually contrasts against a white page — the previous
+             * white-on-white styling was discoverability-broken. */
+            background: var(--accent, #5a67d8);
+            color: #fff;
+            border: 0;
+            border-radius: 8px;
+            width: 44px;
+            height: 44px;
+            padding: 0;
             cursor: pointer;
-            box-shadow: 0 2px 4px var(--card-shadow);
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
             align-items: center;
             justify-content: center;
         }
-        .tinkerdown-nav-toggle:hover {
-            background: var(--bg-secondary);
+        .tinkerdown-nav-toggle:hover,
+        .tinkerdown-nav-toggle:focus-visible {
+            filter: brightness(1.1);
+            outline: 0;
         }
         .tinkerdown-nav-toggle svg {
             display: block;
+            stroke: currentColor;
         }
 
         /* Backdrop shown behind the open sidebar on mobile so taps outside
