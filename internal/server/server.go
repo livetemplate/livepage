@@ -1689,9 +1689,50 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
         }
 
         .nav-pages {
+            /* Override PicoCSS nav ul { display: flex } which would otherwise
+             * lay out nav items horizontally and crush them in the sidebar. */
+            display: block;
             list-style: none;
             margin: 0;
             padding: 0;
+        }
+
+        /* Mobile navigation toggle. Hidden on desktop; appears at <=768px
+         * to expose the otherwise-translated-off-screen sidebar. */
+        .tinkerdown-nav-toggle {
+            display: none;
+            position: fixed;
+            top: 0.75rem;
+            left: 0.75rem;
+            z-index: 1100;
+            background: var(--card-bg);
+            color: var(--text-primary);
+            border: 1px solid var(--card-border);
+            border-radius: 6px;
+            padding: 0.5rem;
+            cursor: pointer;
+            box-shadow: 0 2px 4px var(--card-shadow);
+            align-items: center;
+            justify-content: center;
+        }
+        .tinkerdown-nav-toggle:hover {
+            background: var(--bg-secondary);
+        }
+        .tinkerdown-nav-toggle svg {
+            display: block;
+        }
+
+        /* Backdrop shown behind the open sidebar on mobile so taps outside
+         * the menu close it. Click handler attached in the toggle script. */
+        .tinkerdown-nav-backdrop {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.4);
+            z-index: 850;
+        }
+        .tinkerdown-nav-backdrop.open {
+            display: block;
         }
 
         .nav-pages li a {
@@ -1948,13 +1989,21 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
                 transform: translateX(0);
             }
 
+            /* Reveal the toggle button at mobile widths. */
+            .tinkerdown-nav-toggle {
+                display: flex;
+            }
+
+            /* Make room for the fixed-position toggle so it doesn't overlap
+             * the page H1. Only applied when a sidebar exists. */
+            body:has(.tinkerdown-nav-sidebar) {
+                margin-left: 0;
+                padding-top: 3.5rem;
+            }
+
             .tinkerdown-nav-bottom {
                 left: 0;
                 padding: 0 1rem;
-            }
-
-            body:has(.tinkerdown-nav-sidebar) {
-                margin-left: 0;
             }
 
             .nav-btn {
@@ -2909,7 +2958,15 @@ func (s *Server) renderSidebar(currentPath string) string {
 	}
 
 	var html strings.Builder
-	html.WriteString(`<nav class="tinkerdown-nav-sidebar">`)
+
+	// Mobile hamburger toggle + backdrop. Hidden on desktop via CSS; on
+	// mobile the hamburger is fixed top-left and the backdrop covers the
+	// page when the sidebar is open. Inline SVG keeps the bundle CSP-clean
+	// (no font-icon library, no external image fetch).
+	html.WriteString(`<button type="button" class="tinkerdown-nav-toggle" aria-label="Toggle navigation" aria-expanded="false" aria-controls="tinkerdown-sidebar"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>`)
+	html.WriteString(`<div class="tinkerdown-nav-backdrop" aria-hidden="true"></div>`)
+
+	html.WriteString(`<nav id="tinkerdown-sidebar" class="tinkerdown-nav-sidebar">`)
 
 	// Site title/logo
 	if s.config.Site != nil && s.config.Title != "" {
@@ -2937,6 +2994,35 @@ func (s *Server) renderSidebar(currentPath string) string {
 	}
 
 	html.WriteString(`</nav>`)
+
+	// Toggle wiring. Idempotent re-init guard so hot-reload / re-mounted
+	// scripts don't double-bind handlers. CSP-friendly (no inline event
+	// attributes — only event listeners on a single inline script).
+	html.WriteString(`<script>(function(){
+		var toggle = document.querySelector('.tinkerdown-nav-toggle');
+		var sidebar = document.querySelector('.tinkerdown-nav-sidebar');
+		var backdrop = document.querySelector('.tinkerdown-nav-backdrop');
+		if (!toggle || !sidebar || toggle.dataset.bound === '1') return;
+		toggle.dataset.bound = '1';
+		function setOpen(open) {
+			sidebar.classList.toggle('open', open);
+			if (backdrop) backdrop.classList.toggle('open', open);
+			toggle.setAttribute('aria-expanded', String(open));
+		}
+		toggle.addEventListener('click', function() {
+			setOpen(!sidebar.classList.contains('open'));
+		});
+		if (backdrop) backdrop.addEventListener('click', function() { setOpen(false); });
+		// Close when a nav link is tapped — mobile UX expectation.
+		sidebar.addEventListener('click', function(e) {
+			if (e.target && e.target.closest && e.target.closest('a')) setOpen(false);
+		});
+		// Close on Escape key.
+		document.addEventListener('keydown', function(e) {
+			if (e.key === 'Escape' && sidebar.classList.contains('open')) setOpen(false);
+		});
+	})();</script>`)
+
 	return html.String()
 }
 
