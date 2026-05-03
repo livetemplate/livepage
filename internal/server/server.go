@@ -1189,6 +1189,14 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
             font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
             border: 1px solid var(--code-border);
             color: var(--text-primary);
+            /* PicoCSS forces inline code to display:inline-block with
+             * its own padding, which prevents long inline code (CLI
+             * invocations, package paths, long flags) from wrapping at
+             * word boundaries — the unbreakable inline-block forces
+             * horizontal page overflow on mobile.
+             * Restore inline + allow soft-wrap inside long tokens. */
+            display: inline;
+            overflow-wrap: anywhere;
         }
 
         pre {
