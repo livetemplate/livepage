@@ -10,6 +10,8 @@ type Page struct {
 	Title             string
 	Type              string // tutorial, guide, reference, playground
 	SourceFile        string // Absolute path to source .md file (for error messages)
+	SourceRepo        string // Origin GitHub repo URL from frontmatter (for edit link)
+	SourcePath        string // Path within origin repo from frontmatter (for edit link)
 	Sidebar           *bool  // nil = use default, true/false = explicit override
 	Config            PageConfig
 	StaticHTML        string

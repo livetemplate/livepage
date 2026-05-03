@@ -700,6 +700,26 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
 		prevNextHTML = s.renderPrevNext(currentPath)
 	}
 
+	// Build the "Edit this page on GitHub" footer link, if configurable.
+	// Page frontmatter (source_repo + source_path) wins over site repo.
+	editLinkHTML := ""
+	siteRepo := ""
+	if s.config.Site != nil {
+		siteRepo = s.config.Site.Repository
+	}
+	pageRelPath := ""
+	if s.siteManager != nil {
+		if node, ok := s.siteManager.GetPage(currentPath); ok && node != nil {
+			pageRelPath = node.FilePath
+		}
+	}
+	if editURL := buildEditURL(siteRepo, page.SourceRepo, page.SourcePath, pageRelPath); editURL != "" {
+		editLinkHTML = fmt.Sprintf(
+			`<div class="page-edit-link"><a href="%s" target="_blank" rel="noopener">Edit this page on GitHub</a></div>`,
+			editURL,
+		)
+	}
+
 	// Wrap content with breadcrumbs and prev/next
 	contentWithNav := fmt.Sprintf(`
 		%s
@@ -707,7 +727,8 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
 			%s
 		</div>
 		%s
-	`, breadcrumbsHTML, content, prevNextHTML)
+		%s
+	`, breadcrumbsHTML, content, editLinkHTML, prevNextHTML)
 
 	// Build WebSocket URL from host with page path for multi-page routing
 	wsURL := fmt.Sprintf("ws://%s/ws?page=%s", host, url.QueryEscape(currentPath))
