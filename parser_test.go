@@ -1088,7 +1088,7 @@ func TestProcessMermaidReplacesBlockOnSuccess(t *testing.T) {
 	if remaining != 0 {
 		t.Errorf("remaining = %d, want 0", remaining)
 	}
-	if !strings.Contains(out, `<div class="mermaid-prerendered"><svg>diagram</svg></div>`) {
+	if !strings.Contains(out, `<div class="mermaid mermaid-prerendered"><svg>diagram</svg></div>`) {
 		t.Errorf("expected pre-rendered div in output: %s", out)
 	}
 	if strings.Contains(out, "language-mermaid") {
