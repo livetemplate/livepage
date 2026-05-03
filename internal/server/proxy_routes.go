@@ -41,18 +41,15 @@ func newProxyRoute(re config.RouteEntry) (*proxyRoute, error) {
 	rp := httputil.NewSingleHostReverseProxy(u)
 	origDirector := rp.Director
 	rp.Director = func(req *http.Request) {
+		// Save Path AND RawPath before the default Director runs.
+		// NewSingleHostReverseProxy's default Director joins
+		// upstream.Path with req.URL.Path, which is wrong for our
+		// passthrough model where the upstream owns the full URL
+		// space — restore both fields after to forward the request
+		// path verbatim, including any percent-encoding.
+		savedPath, savedRaw := req.URL.Path, req.URL.RawPath
 		origDirector(req)
-		// Restore the original request path. NewSingleHostReverseProxy's
-		// default Director joins upstream.Path with req.URL.Path, which
-		// is wrong for our passthrough model where upstream owns the
-		// full URL space.
-		req.URL.Path = req.URL.RawPath
-		if req.URL.Path == "" {
-			req.URL.Path = req.RequestURI
-			if i := strings.IndexByte(req.URL.Path, '?'); i >= 0 {
-				req.URL.Path = req.URL.Path[:i]
-			}
-		}
+		req.URL.Path, req.URL.RawPath = savedPath, savedRaw
 		req.Host = u.Host
 	}
 

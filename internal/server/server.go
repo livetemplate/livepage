@@ -385,8 +385,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"frame-ancestors 'none'")
 
 	// Strip the configured version prefix (if any) so the rest of routing
-	// can be prefix-agnostic. With prefix unset this is a no-op.
+	// can be prefix-agnostic. With prefix unset this is a no-op. Both
+	// Path and RawPath must be stripped so downstream handlers (e.g. the
+	// reverse-proxy Director, which preserves RawPath verbatim) don't
+	// see an out-of-sync original-prefixed path.
 	r.URL.Path = stripVersionPrefix(r.URL.Path, s.config.VersionPrefix)
+	if r.URL.RawPath != "" {
+		r.URL.RawPath = stripVersionPrefix(r.URL.RawPath, s.config.VersionPrefix)
+	}
 
 	// Health endpoint (always available, especially important in headless mode)
 	if r.URL.Path == "/health" {
