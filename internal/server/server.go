@@ -353,9 +353,19 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// policy). Without this, our X-Frame-Options/CSP would override the
 	// upstream's intent — which breaks WebSocket apps that need their own
 	// connect-src and frame settings.
+	//
+	// Reverse-proxied responses also bypass our gzip middleware: upstreams
+	// own their own Content-Encoding/Content-Length, and double-encoding
+	// breaks browsers (Chrome reports ERR_CONTENT_DECODING_FAILED).
 	for _, pr := range s.proxyRoutes {
 		if pr.matches(r.URL.Path) {
-			pr.handler.ServeHTTP(w, r)
+			rw := w
+			if u, ok := w.(interface{ Unwrap() http.ResponseWriter }); ok {
+				rw = u.Unwrap()
+				rw.Header().Del("Content-Encoding")
+				rw.Header().Del("Vary")
+			}
+			pr.handler.ServeHTTP(rw, r)
 			return
 		}
 	}
@@ -865,7 +875,6 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
     <!-- PicoCSS - Semantic/Classless CSS Framework (embedded) -->
     <link rel="stylesheet" href="/assets/pico.css">
     <link rel="stylesheet" href="/assets/tinkerdown-client.css">
-    %s
     <style>
         /* Theme Variables */
         :root {
@@ -2114,6 +2123,7 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
             border-radius: 0.3em;
         }
     </style>
+    %s
 
     <!-- Prism.js for syntax highlighting (embedded) -->
     <link href="/assets/prism.css" rel="stylesheet" />

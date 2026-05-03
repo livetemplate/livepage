@@ -27,6 +27,16 @@ func (w *gzipResponseWriter) Write(b []byte) (int, error) {
 	return w.Writer.Write(b)
 }
 
+// Unwrap exposes the underlying ResponseWriter so handlers that must
+// bypass gzip wrapping (notably reverse-proxied responses, where the
+// upstream owns Content-Length / Content-Encoding) can write the raw
+// bytes without double-encoding. Callers should also clear any eager
+// `Content-Encoding: gzip` / `Vary: Accept-Encoding` headers the
+// middleware already set on the underlying writer.
+func (w *gzipResponseWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
 // gzipWriterPool reuses gzip writers to reduce GC pressure
 var gzipWriterPool = sync.Pool{
 	New: func() interface{} {
