@@ -17,9 +17,20 @@ import (
 	"github.com/livetemplate/tinkerdown"
 	"github.com/livetemplate/tinkerdown/internal/assets"
 	"github.com/livetemplate/tinkerdown/internal/config"
+	"github.com/livetemplate/tinkerdown/internal/diagrams"
 	"github.com/livetemplate/tinkerdown/internal/schedule"
 	"github.com/livetemplate/tinkerdown/internal/site"
 )
+
+// defaultStr returns s when non-empty, otherwise fallback. Local helper
+// for log lines where an empty config value should display as the
+// runtime-applied default.
+func defaultStr(s, fallback string) string {
+	if s == "" {
+		return fallback
+	}
+	return s
+}
 
 // Route represents a discovered page route.
 type Route struct {
@@ -76,6 +87,15 @@ func NewWithConfig(rootDir string, cfg *config.Config) *Server {
 	// Initialize site manager if in site mode
 	if cfg.IsSiteMode() {
 		srv.siteManager = site.New(rootDir, cfg)
+	}
+
+	// Wire up server-side diagram pre-rendering (G16) when enabled. Done
+	// BEFORE Discover() so the parser sees the renderer on first parse.
+	// Setter is idempotent — re-init or hot-reload paths can call again.
+	if cfg.Features.PrerenderDiagrams {
+		tinkerdown.SetMermaidRenderer(diagrams.NewKrokiMermaid(cfg.Features.KrokiURL))
+		log.Printf("[Diagrams] mermaid pre-render enabled (Kroki=%s)",
+			defaultStr(cfg.Features.KrokiURL, "https://kroki.io"))
 	}
 
 	// Build reverse-proxy routes from config. Bad entries are logged but

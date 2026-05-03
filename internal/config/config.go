@@ -488,6 +488,19 @@ type FeaturesConfig struct {
 	HotReload bool `yaml:"hot_reload"`
 	Sidebar   bool `yaml:"sidebar"`  // Show navigation sidebar (default: false)
 	Headless  bool `yaml:"headless"` // Run without web UI, only API/webhooks/schedules
+
+	// PrerenderDiagrams enables server-side mermaid pre-rendering via
+	// Kroki. When true, ```mermaid blocks are converted to inline SVG at
+	// parse time and the ~3.3MB client-side mermaid runtime is skipped on
+	// pages where ALL blocks pre-rendered successfully. Blocks that fail
+	// to render fall back to the client-side runtime. Default: false.
+	PrerenderDiagrams bool `yaml:"prerender_diagrams,omitempty"`
+
+	// KrokiURL overrides the Kroki base URL used for diagram pre-render
+	// (default: https://kroki.io public instance). Point this at a
+	// self-hosted Kroki container for production deployments where the
+	// public instance's rate limits or terms are not acceptable.
+	KrokiURL string `yaml:"kroki_url,omitempty"`
 }
 
 // APIConfig holds REST API configuration

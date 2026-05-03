@@ -1037,6 +1037,154 @@ func TestProcessCharts(t *testing.T) {
 	}
 }
 
+// stubRenderer is a controllable DiagramRenderer for tests.
+type stubRenderer struct {
+	output []byte
+	err    error
+}
+
+func (s stubRenderer) Render(_ []byte) ([]byte, error) {
+	return s.output, s.err
+}
+
+// captureRenderer records the source bytes passed to Render so tests
+// can verify the unescape contract.
+type captureRenderer struct {
+	ref    *[]byte
+	output []byte
+}
+
+func (c captureRenderer) Render(source []byte) ([]byte, error) {
+	*c.ref = append([]byte{}, source...)
+	return c.output, nil
+}
+
+type errStubT string
+
+func (e errStubT) Error() string { return string(e) }
+
+var errStub = errStubT("renderer down for test")
+
+func TestProcessMermaidNoOpWithoutRenderer(t *testing.T) {
+	in := `<p>before</p><pre><code class="language-mermaid">flowchart LR
+  A --&gt; B
+</code></pre><p>after</p>`
+	out, remaining := processMermaid(in, nil)
+	if out != in {
+		t.Errorf("html should be unchanged when renderer is nil")
+	}
+	if remaining != 1 {
+		t.Errorf("remaining = %d, want 1", remaining)
+	}
+}
+
+func TestProcessMermaidReplacesBlockOnSuccess(t *testing.T) {
+	in := `<pre><code class="language-mermaid">flowchart LR
+  A --&gt; B
+</code></pre>`
+	r := stubRenderer{output: []byte(`<svg>diagram</svg>`)}
+	out, remaining := processMermaid(in, r)
+
+	if remaining != 0 {
+		t.Errorf("remaining = %d, want 0", remaining)
+	}
+	if !strings.Contains(out, `<div class="mermaid-prerendered"><svg>diagram</svg></div>`) {
+		t.Errorf("expected pre-rendered div in output: %s", out)
+	}
+	if strings.Contains(out, "language-mermaid") {
+		t.Errorf("original block should be removed: %s", out)
+	}
+}
+
+func TestProcessMermaidLeavesBlockOnRendererError(t *testing.T) {
+	in := `<pre><code class="language-mermaid">bad source</code></pre>`
+	r := stubRenderer{err: errStub}
+	out, remaining := processMermaid(in, r)
+
+	if remaining != 1 {
+		t.Errorf("remaining = %d, want 1 (failure should keep the block)", remaining)
+	}
+	if !strings.Contains(out, "language-mermaid") {
+		t.Errorf("failed-render block should remain in output: %s", out)
+	}
+	if strings.Contains(out, "mermaid-prerendered") {
+		t.Errorf("no pre-rendered div should be emitted on failure: %s", out)
+	}
+}
+
+func TestProcessMermaidUnescapesSourceBeforeRendering(t *testing.T) {
+	// Goldmark HTML-escapes < and > inside fenced blocks. The renderer
+	// must receive the original mermaid syntax, not the escaped form.
+	in := `<pre><code class="language-mermaid">flowchart LR
+  A --&gt; B
+  B --&lt; C
+</code></pre>`
+	var captured []byte
+	r := captureRenderer{ref: &captured, output: []byte("<svg/>")}
+	processMermaid(in, r)
+
+	if !strings.Contains(string(captured), "-->") {
+		t.Errorf("renderer received escaped HTML instead of raw mermaid: %q", captured)
+	}
+	if strings.Contains(string(captured), "&gt;") {
+		t.Errorf("renderer received escaped &gt;: %q", captured)
+	}
+}
+
+func TestProcessMermaidHandlesMultipleBlocks(t *testing.T) {
+	in := `<pre><code class="language-mermaid">A</code></pre>
+<p>between</p>
+<pre><code class="language-mermaid">B</code></pre>`
+	r := stubRenderer{output: []byte("<svg/>")}
+	out, remaining := processMermaid(in, r)
+
+	if remaining != 0 {
+		t.Errorf("remaining = %d, want 0", remaining)
+	}
+	if strings.Count(out, "mermaid-prerendered") != 2 {
+		t.Errorf("expected 2 pre-rendered divs, got: %s", out)
+	}
+}
+
+func TestParseMarkdownEndToEndPreRendersWhenRendererSet(t *testing.T) {
+	r := stubRenderer{output: []byte(`<svg id="diag">x</svg>`)}
+	SetMermaidRenderer(r)
+	t.Cleanup(func() { SetMermaidRenderer(nil) })
+
+	content := []byte("---\ntitle: Diag\n---\n\n```mermaid\nflowchart LR\n  A --> B\n```\n")
+	fm, _, html, err := ParseMarkdown(content)
+	if err != nil {
+		t.Fatalf("ParseMarkdown: %v", err)
+	}
+	if fm.HasMermaid {
+		t.Error("HasMermaid should be false when ALL blocks pre-rendered (skips runtime injection)")
+	}
+	if !strings.Contains(html, `mermaid-prerendered`) {
+		t.Errorf("html missing pre-rendered marker: %s", html)
+	}
+	if strings.Contains(html, "language-mermaid") {
+		t.Errorf("original mermaid block should be replaced: %s", html)
+	}
+}
+
+func TestParseMarkdownEndToEndKeepsBlockOnRendererFailure(t *testing.T) {
+	r := stubRenderer{err: errStub}
+	SetMermaidRenderer(r)
+	t.Cleanup(func() { SetMermaidRenderer(nil) })
+
+	content := []byte("---\ntitle: Diag\n---\n\n```mermaid\nflowchart LR\n  A --> B\n```\n")
+	fm, _, html, err := ParseMarkdown(content)
+	if err != nil {
+		t.Fatalf("ParseMarkdown: %v", err)
+	}
+	if !fm.HasMermaid {
+		t.Error("HasMermaid should remain true when renderer fails (runtime needed for fallback)")
+	}
+	if !strings.Contains(html, "language-mermaid") {
+		t.Errorf("original block must remain for client-side fallback: %s", html)
+	}
+}
+
 func TestParseMarkdownDetectsMermaid(t *testing.T) {
 	cases := []struct {
 		name    string
