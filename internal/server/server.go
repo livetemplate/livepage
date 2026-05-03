@@ -695,8 +695,19 @@ func (s *Server) servePage(w http.ResponseWriter, r *http.Request, route *Route)
 // generic reverse proxies all set it on TLS-terminated requests),
 // then fall back to r.TLS for direct HTTPS servers, then "ws".
 func detectWSScheme(r *http.Request) string {
-	if proto := r.Header.Get("X-Forwarded-Proto"); proto == "https" {
-		return "wss"
+	// When X-Forwarded-Proto is present, it is authoritative — the
+	// proxy knows what scheme the client actually spoke. We must NOT
+	// fall through to the r.TLS check because a TLS-terminated server
+	// behind a proxy that talks plain http to its backend would then
+	// emit wss:// for clients that connected over plain http.
+	//
+	// EqualFold defends against proxies that send "HTTPS" / "Https";
+	// net/http canonicalises header *names* but not *values*.
+	if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
+		if strings.EqualFold(proto, "https") {
+			return "wss"
+		}
+		return "ws"
 	}
 	if r.TLS != nil {
 		return "wss"

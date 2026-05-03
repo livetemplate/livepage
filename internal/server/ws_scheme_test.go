@@ -53,13 +53,26 @@ func TestDetectWSScheme(t *testing.T) {
 			want: "ws",
 		},
 		{
-			// Edge sets X-Forwarded-Proto: http and TLS isn't terminated —
-			// stay plain. We don't try to second-guess the edge.
-			name: "x-forwarded-proto http takes priority over absent TLS",
+			// The case where the priority order between the two checks
+			// actually matters: the proxy advertises plain http but our
+			// listening socket happens to be TLS. The proxy's signal is
+			// authoritative — it knows what the client actually spoke.
+			name: "x-forwarded-proto http overrides r.TLS (proxy is authoritative)",
 			req: &http.Request{
 				Header: http.Header{"X-Forwarded-Proto": []string{"http"}},
+				TLS:    &tls.ConnectionState{},
 			},
 			want: "ws",
+		},
+		{
+			// Defensive: net/http canonicalises header names but not
+			// values. Most proxies send lowercase, but EqualFold guards
+			// against the rare ones that don't.
+			name: "x-forwarded-proto HTTPS (uppercase) still detected as wss",
+			req: &http.Request{
+				Header: http.Header{"X-Forwarded-Proto": []string{"HTTPS"}},
+			},
+			want: "wss",
 		},
 	}
 	for _, c := range cases {
