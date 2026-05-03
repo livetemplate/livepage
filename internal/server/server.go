@@ -1600,7 +1600,13 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
             z-index: 900;
             display: flex;
             flex-direction: column;
-            overflow: hidden;
+            /* Scroll nav vertically when its content exceeds the viewport.
+             * The previous setting hid the overflow, which clipped bottom
+             * nav items unreachably on a 10+-section sidebar. The contain
+             * value on overscroll-behavior keeps nav scroll from chaining
+             * into the page when the sidebar reaches its end. */
+            overflow-y: auto;
+            overscroll-behavior: contain;
         }
 
         .nav-sidebar-header {

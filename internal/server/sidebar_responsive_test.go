@@ -97,6 +97,40 @@ func TestSidebarRendersMobileToggleAndBackdrop(t *testing.T) {
 	}
 }
 
+// Regression: a long sidebar (10+ sections) was unscrollable because the
+// base sidebar rule declared `overflow: hidden`. Bottom items were
+// clipped and unreachable on viewports shorter than the full menu.
+//
+// The rendered CSS has variable indentation (depending on Sprintf
+// nesting) so anchor-and-substring is tricky. Easiest: just assert
+// `overflow-y: auto` exists somewhere in the document AND no
+// `.tinkerdown-nav-sidebar` rule body still uses `overflow: hidden`.
+func TestSidebarIsScrollable(t *testing.T) {
+	body := renderHomeWithSidebar(t)
+
+	if !strings.Contains(body, "overflow-y: auto") {
+		t.Error(".tinkerdown-nav-sidebar must declare overflow-y: auto so long navs can scroll")
+	}
+	// Look at every .tinkerdown-nav-sidebar { rule body and ensure
+	// none declare overflow: hidden (the original bug).
+	rest := body
+	for {
+		idx := strings.Index(rest, ".tinkerdown-nav-sidebar {")
+		if idx < 0 {
+			break
+		}
+		end := strings.Index(rest[idx:], "}")
+		if end < 0 {
+			break
+		}
+		ruleBody := rest[idx : idx+end]
+		if strings.Contains(ruleBody, "overflow: hidden") {
+			t.Errorf("found .tinkerdown-nav-sidebar rule with overflow: hidden (clips bottom nav items):\n%s", ruleBody)
+		}
+		rest = rest[idx+end:]
+	}
+}
+
 // G16 sub-issue: pre-rendered mermaid SVGs come back from Kroki at native
 // pixel dimensions (e.g. 1681×585 for sequence diagrams). Without
 // `max-width: 100%; height: auto` on the SVG, mobile Safari forces a
