@@ -238,6 +238,16 @@ func ParseMarkdown(content []byte) (*Frontmatter, []*CodeBlock, string, error) {
 		frontmatter.HasCharts = true
 	}
 
+	// Pre-render mermaid blocks to inline SVG when a renderer is registered
+	// (server enables this via SetMermaidRenderer at startup based on
+	// features.prerender_diagrams). Re-set HasMermaid based on blocks that
+	// the renderer COULD NOT handle — only those still need the runtime.
+	if frontmatter.HasMermaid {
+		var remainingMermaid int
+		html, remainingMermaid = processMermaid(html, mermaidRenderer)
+		frontmatter.HasMermaid = remainingMermaid > 0
+	}
+
 	// Parse schedule tokens and imperatives from markdown content
 	schedules, scheduleWarnings := parseScheduleTokens(remaining)
 	if len(schedules) > 0 {
@@ -695,6 +705,83 @@ var htmlTagPattern = regexp.MustCompile(`<[^>]*>`)
 var chartAnnotationPattern = regexp.MustCompile(
 	`(<h([1-6])\s+id="[^"]*"[^>]*>)(.*?)\s*\{chart(?::(\w+))?\}\s*(</h[1-6]>)`,
 )
+
+// mermaidBlockPattern matches goldmark-rendered ```mermaid fenced blocks:
+//
+//	<pre><code class="language-mermaid">…source…</code></pre>
+//
+// The `(?s)` flag lets `.` cross newlines so multi-line diagram source matches.
+// Capture group 1 is the diagram source (HTML-escaped — caller must unescape
+// before sending to a renderer).
+var mermaidBlockPattern = regexp.MustCompile(
+	`(?s)<pre><code class="language-mermaid">(.*?)</code></pre>`,
+)
+
+// mermaidRenderer is the package-level diagram renderer used by parsing
+// when set. Servers initialize this once at startup based on config; nil
+// means "no pre-rendering, leave mermaid blocks for the client runtime".
+//
+// Made package-level (rather than threaded through every parse function)
+// to avoid breaking the existing ParseMarkdown / ParseFile API surface.
+var mermaidRenderer DiagramRenderer
+
+// DiagramRenderer renders diagram source to bytes (typically inline SVG).
+// The interface deliberately mirrors internal/diagrams.Renderer so the
+// concrete implementation can live in that subpackage without forcing
+// callers of tinkerdown to import it.
+type DiagramRenderer interface {
+	Render(source []byte) ([]byte, error)
+}
+
+// SetMermaidRenderer registers a renderer that will be used to pre-render
+// ```mermaid fenced blocks during ParseMarkdown. Pass nil to disable.
+// Safe to call once during server initialization.
+func SetMermaidRenderer(r DiagramRenderer) {
+	mermaidRenderer = r
+}
+
+// processMermaid replaces ```mermaid fenced blocks with inline SVG when a
+// renderer is available. Blocks that fail to render are left intact so the
+// client-side runtime can handle them — this is the graceful-degradation
+// path that keeps pages working when Kroki is unreachable.
+//
+// Returns the modified HTML and the number of blocks that were NOT
+// pre-rendered (i.e. still need the client-side runtime). Callers use the
+// remaining count to decide whether to inject the mermaid runtime script.
+func processMermaid(htmlStr string, renderer DiagramRenderer) (string, int) {
+	matches := mermaidBlockPattern.FindAllStringSubmatchIndex(htmlStr, -1)
+	if len(matches) == 0 {
+		return htmlStr, 0
+	}
+	if renderer == nil {
+		return htmlStr, len(matches)
+	}
+
+	remaining := 0
+	// Walk in reverse so indices stay valid as we splice replacements in.
+	for i := len(matches) - 1; i >= 0; i-- {
+		m := matches[i]
+		blockStart, blockEnd := m[0], m[1]
+		sourceStart, sourceEnd := m[2], m[3]
+
+		// Goldmark HTML-escapes the code-block contents (e.g. `>` → `&gt;`).
+		// Kroki expects the original mermaid syntax, so unescape first.
+		source := html.UnescapeString(htmlStr[sourceStart:sourceEnd])
+
+		svg, err := renderer.Render([]byte(source))
+		if err != nil {
+			// Keep the block — client runtime will render it.
+			remaining++
+			continue
+		}
+
+		// Wrap in a div so themes / dark mode CSS can target pre-rendered
+		// diagrams distinctly from runtime-rendered ones.
+		replacement := `<div class="mermaid-prerendered">` + string(svg) + `</div>`
+		htmlStr = htmlStr[:blockStart] + replacement + htmlStr[blockEnd:]
+	}
+	return htmlStr, remaining
+}
 
 // chartTablePattern matches a GFM-rendered table immediately after a heading.
 // Uses <table[^>]*> to tolerate attributes Goldmark may add via extensions.
@@ -1177,6 +1264,13 @@ func ParseMarkdownWithPartials(content []byte, baseDir string) (*Frontmatter, []
 	htmlStr, hasCharts := processCharts(htmlStr, frontmatter.Charts)
 	if hasCharts {
 		frontmatter.HasCharts = true
+	}
+
+	// Pre-render mermaid (see ParseMarkdown for rationale).
+	if frontmatter.HasMermaid {
+		var remainingMermaid int
+		htmlStr, remainingMermaid = processMermaid(htmlStr, mermaidRenderer)
+		frontmatter.HasMermaid = remainingMermaid > 0
 	}
 
 	// Parse schedule tokens and imperatives from markdown content
