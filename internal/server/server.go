@@ -682,12 +682,44 @@ func (s *Server) servePage(w http.ResponseWriter, r *http.Request, route *Route)
 	// TODO: Add WebSocket support for interactivity
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
-	html := s.renderPage(route.Page, r.URL.Path, r.Host)
+	html := s.renderPage(route.Page, r.URL.Path, r.Host, detectWSScheme(r))
 	w.Write([]byte(html))
 }
 
-// renderPage renders a page to HTML.
-func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host string) string {
+// detectWSScheme returns the appropriate WebSocket URL scheme ("wss"
+// or "ws") for the request. A page served over HTTPS must connect to
+// a wss:// endpoint or browsers reject the upgrade as mixed-content,
+// silently breaking every interactive block on the page.
+//
+// We trust X-Forwarded-Proto from the edge first (fly, cloudflare,
+// generic reverse proxies all set it on TLS-terminated requests),
+// then fall back to r.TLS for direct HTTPS servers, then "ws".
+func detectWSScheme(r *http.Request) string {
+	// When X-Forwarded-Proto is present, it is authoritative — the
+	// proxy knows what scheme the client actually spoke. We must NOT
+	// fall through to the r.TLS check because a TLS-terminated server
+	// behind a proxy that talks plain http to its backend would then
+	// emit wss:// for clients that connected over plain http.
+	//
+	// EqualFold defends against proxies that send "HTTPS" / "Https";
+	// net/http canonicalises header *names* but not *values*.
+	if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
+		if strings.EqualFold(proto, "https") {
+			return "wss"
+		}
+		return "ws"
+	}
+	if r.TLS != nil {
+		return "wss"
+	}
+	return "ws"
+}
+
+// renderPage renders a page to HTML. wsScheme should be "ws" for
+// http-served pages and "wss" for https-served pages — see
+// detectWSScheme. Passing the wrong scheme silently breaks every
+// interactive block under HTTPS via mixed-content rejection.
+func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host string, wsScheme string) string {
 	// Render code blocks with metadata for client discovery
 	content := s.renderContent(page)
 
@@ -746,8 +778,9 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
 		%s
 	`, breadcrumbsHTML, content, editLinkHTML, prevNextHTML)
 
-	// Build WebSocket URL from host with page path for multi-page routing
-	wsURL := fmt.Sprintf("ws://%s/ws?page=%s", host, url.QueryEscape(currentPath))
+	// Build WebSocket URL from host with page path for multi-page routing.
+	// Scheme MUST match the page's request scheme — see detectWSScheme.
+	wsURL := fmt.Sprintf("%s://%s/ws?page=%s", wsScheme, host, url.QueryEscape(currentPath))
 
 	// Conditionally include Chart.js for pages with chart annotations
 	chartScript := ""
