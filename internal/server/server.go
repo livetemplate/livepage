@@ -1697,6 +1697,17 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
             padding: 0;
         }
 
+        .nav-pages li {
+            /* Override PicoCSS nav li { display: inline-block }. The previous
+             * fix on .nav-pages only switched the UL to block; PicoCSS still
+             * laid out the LIs as inline-block at ~135px each, so they
+             * packed horizontally in the sidebar. Force list-item layout. */
+            display: list-item;
+            margin: 0;
+            padding: 0;
+            width: auto;
+        }
+
         /* Mobile navigation toggle. Hidden on desktop; appears at <=768px
          * to expose the otherwise-translated-off-screen sidebar. */
         .tinkerdown-nav-toggle {
