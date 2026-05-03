@@ -1213,8 +1213,13 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
         /* Wide tables on narrow viewports get a horizontal scroll
          * container instead of overflowing the page. display: block on
          * the table preserves table-internal cell layout while letting
-         * the table itself scroll within the article column. */
-        article table {
+         * the table itself scroll within its column.
+         *
+         * Scoped to .content-wrapper (tinkerdown's content container)
+         * rather than the semantic article element, which the renderer
+         * does not emit — v0.1.10 used the article-prefixed selector
+         * and matched nothing on every docs page. */
+        .content-wrapper table {
             display: block;
             max-width: 100%%;
             overflow-x: auto;

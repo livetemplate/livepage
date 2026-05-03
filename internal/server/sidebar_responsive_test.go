@@ -195,25 +195,32 @@ func TestPreBleedOutGuardedByMediaQuery(t *testing.T) {
 }
 
 // Regression: wide reference tables (e.g. /reference/template-support-matrix)
-// have many columns whose combined intrinsic width exceeds the article
-// column on mobile. Without `display: block; overflow-x: auto;` on
-// `article table`, the table forces the document to scroll horizontally.
-func TestArticleTablesAreScrollable(t *testing.T) {
+// have many columns whose combined intrinsic width exceeds the content
+// column on mobile. v0.1.10 added a rule but used `article table` as the
+// selector — tinkerdown does not emit a semantic <article> element, so
+// the rule matched nothing and pages still overflowed. Lock the
+// .content-wrapper-scoped selector so the rule actually matches.
+func TestContentTablesAreScrollable(t *testing.T) {
 	body := renderHomeWithSidebar(t)
 
-	idx := strings.Index(body, "article table {")
+	idx := strings.Index(body, ".content-wrapper table {")
 	if idx < 0 {
-		t.Fatal("article table rule missing — wide tables will force horizontal page overflow on mobile")
+		t.Fatal(".content-wrapper table rule missing — wide tables will force horizontal page overflow on mobile")
 	}
 	window := body[idx:]
 	if len(window) > 300 {
 		window = window[:300]
 	}
 	if !strings.Contains(window, "display: block") {
-		t.Errorf("article table must declare display: block so it can scroll independently; rule:\n%s", window)
+		t.Errorf(".content-wrapper table must declare display: block so it can scroll independently; rule:\n%s", window)
 	}
 	if !strings.Contains(window, "overflow-x: auto") {
-		t.Errorf("article table must declare overflow-x: auto; rule:\n%s", window)
+		t.Errorf(".content-wrapper table must declare overflow-x: auto; rule:\n%s", window)
+	}
+	// And explicitly assert the broken selector is GONE — defense in
+	// depth against re-introducing it.
+	if strings.Contains(body, "article table {") {
+		t.Error("`article table` selector found — tinkerdown does not emit <article>, this matches nothing")
 	}
 }
 
