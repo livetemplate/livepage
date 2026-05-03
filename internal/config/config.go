@@ -34,6 +34,23 @@ type Config struct {
 	// future multi-version deployment can mount several site builds under
 	// distinct prefixes (e.g. /v0/, /latest/) without collision.
 	VersionPrefix string `yaml:"version_prefix,omitempty"`
+
+	// Routes declares custom URL routes that bypass the markdown page
+	// resolver. Each entry binds a request-path pattern to an upstream
+	// destination. Currently only `type: proxy` is supported, which
+	// reverse-proxies the request (including WebSocket upgrades) to the
+	// configured upstream host. The full request path is forwarded
+	// unchanged — the upstream is responsible for its own URL structure.
+	Routes []RouteEntry `yaml:"routes,omitempty"`
+}
+
+// RouteEntry binds a URL pattern to a destination. A pattern ending in
+// "/" matches that subtree; otherwise it must match exactly. Routes are
+// evaluated in declaration order; first match wins.
+type RouteEntry struct {
+	Pattern  string `yaml:"pattern"`
+	Type     string `yaml:"type"`
+	Upstream string `yaml:"upstream"`
 }
 
 // OutputConfig defines an output destination for notifications.

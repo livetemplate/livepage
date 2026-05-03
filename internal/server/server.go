@@ -47,6 +47,7 @@ type Server struct {
 	rateLimitDone      <-chan struct{}                        // Closed when rate limiter goroutine exits
 	recentSourceWrites map[string]time.Time                  // Files recently written by source actions
 	sourceWriteMu      sync.Mutex                            // Protects recentSourceWrites
+	proxyRoutes        []*proxyRoute                         // Custom routes that bypass markdown resolution and reverse-proxy to upstream
 }
 
 // New creates a new server for the given root directory.
@@ -75,6 +76,17 @@ func NewWithConfig(rootDir string, cfg *config.Config) *Server {
 	// Initialize site manager if in site mode
 	if cfg.IsSiteMode() {
 		srv.siteManager = site.New(rootDir, cfg)
+	}
+
+	// Build reverse-proxy routes from config. Bad entries are logged but
+	// do not abort startup — operator-friendly behaviour for misconfig.
+	if len(cfg.Routes) > 0 {
+		routes, errs := buildProxyRoutes(cfg.Routes)
+		srv.proxyRoutes = routes
+		for _, err := range errs {
+			log.Printf("[Routes] skipping invalid route: %v", err)
+		}
+		log.Printf("[Routes] loaded %d proxy route(s)", len(routes))
 	}
 
 	// Initialize playground handler
@@ -336,6 +348,18 @@ func (s *Server) Routes() []*Route {
 
 // ServeHTTP implements http.Handler.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Custom proxy routes match BEFORE we set our own security headers,
+	// so the upstream owns its full response surface (CSP, cookies, frame
+	// policy). Without this, our X-Frame-Options/CSP would override the
+	// upstream's intent — which breaks WebSocket apps that need their own
+	// connect-src and frame settings.
+	for _, pr := range s.proxyRoutes {
+		if pr.matches(r.URL.Path) {
+			pr.handler.ServeHTTP(w, r)
+			return
+		}
+	}
+
 	// Security headers applied via SecurityHeadersMiddleware on API routes.
 	// Apply same headers to all other routes for consistency.
 	w.Header().Set("X-Frame-Options", "DENY")
