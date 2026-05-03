@@ -96,10 +96,12 @@ type ParamDef struct {
 // Frontmatter represents the YAML frontmatter at the top of a markdown file.
 type Frontmatter struct {
 	// Page metadata
-	Title   string      `yaml:"title"`
-	Type    string      `yaml:"type"`    // tutorial, guide, reference, playground
-	Persist PersistMode `yaml:"persist"` // none, localstorage, server
-	Steps   int         `yaml:"steps"`
+	Title       string      `yaml:"title"`
+	Description string      `yaml:"description,omitempty"` // Used for <meta name="description"> + og:description
+	Image       string      `yaml:"image,omitempty"`       // Path/URL used for og:image (falls back to site logo)
+	Type        string      `yaml:"type"`                  // tutorial, guide, reference, playground
+	Persist     PersistMode `yaml:"persist"`               // none, localstorage, server
+	Steps       int         `yaml:"steps"`
 
 	// Top-level convenience options
 	Sidebar *bool `yaml:"sidebar,omitempty"` // Show navigation sidebar (overrides features.sidebar)
@@ -137,6 +139,9 @@ type Frontmatter struct {
 
 	// HasCharts indicates the page has {chart:...} annotations (populated during parsing)
 	HasCharts bool `yaml:"-"`
+
+	// HasMermaid indicates the page has ```mermaid fenced blocks (populated during parsing)
+	HasMermaid bool `yaml:"-"`
 }
 
 // CodeBlock represents a code block extracted from markdown.
@@ -188,6 +193,13 @@ func ParseMarkdown(content []byte) (*Frontmatter, []*CodeBlock, string, error) {
 				// This is a livemdtools block - collect it and map it to AST node
 				codeBlocks = append(codeBlocks, block)
 				blockMap[n] = block
+			} else if fenced.Info != nil {
+				// Non-livemdtools fenced block — check for mermaid so the
+				// server can conditionally load the heavy Mermaid runtime.
+				info := strings.Fields(string(fenced.Info.Text(remaining)))
+				if len(info) > 0 && info[0] == "mermaid" {
+					frontmatter.HasMermaid = true
+				}
 			}
 		}
 
@@ -1124,6 +1136,11 @@ func ParseMarkdownWithPartials(content []byte, baseDir string) (*Frontmatter, []
 			if block != nil {
 				codeBlocks = append(codeBlocks, block)
 				blockMap[n] = block
+			} else if fenced.Info != nil {
+				info := strings.Fields(string(fenced.Info.Text(processed)))
+				if len(info) > 0 && info[0] == "mermaid" {
+					frontmatter.HasMermaid = true
+				}
 			}
 		}
 

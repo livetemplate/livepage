@@ -1037,6 +1037,41 @@ func TestProcessCharts(t *testing.T) {
 	}
 }
 
+func TestParseMarkdownDetectsMermaid(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{
+			name: "page with mermaid block",
+			content: "---\ntitle: \"Diagram\"\n---\n\n# Flow\n\n```mermaid\nflowchart LR\n  A --> B\n```\n",
+			want: true,
+		},
+		{
+			name:    "page without mermaid block",
+			content: "---\ntitle: \"No Diagram\"\n---\n\n# Just text\n\n```go\nfmt.Println(\"hi\")\n```\n",
+			want:    false,
+		},
+		{
+			name:    "no fenced blocks at all",
+			content: "---\ntitle: \"Plain\"\n---\n\nJust prose, no code.\n",
+			want:    false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fm, _, _, err := ParseMarkdown([]byte(tc.content))
+			if err != nil {
+				t.Fatalf("ParseMarkdown failed: %v", err)
+			}
+			if fm.HasMermaid != tc.want {
+				t.Errorf("HasMermaid = %v, want %v", fm.HasMermaid, tc.want)
+			}
+		})
+	}
+}
+
 func TestParseMarkdownWithCharts(t *testing.T) {
 	content := []byte(`---
 title: "Chart Test"

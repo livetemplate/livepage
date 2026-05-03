@@ -400,6 +400,17 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// SEO endpoints (always available; sitemap returns 404 in headless mode
+	// since there are no pages to enumerate, but robots.txt is still useful).
+	if r.URL.Path == "/sitemap.xml" {
+		s.serveSitemap(w, r)
+		return
+	}
+	if r.URL.Path == "/robots.txt" {
+		s.serveRobots(w, r)
+		return
+	}
+
 	// Serve REST API endpoints
 	if strings.HasPrefix(r.URL.Path, "/api/sources/") && s.apiRoutes != nil {
 		s.apiRoutes.ServeHTTP(w, r)
@@ -782,12 +793,57 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
 	// Scheme MUST match the page's request scheme — see detectWSScheme.
 	wsURL := fmt.Sprintf("%s://%s/ws?page=%s", wsScheme, host, url.QueryEscape(currentPath))
 
-	// Conditionally include Chart.js for pages with chart annotations
+	// Build per-page SEO meta tags (OG, Twitter card, description, canonical).
+	// Falls back to site-level config when frontmatter fields are absent.
+	seoTags := s.buildSEOTags(page, currentPath)
+
+	// Conditionally include Mermaid (~3.3MB) only when the page has
+	// ```mermaid fenced blocks. HasMermaid is set by the parser AST walk.
+	mermaidScript := ""
+	if page.HasMermaid {
+		mermaidScript = `
+    <!-- Mermaid.js for diagrams (embedded) -->
+    <script defer src="/assets/mermaid.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            mermaid.initialize({
+                startOnLoad: false,
+                theme: document.documentElement.classList.contains('theme-dark') ? 'dark' : 'default',
+                flowchart: { useMaxWidth: true, htmlLabels: true, curve: 'basis' },
+                sequence: {
+                    diagramMarginX: 50, diagramMarginY: 10, actorMargin: 50,
+                    width: 150, height: 65, boxMargin: 10, boxTextMargin: 5,
+                    noteMargin: 10, messageMargin: 35, mirrorActors: true, useMaxWidth: true
+                }
+            });
+
+            // Convert ` + "`" + `` + "`" + `` + "`" + `mermaid code blocks into rendered diagrams.
+            document.querySelectorAll('code.language-mermaid').forEach(function(codeBlock) {
+                const mermaidDiv = document.createElement('div');
+                mermaidDiv.className = 'mermaid';
+                mermaidDiv.textContent = codeBlock.textContent;
+                const preBlock = codeBlock.parentElement;
+                preBlock.parentNode.replaceChild(mermaidDiv, preBlock);
+            });
+            mermaid.run();
+        });
+
+        document.addEventListener('themeChanged', function(e) {
+            mermaid.initialize({ theme: e.detail.theme === 'dark' ? 'dark' : 'default' });
+            mermaid.run();
+        });
+    </script>`
+	}
+
+	// Conditionally include Chart.js for pages with chart annotations.
+	// defer makes the external script non-render-blocking. The inline init
+	// script registers a DOMContentLoaded listener, which fires after defer
+	// scripts execute, so Chart will be defined when the listener runs.
 	chartScript := ""
 	if page.HasCharts {
 		chartScript = `
     <!-- Chart.js for data visualization (embedded) -->
-    <script src="/assets/chart.js"></script>
+    <script defer src="/assets/chart.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function() {
             var isDark = document.documentElement.classList.contains('theme-dark');
@@ -910,7 +966,7 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
     <meta name="tinkerdown-ws-url" content="%s">
     <meta name="tinkerdown-debug" content="true">
     <meta name="tinkerdown-sidebar" content="%t">
-    <title>%s</title>
+    <title>%s</title>%s
     <!-- PicoCSS - Semantic/Classless CSS Framework (embedded) -->
     <link rel="stylesheet" href="/assets/pico.css">
     <link rel="stylesheet" href="/assets/tinkerdown-client.css">
@@ -2501,19 +2557,20 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
         })();
     </script>
 
-    <script src="/assets/tinkerdown-client.js"></script>
+    <script defer src="/assets/tinkerdown-client.js"></script>
 
-    <!-- Prism.js for syntax highlighting (embedded) -->
-    <script src="/assets/prism.js"></script>
-    <script src="/assets/prism-go.js"></script>
-    <script src="/assets/prism-javascript.js"></script>
-    <script src="/assets/prism-jsx.js"></script>
-    <script src="/assets/prism-markup.js"></script>
-    <script src="/assets/prism-css.js"></script>
-    <script src="/assets/prism-yaml.js"></script>
-    <script src="/assets/prism-json.js"></script>
-    <script src="/assets/prism-bash.js"></script>
-    <script src="/assets/prism-markdown.js"></script>
+    <!-- Prism.js for syntax highlighting (embedded). defer eliminates render-block
+         and preserves source order so language plugins load after prism core. -->
+    <script defer src="/assets/prism.js"></script>
+    <script defer src="/assets/prism-go.js"></script>
+    <script defer src="/assets/prism-javascript.js"></script>
+    <script defer src="/assets/prism-jsx.js"></script>
+    <script defer src="/assets/prism-markup.js"></script>
+    <script defer src="/assets/prism-css.js"></script>
+    <script defer src="/assets/prism-yaml.js"></script>
+    <script defer src="/assets/prism-json.js"></script>
+    <script defer src="/assets/prism-bash.js"></script>
+    <script defer src="/assets/prism-markdown.js"></script>
     <script>
         // Highlight all code blocks on page load
         document.addEventListener('DOMContentLoaded', function() {
@@ -2521,68 +2578,10 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
         });
     </script>
 
-    <!-- Mermaid.js for diagrams (embedded) -->
-    <script src="/assets/mermaid.js"></script>
-    <script>
-        // Initialize Mermaid for diagram rendering
-        mermaid.initialize({
-            startOnLoad: false, // We'll trigger manually after conversion
-            theme: document.documentElement.classList.contains('theme-dark') ? 'dark' : 'default',
-            flowchart: {
-                useMaxWidth: true,
-                htmlLabels: true,
-                curve: 'basis'
-            },
-            sequence: {
-                diagramMarginX: 50,
-                diagramMarginY: 10,
-                actorMargin: 50,
-                width: 150,
-                height: 65,
-                boxMargin: 10,
-                boxTextMargin: 5,
-                noteMargin: 10,
-                messageMargin: 35,
-                mirrorActors: true,
-                useMaxWidth: true
-            }
-        });
-
-        // Convert mermaid code blocks to rendered diagrams
-        document.addEventListener('DOMContentLoaded', function() {
-            // Find all code blocks with language-mermaid class
-            const mermaidBlocks = document.querySelectorAll('code.language-mermaid');
-
-            mermaidBlocks.forEach(function(codeBlock) {
-                // Get the mermaid code
-                const code = codeBlock.textContent;
-
-                // Create a new div for the rendered diagram
-                const mermaidDiv = document.createElement('div');
-                mermaidDiv.className = 'mermaid';
-                mermaidDiv.textContent = code;
-
-                // Replace the pre>code structure with just the mermaid div
-                const preBlock = codeBlock.parentElement;
-                preBlock.parentNode.replaceChild(mermaidDiv, preBlock);
-            });
-
-            // Now render all mermaid diagrams
-            mermaid.run();
-        });
-
-        // Re-initialize Mermaid when theme changes
-        document.addEventListener('themeChanged', function(e) {
-            mermaid.initialize({
-                theme: e.detail.theme === 'dark' ? 'dark' : 'default'
-            });
-            // Re-render all diagrams
-            mermaid.run();
-        });
-    </script>
+    %s
 %s
 </body>
-</html>`, wsURL, showSidebar, page.Title, stylingOverrideCSS, sidebar, contentWithNav, defaultTheme, chartScript)
+</html>`, wsURL, showSidebar, page.Title, seoTags, stylingOverrideCSS, sidebar, contentWithNav, defaultTheme, mermaidScript, chartScript)
 
 	return html
 }
