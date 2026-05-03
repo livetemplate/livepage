@@ -775,9 +775,12 @@ func processMermaid(htmlStr string, renderer DiagramRenderer) (string, int) {
 			continue
 		}
 
-		// Wrap in a div so themes / dark mode CSS can target pre-rendered
-		// diagrams distinctly from runtime-rendered ones.
-		replacement := `<div class="mermaid-prerendered">` + string(svg) + `</div>`
+		// Wrap in a div with BOTH classes: `mermaid` (the canonical
+		// container class used by the client-side runtime, so existing
+		// CSS / e2e selectors keep matching) and `mermaid-prerendered`
+		// (so themes that need to distinguish pre-rendered from
+		// runtime-rendered diagrams still can).
+		replacement := `<div class="mermaid mermaid-prerendered">` + string(svg) + `</div>`
 		htmlStr = htmlStr[:blockStart] + replacement + htmlStr[blockEnd:]
 	}
 	return htmlStr, remaining
