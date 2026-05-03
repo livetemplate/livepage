@@ -1197,8 +1197,8 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
             padding: 1.25rem 1rem;
             border-radius: 8px;
             overflow-x: auto;
-            margin: 1.5rem calc((800px - 100%%) / 2 * -1);
-            max-width: 1000px;
+            margin: 1.5rem 0;
+            max-width: 100%%;
             box-shadow: 0 4px 12px rgba(0,0,0,0.15);
             border: 1px solid var(--border-color);
         }
@@ -1210,17 +1210,43 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
             color: inherit;
         }
 
+        /* Wide tables on narrow viewports get a horizontal scroll
+         * container instead of overflowing the page. display: block on
+         * the table preserves table-internal cell layout while letting
+         * the table itself scroll within the article column. */
+        article table {
+            display: block;
+            max-width: 100%%;
+            overflow-x: auto;
+        }
+
         /* Interactive blocks */
         .tinkerdown-wasm-block,
         .tinkerdown-interactive-block {
-            margin: 2rem calc((800px - 100%%) / 2 * -1);
-            max-width: 1000px;
+            margin: 2rem 0;
+            max-width: 100%%;
             padding: 1.5rem;
             background: var(--card-bg);
             border-radius: 16px;
             box-shadow: 0 4px 16px var(--card-shadow);
             border: 1px solid var(--card-border);
             transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        /* Bleed pre + interactive blocks beyond the article column on
+         * wide screens for visual emphasis. The article column maxes
+         * at 800px, so this trick is safe only when the viewport
+         * itself is wide enough that the negative margin doesn't pull
+         * the box past the viewport edge — below this breakpoint the
+         * blocks fit within the article column instead. */
+        @media (min-width: 900px) {
+            pre,
+            .tinkerdown-wasm-block,
+            .tinkerdown-interactive-block {
+                margin-left: calc((800px - 100%%) / 2 * -1);
+                margin-right: calc((800px - 100%%) / 2 * -1);
+                max-width: 1000px;
+            }
         }
 
         .tinkerdown-wasm-block:hover,

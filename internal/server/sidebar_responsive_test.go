@@ -156,6 +156,67 @@ func TestPrerenderedMermaidIsResponsive(t *testing.T) {
 	}
 }
 
+// Regression: <pre> code blocks and interactive blocks used a negative
+// margin (margin: 1.5rem calc((800px - 100%) / 2 * -1)) to bleed past
+// the article column on desktop. On mobile (393px viewport) the
+// expression evaluates to ~-203px, pulling each block ~407px wider than
+// the viewport and forcing the entire page into horizontal overflow.
+// The fix moves the bleed-out trick behind a min-width media query so
+// it only applies when the viewport is wide enough to absorb it.
+func TestPreBleedOutGuardedByMediaQuery(t *testing.T) {
+	body := renderHomeWithSidebar(t)
+
+	// The base `pre {` rule must NOT declare the negative-margin
+	// expression — that's the bug.
+	rest := body
+	for {
+		idx := strings.Index(rest, "pre {")
+		if idx < 0 {
+			break
+		}
+		end := strings.Index(rest[idx:], "}")
+		if end < 0 {
+			break
+		}
+		ruleBody := rest[idx : idx+end]
+		if strings.Contains(ruleBody, "(800px - 100%) / 2 * -1") {
+			t.Errorf("base `pre` rule declares negative-margin bleed-out — overflows mobile viewports:\n%s", ruleBody)
+		}
+		rest = rest[idx+end:]
+	}
+
+	// The bleed-out IS allowed inside an @media (min-width: 900px) block.
+	if !strings.Contains(body, "@media (min-width: 900px)") {
+		t.Error("pre/wasm-block bleed-out must live inside @media (min-width: 900px) — guarantees no mobile overflow")
+	}
+	if !strings.Contains(body, "calc((800px - 100%) / 2 * -1)") {
+		t.Error("desktop bleed-out math (calc((800px - 100%) / 2 * -1)) should still exist inside the media query")
+	}
+}
+
+// Regression: wide reference tables (e.g. /reference/template-support-matrix)
+// have many columns whose combined intrinsic width exceeds the article
+// column on mobile. Without `display: block; overflow-x: auto;` on
+// `article table`, the table forces the document to scroll horizontally.
+func TestArticleTablesAreScrollable(t *testing.T) {
+	body := renderHomeWithSidebar(t)
+
+	idx := strings.Index(body, "article table {")
+	if idx < 0 {
+		t.Fatal("article table rule missing — wide tables will force horizontal page overflow on mobile")
+	}
+	window := body[idx:]
+	if len(window) > 300 {
+		window = window[:300]
+	}
+	if !strings.Contains(window, "display: block") {
+		t.Errorf("article table must declare display: block so it can scroll independently; rule:\n%s", window)
+	}
+	if !strings.Contains(window, "overflow-x: auto") {
+		t.Errorf("article table must declare overflow-x: auto; rule:\n%s", window)
+	}
+}
+
 func TestSidebarToggleScriptIsBound(t *testing.T) {
 	body := renderHomeWithSidebar(t)
 	// The inline toggle script needs to be present and use the
