@@ -224,6 +224,34 @@ func TestContentTablesAreScrollable(t *testing.T) {
 	}
 }
 
+// Regression: PicoCSS sets `code, kbd, samp { display: inline-block }`
+// which prevents long inline <code> (CLI flags, package paths) from
+// wrapping at word boundaries — the unbreakable inline-block forces
+// horizontal page overflow on mobile. Override pico's display and add
+// overflow-wrap so long inline tokens soft-wrap.
+func TestInlineCodeIsWrappable(t *testing.T) {
+	body := renderHomeWithSidebar(t)
+
+	// Find the base `code {` rule and check it explicitly declares
+	// display:inline + overflow-wrap. Use the leading-whitespace
+	// anchor to avoid matching `pre code {` or `.foo code {` rules.
+	idx := strings.Index(body, "        code {")
+	if idx < 0 {
+		t.Fatal("base `code` rule missing")
+	}
+	end := strings.Index(body[idx:], "}")
+	if end < 0 {
+		t.Fatal("malformed `code` rule")
+	}
+	rule := body[idx : idx+end]
+	if !strings.Contains(rule, "display: inline") {
+		t.Errorf("base `code` rule must declare display:inline to override PicoCSS inline-block; rule:\n%s", rule)
+	}
+	if !strings.Contains(rule, "overflow-wrap: anywhere") {
+		t.Errorf("base `code` rule must declare overflow-wrap:anywhere so long inline code can wrap; rule:\n%s", rule)
+	}
+}
+
 func TestSidebarToggleScriptIsBound(t *testing.T) {
 	body := renderHomeWithSidebar(t)
 	// The inline toggle script needs to be present and use the
