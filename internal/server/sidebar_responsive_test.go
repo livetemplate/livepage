@@ -284,6 +284,47 @@ func TestBodyWidthSubtractsSidebar(t *testing.T) {
 	}
 }
 
+// Regression for the v0.1.13 → v0.1.14 mobile breakage: the desktop
+// fix added `width: calc(100% - 360px)` to the base body rule, but the
+// @media (max-width: 768px) block — which sets margin-left: 0 to hide
+// the sidebar on mobile — did NOT also override width. Body inherited
+// the desktop calc, evaluating to 393 - 360 = 33px on iPhone 14, and
+// page text stacked one character per line ("Install" became I/n/s/t/a/l/l).
+// Lock in: the body:has(.tinkerdown-nav-sidebar) rule that resets
+// margin-left to 0 must ALSO reset width to 100%.
+func TestMobileBodyWidthResetsToFullViewport(t *testing.T) {
+	body := renderHomeWithSidebar(t)
+
+	// Walk through every body:has(.tinkerdown-nav-sidebar) rule body
+	// and find the one that contains "margin-left: 0" — that's the
+	// mobile reset rule, which must also reset width.
+	const marker = "body:has(.tinkerdown-nav-sidebar) {"
+	rest := body
+	var mobileRule string
+	for {
+		idx := strings.Index(rest, marker)
+		if idx < 0 {
+			break
+		}
+		end := strings.Index(rest[idx:], "}")
+		if end < 0 {
+			break
+		}
+		rule := rest[idx : idx+end]
+		if strings.Contains(rule, "margin-left: 0;") || strings.Contains(rule, "margin-left: 0\n") {
+			mobileRule = rule
+			break
+		}
+		rest = rest[idx+end:]
+	}
+	if mobileRule == "" {
+		t.Fatal("no body:has(.tinkerdown-nav-sidebar) rule with margin-left: 0 found — mobile body sizing is unhandled")
+	}
+	if !strings.Contains(mobileRule, "width: 100%") {
+		t.Errorf("the mobile body rule (margin-left: 0) MUST declare width: 100%% to override the desktop calc(100%% - 360px), otherwise body collapses to ~33px on a 393px viewport; rule:\n%s", mobileRule)
+	}
+}
+
 func TestSidebarToggleScriptIsBound(t *testing.T) {
 	body := renderHomeWithSidebar(t)
 	// The inline toggle script needs to be present and use the
