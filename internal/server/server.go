@@ -2093,10 +2093,14 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
             }
 
             /* Make room for the fixed-position toggle so it doesn't overlap
-             * the page H1. Only applied when a sidebar exists. */
+             * the page H1. Only applied when a sidebar exists.
+             * width: 100%% explicitly resets the desktop calc(100%% - 360px)
+             * — without this override, body collapses to 33px on a 393px
+             * mobile viewport and content stacks one character per line. */
             body:has(.tinkerdown-nav-sidebar) {
                 margin-left: 0;
                 padding-top: 3.5rem;
+                width: 100%%;
             }
 
             .tinkerdown-nav-bottom {
