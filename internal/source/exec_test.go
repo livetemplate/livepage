@@ -52,7 +52,7 @@ func TestExecSourceFetchJSON(t *testing.T) {
 
 	// Create a script that outputs JSON array
 	scriptPath := filepath.Join(tmpDir, "data.sh")
-	scriptContent := `#!/bin/bash
+	scriptContent := `#!/usr/bin/env bash
 echo '[{"id":1,"name":"Alice"},{"id":2,"name":"Bob"}]'
 `
 	err := os.WriteFile(scriptPath, []byte(scriptContent), 0755)
@@ -79,7 +79,7 @@ func TestExecSourceFetchSingleObject(t *testing.T) {
 
 	// Create a script that outputs a single JSON object
 	scriptPath := filepath.Join(tmpDir, "single.sh")
-	scriptContent := `#!/bin/bash
+	scriptContent := `#!/usr/bin/env bash
 echo '{"status":"ok","count":42}'
 `
 	err := os.WriteFile(scriptPath, []byte(scriptContent), 0755)
@@ -104,7 +104,7 @@ func TestExecSourceFetchNDJSON(t *testing.T) {
 
 	// Create a script that outputs newline-delimited JSON
 	scriptPath := filepath.Join(tmpDir, "ndjson.sh")
-	scriptContent := `#!/bin/bash
+	scriptContent := `#!/usr/bin/env bash
 echo '{"line":1}'
 echo '{"line":2}'
 echo '{"line":3}'
@@ -132,7 +132,7 @@ func TestExecSourceFetchEmptyOutput(t *testing.T) {
 
 	// Create a script with empty output
 	scriptPath := filepath.Join(tmpDir, "empty.sh")
-	scriptContent := `#!/bin/bash
+	scriptContent := `#!/usr/bin/env bash
 echo ""
 `
 	err := os.WriteFile(scriptPath, []byte(scriptContent), 0755)
@@ -154,7 +154,7 @@ func TestExecSourceFetchInvalidJSON(t *testing.T) {
 
 	// Create a script with invalid JSON
 	scriptPath := filepath.Join(tmpDir, "invalid.sh")
-	scriptContent := `#!/bin/bash
+	scriptContent := `#!/usr/bin/env bash
 echo 'not valid json'
 `
 	err := os.WriteFile(scriptPath, []byte(scriptContent), 0755)
@@ -176,7 +176,7 @@ func TestExecSourceFetchCommandFails(t *testing.T) {
 
 	// Create a script that exits with error
 	scriptPath := filepath.Join(tmpDir, "fail.sh")
-	scriptContent := `#!/bin/bash
+	scriptContent := `#!/usr/bin/env bash
 exit 1
 `
 	err := os.WriteFile(scriptPath, []byte(scriptContent), 0755)
@@ -231,7 +231,7 @@ func TestExecSourceWithAllowExec(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	scriptPath := filepath.Join(tmpDir, "test.sh")
-	err := os.WriteFile(scriptPath, []byte("#!/bin/bash\necho '{\"ok\":true}'"), 0755)
+	err := os.WriteFile(scriptPath, []byte("#!/usr/bin/env bash\necho '{\"ok\":true}'"), 0755)
 	require.NoError(t, err)
 
 	cfg := config.SourceConfig{
@@ -253,7 +253,7 @@ func TestExecSourceWithAllowExec(t *testing.T) {
 func TestExecSourceLinesFormat(t *testing.T) {
 	tmpDir := t.TempDir()
 	scriptPath := filepath.Join(tmpDir, "lines.sh")
-	scriptContent := `#!/bin/bash
+	scriptContent := `#!/usr/bin/env bash
 echo "first line"
 echo "second line"
 echo "third line"
@@ -287,7 +287,7 @@ echo "third line"
 func TestExecSourceCSVFormat(t *testing.T) {
 	tmpDir := t.TempDir()
 	scriptPath := filepath.Join(tmpDir, "csv.sh")
-	scriptContent := `#!/bin/bash
+	scriptContent := `#!/usr/bin/env bash
 echo "name,age,city"
 echo "Alice,30,NYC"
 echo "Bob,25,LA"
@@ -322,7 +322,7 @@ func TestExecSourceCustomDelimiter(t *testing.T) {
 	tmpDir := t.TempDir()
 	scriptPath := filepath.Join(tmpDir, "tsv.sh")
 	// Tab-separated values
-	scriptContent := "#!/bin/bash\necho -e \"id\\tname\\tvalue\"\necho -e \"1\\tAlpha\\t100\"\necho -e \"2\\tBeta\\t200\"\n"
+	scriptContent := "#!/usr/bin/env bash\necho -e \"id\\tname\\tvalue\"\necho -e \"1\\tAlpha\\t100\"\necho -e \"2\\tBeta\\t200\"\n"
 	err := os.WriteFile(scriptPath, []byte(scriptContent), 0755)
 	require.NoError(t, err)
 
@@ -355,7 +355,7 @@ func TestExecSourceEnvVars(t *testing.T) {
 	tmpDir := t.TempDir()
 	scriptPath := filepath.Join(tmpDir, "env.sh")
 	// Script echoes the env vars as JSON
-	scriptContent := `#!/bin/bash
+	scriptContent := `#!/usr/bin/env bash
 echo "{\"my_var\":\"$MY_VAR\",\"expanded\":\"$EXPANDED_VAR\"}"
 `
 	err := os.WriteFile(scriptPath, []byte(scriptContent), 0755)
@@ -401,7 +401,7 @@ func TestExecSourceTimeout(t *testing.T) {
 func TestExecSourceEmptyLines(t *testing.T) {
 	tmpDir := t.TempDir()
 	scriptPath := filepath.Join(tmpDir, "empty_lines.sh")
-	scriptContent := `#!/bin/bash
+	scriptContent := `#!/usr/bin/env bash
 echo "line one"
 echo ""
 echo "line two"
@@ -433,4 +433,30 @@ echo "line three"
 	assert.Equal(t, 1, data[1]["index"])
 	assert.Equal(t, "line three", data[2]["line"])
 	assert.Equal(t, 2, data[2]["index"])
+}
+
+// Issue #244: exec.Command's behavior for './' and '../' commands
+// varied across Go runtimes / platforms — the path was sometimes
+// resolved against the process CWD before cmd.Dir applied. Lock the
+// "resolve relative to siteDir" semantics here.
+func TestResolveCmdPath(t *testing.T) {
+	cases := []struct {
+		name    string
+		cmdName string
+		siteDir string
+		want    string
+	}{
+		{"dot-slash joins siteDir", "./script.sh", "/site", "/site/script.sh"},
+		{"dotdot-slash joins siteDir", "../parent.sh", "/site/sub", "/site/parent.sh"},
+		{"absolute path passes through", "/usr/bin/curl", "/site", "/usr/bin/curl"},
+		{"bare name passes through (PATH lookup)", "curl", "/site", "curl"},
+		{"empty siteDir is no-op", "./script.sh", "", "./script.sh"},
+		{"sub-relative bare path passes through", "scripts/foo.sh", "/site", "scripts/foo.sh"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := resolveCmdPath(tc.cmdName, tc.siteDir)
+			assert.Equal(t, tc.want, got)
+		})
+	}
 }
