@@ -2044,12 +2044,20 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
             font-weight: 600;
         }
 
-        /* Adjust main content to make room for navigation */
+        /* Adjust main content to make room for navigation.
+         * width must subtract the sidebar width: body's natural width
+         * is 100vw, and margin-left does NOT shrink it (margins live
+         * outside the box even with box-sizing: border-box). Without
+         * the explicit width, body is 100vw wide AND shifted right by
+         * the sidebar width, creating ~360px of horizontal page
+         * overflow on desktop and a wide visible gap between the
+         * sidebar's right edge and the centered content-wrapper. */
         body:has(.tinkerdown-nav-sidebar) {
             margin-left: 360px;
             margin-right: 0;
             margin-bottom: 60px;
             max-width: none;
+            width: calc(100%% - 360px);
         }
 
         /* Responsive Navigation */
@@ -2064,6 +2072,7 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
 
             body:has(.tinkerdown-nav-sidebar) {
                 margin-left: 320px;
+                width: calc(100%% - 320px);
             }
         }
 

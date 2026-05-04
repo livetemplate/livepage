@@ -252,6 +252,38 @@ func TestInlineCodeIsWrappable(t *testing.T) {
 	}
 }
 
+// Regression: body has margin-left: <sidebar-width> to clear the
+// fixed-position sidebar, but margin-left does NOT shrink the body's
+// own width (margins live outside the box even with box-sizing:
+// border-box). Without an explicit width: calc(100% - <sidebar-width>),
+// body's natural 100vw width plus the sidebar margin produces a total
+// horizontal footprint of 100vw + sidebar-width, forcing the document
+// into horizontal scroll on desktop and creating a wide visible gap
+// between the sidebar's right edge and the centered content-wrapper.
+func TestBodyWidthSubtractsSidebar(t *testing.T) {
+	body := renderHomeWithSidebar(t)
+
+	// Find the base body:has(.tinkerdown-nav-sidebar) rule.
+	idx := strings.Index(body, "body:has(.tinkerdown-nav-sidebar) {")
+	if idx < 0 {
+		t.Fatal("body:has(.tinkerdown-nav-sidebar) rule missing")
+	}
+	end := strings.Index(body[idx:], "}")
+	rule := body[idx : idx+end]
+	if !strings.Contains(rule, "margin-left: 360px") {
+		t.Errorf("base sidebar rule should declare margin-left: 360px; rule:\n%s", rule)
+	}
+	if !strings.Contains(rule, "width: calc(100% - 360px)") {
+		t.Errorf("base sidebar rule MUST declare width: calc(100%% - 360px) so body footprint = viewport; rule:\n%s", rule)
+	}
+
+	// And the @media (max-width: 1024px) rule that narrows the sidebar
+	// to 320px must apply the matching width override.
+	if !strings.Contains(body, "width: calc(100% - 320px)") {
+		t.Error("the 1024px breakpoint must also override width: calc(100% - 320px) to match its 320px sidebar")
+	}
+}
+
 func TestSidebarToggleScriptIsBound(t *testing.T) {
 	body := renderHomeWithSidebar(t)
 	// The inline toggle script needs to be present and use the
