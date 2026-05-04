@@ -90,6 +90,24 @@ func (s *ExecSource) Name() string {
 	return s.name
 }
 
+// resolveCmdPath turns a relative './path' or '../path' into an absolute
+// path under siteDir. Without this, exec.Command's behavior for './'
+// commands varies across Go runtimes and platforms (see issue #244):
+// the path is sometimes resolved relative to the process CWD before
+// cmd.Dir is applied, breaking the user's mental model that
+// cmd: "./script.sh" means "the script.sh next to my tinkerdown.yaml".
+// Bare names like 'curl' and absolute paths pass through unchanged so
+// PATH lookup still works as expected.
+func resolveCmdPath(cmdName, siteDir string) string {
+	if siteDir == "" {
+		return cmdName
+	}
+	if strings.HasPrefix(cmdName, "./") || strings.HasPrefix(cmdName, "../") {
+		return filepath.Join(siteDir, cmdName)
+	}
+	return cmdName
+}
+
 // Fetch executes the command and parses output according to format
 func (s *ExecSource) Fetch(ctx context.Context) ([]map[string]interface{}, error) {
 	// Parse command - split by spaces (simple parsing)
@@ -98,7 +116,7 @@ func (s *ExecSource) Fetch(ctx context.Context) ([]map[string]interface{}, error
 		return nil, fmt.Errorf("exec source %q: empty command", s.name)
 	}
 
-	cmdName := parts[0]
+	cmdName := resolveCmdPath(parts[0], s.siteDir)
 	args := parts[1:]
 
 	// Create command with context and timeout
@@ -272,7 +290,7 @@ func (s *ExecSource) FetchWithArgs(ctx context.Context, args map[string]string) 
 		return nil, fmt.Errorf("exec source %q: empty command", s.name)
 	}
 
-	cmdName := parts[0]
+	cmdName := resolveCmdPath(parts[0], s.siteDir)
 
 	// Build new arguments from the provided map
 	var newArgs []string
