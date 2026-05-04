@@ -18,6 +18,7 @@ import (
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
 	"github.com/yuin/goldmark/parser"
+	gmhtml "github.com/yuin/goldmark/renderer/html"
 	"github.com/yuin/goldmark/text"
 	"gopkg.in/yaml.v3"
 )
@@ -162,11 +163,19 @@ func ParseMarkdown(content []byte) (*Frontmatter, []*CodeBlock, string, error) {
 		return nil, nil, "", fmt.Errorf("failed to parse frontmatter: %w", err)
 	}
 
-	// Parse markdown with goldmark
+	// Parse markdown with goldmark. WithUnsafe() lets raw HTML in markdown
+	// pass through to the rendered output — matches CommonMark behavior and
+	// what other static-site generators (Hugo, MkDocs, Docusaurus) do by
+	// default. Tinkerdown's threat model is author-controlled markdown, not
+	// arbitrary user input, so the default-omit behavior surprises authors
+	// who expect <iframe>, <details>, <video> etc. to render.
 	md := goldmark.New(
 		goldmark.WithExtensions(extension.GFM),
 		goldmark.WithParserOptions(
 			parser.WithAutoHeadingID(),
+		),
+		goldmark.WithRendererOptions(
+			gmhtml.WithUnsafe(),
 		),
 	)
 
@@ -1197,11 +1206,15 @@ func ParseMarkdownWithPartials(content []byte, baseDir string) (*Frontmatter, []
 	// Now parse the processed content (without frontmatter since we already extracted it)
 	// We need to reconstruct the content for ParseMarkdown or parse directly here
 
-	// Parse markdown with goldmark
+	// Parse markdown with goldmark. See the WithUnsafe rationale on the
+	// other goldmark.New site above.
 	md := goldmark.New(
 		goldmark.WithExtensions(extension.GFM),
 		goldmark.WithParserOptions(
 			parser.WithAutoHeadingID(),
+		),
+		goldmark.WithRendererOptions(
+			gmhtml.WithUnsafe(),
 		),
 	)
 

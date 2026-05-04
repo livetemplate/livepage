@@ -1326,3 +1326,53 @@ charts:
 }
 
 func boolPtr(b bool) *bool { return &b }
+
+// TestRawHTMLPassesThrough verifies the goldmark renderer is configured with
+// WithUnsafe so that author-written raw HTML (iframe, details, video, etc.)
+// reaches the rendered output. Without this, goldmark substitutes
+// "<!-- raw HTML omitted -->" for inline raw HTML, which surprises authors
+// expecting CommonMark passthrough behavior. Tinkerdown's threat model is
+// trusted authors, not arbitrary user input.
+func TestRawHTMLPassesThrough(t *testing.T) {
+	cases := []struct {
+		name string
+		md   string
+		want string // substring that must appear in the rendered HTML
+	}{
+		{
+			name: "iframe block",
+			md:   `<iframe src="/demo" title="Demo" loading="lazy"></iframe>`,
+			want: `<iframe src="/demo"`,
+		},
+		{
+			name: "details block",
+			md: "<details>\n<summary>Click me</summary>\nHidden content.\n</details>",
+			want: "<details>",
+		},
+		{
+			name: "inline span with class",
+			md:   `Some text with a <span class="note">note</span>.`,
+			want: `<span class="note">`,
+		},
+		{
+			name: "video element",
+			md:   `<video src="/demo.mp4" controls></video>`,
+			want: `<video src="/demo.mp4"`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, html, err := ParseMarkdown([]byte(tc.md))
+			if err != nil {
+				t.Fatalf("ParseMarkdown() error = %v", err)
+			}
+			if !strings.Contains(html, tc.want) {
+				t.Errorf("rendered HTML did not contain %q\nfull output:\n%s", tc.want, html)
+			}
+			if strings.Contains(html, "raw HTML omitted") {
+				t.Errorf("rendered HTML still contains 'raw HTML omitted' — WithUnsafe missing\nfull output:\n%s", html)
+			}
+		})
+	}
+}
