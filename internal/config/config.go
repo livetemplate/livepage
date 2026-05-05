@@ -490,8 +490,8 @@ type SecurityConfig struct {
 // typo surfaces at startup instead of as a silently-broken iframe.
 func (c SecurityConfig) Validate() error {
 	for _, origin := range c.FrameSrc {
-		if strings.ContainsAny(origin, ";\r\n \t") {
-			return fmt.Errorf("security.frame_src entry %q contains an invalid character (no spaces, tabs, semicolons, or newlines allowed)", origin)
+		if strings.ContainsAny(origin, ";,\r\n \t") {
+			return fmt.Errorf("security.frame_src entry %q contains an invalid character (no spaces, tabs, commas, semicolons, or newlines allowed)", origin)
 		}
 		u, err := url.Parse(origin)
 		if err != nil || u.Scheme == "" || u.Host == "" {

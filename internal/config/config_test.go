@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -480,6 +482,28 @@ func TestConfigValidateOutputs(t *testing.T) {
 	}
 }
 
+// TestLoadRejectsInjectedFrameSrc closes the loop on the startup-failure
+// guarantee in the SecurityConfig.Validate godoc: a config file containing
+// an injection-style frame_src must surface as an error from Load(),
+// not as a silently-broken CSP at runtime.
+func TestLoadRejectsInjectedFrameSrc(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tinkerdown.yaml")
+	yaml := []byte(`title: bad
+type: tutorial
+security:
+  frame_src:
+    - "https://evil.com; script-src *"
+`)
+	if err := os.WriteFile(path, yaml, 0o644); err != nil {
+		t.Fatalf("write temp config: %v", err)
+	}
+
+	if _, err := Load(path); err == nil {
+		t.Fatal("Load() accepted a frame_src entry containing a semicolon; want error")
+	}
+}
+
 func TestSecurityConfigValidate(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -490,6 +514,7 @@ func TestSecurityConfigValidate(t *testing.T) {
 		{name: "single valid origin", frameSrc: []string{"https://lt-landing-demo.fly.dev"}, wantError: false},
 		{name: "multiple valid origins", frameSrc: []string{"https://a.example.com", "https://b.example.com:8443"}, wantError: false},
 		{name: "rejects semicolon (CSP injection)", frameSrc: []string{"https://evil.com; script-src *"}, wantError: true},
+		{name: "rejects comma (defensive)", frameSrc: []string{"https://evil.com,foo"}, wantError: true},
 		{name: "rejects newline (header split)", frameSrc: []string{"https://evil.com\nX-XSS: 0"}, wantError: true},
 		{name: "rejects carriage return", frameSrc: []string{"https://evil.com\r"}, wantError: true},
 		{name: "rejects bare space", frameSrc: []string{"https://evil.com script-src *"}, wantError: true},

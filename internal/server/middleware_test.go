@@ -868,3 +868,23 @@ func TestSecurityHeadersMiddleware_NoFrameSrcByDefault(t *testing.T) {
 		t.Errorf("frame-src should be omitted when not configured, got: %s", csp)
 	}
 }
+
+// TestServeHTTP_PageRouteEmitsConfiguredFrameSrc covers the second CSP
+// write site — the inline header set in Server.ServeHTTP for non-API
+// page routes. The middleware-path tests above don't exercise this path,
+// and a regression here would silently strip frame-src from every page
+// route while passing the middleware tests.
+func TestServeHTTP_PageRouteEmitsConfiguredFrameSrc(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Security.FrameSrc = []string{"https://lt-landing-demo.fly.dev"}
+	srv := NewWithConfig(t.TempDir(), cfg)
+
+	req := httptest.NewRequest("GET", "/nonexistent-page-but-headers-still-set", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	csp := w.Header().Get("Content-Security-Policy")
+	if !strings.Contains(csp, "frame-src 'self' https://lt-landing-demo.fly.dev") {
+		t.Errorf("page-route CSP missing configured frame-src; got: %s", csp)
+	}
+}
