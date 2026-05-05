@@ -1418,6 +1418,11 @@ func TestParseStringStripsRawHTML(t *testing.T) {
 		{"script_tag", `<script>alert('xss')</script>`},
 		{"img_with_onerror", `<img src=x onerror="alert('xss')">`},
 		{"iframe_with_javascript_url", `<iframe src="javascript:alert('xss')"></iframe>`},
+		// Markdown-native (not raw HTML): goldmark's URL sanitizer blocks
+		// these even without WithUnsafe, but the playground has no test
+		// pinning that guarantee — record it explicitly.
+		{"markdown_link_javascript_url", `[click me](javascript:alert('xss'))`},
+		{"markdown_image_data_url", `![](data:text/html,<script>alert(1)</script>)`},
 	}
 
 	for _, tc := range cases {
