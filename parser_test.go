@@ -1326,3 +1326,116 @@ charts:
 }
 
 func boolPtr(b bool) *bool { return &b }
+
+// TestRawHTMLPassesThrough verifies the goldmark renderer is configured with
+// WithUnsafe so that author-written raw HTML (iframe, details, video, etc.)
+// reaches the rendered output. Without this, goldmark substitutes
+// "<!-- raw HTML omitted -->" for inline raw HTML, which surprises authors
+// expecting CommonMark passthrough behavior. Tinkerdown's threat model is
+// trusted authors, not arbitrary user input.
+func TestRawHTMLPassesThrough(t *testing.T) {
+	cases := []struct {
+		name string
+		md   string
+		want string // substring that must appear in the rendered HTML
+	}{
+		{
+			name: "iframe block",
+			md:   `<iframe src="/demo" title="Demo" loading="lazy"></iframe>`,
+			want: `<iframe src="/demo"`,
+		},
+		{
+			name: "details block",
+			md: "<details>\n<summary>Click me</summary>\nHidden content.\n</details>",
+			want: "<details>",
+		},
+		{
+			name: "inline span with class",
+			md:   `Some text with a <span class="note">note</span>.`,
+			want: `<span class="note">`,
+		},
+		{
+			name: "video element",
+			md:   `<video src="/demo.mp4" controls></video>`,
+			want: `<video src="/demo.mp4"`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, html, err := ParseMarkdown([]byte(tc.md))
+			if err != nil {
+				t.Fatalf("ParseMarkdown() error = %v", err)
+			}
+			if !strings.Contains(html, tc.want) {
+				t.Errorf("rendered HTML did not contain %q\nfull output:\n%s", tc.want, html)
+			}
+			if strings.Contains(html, "raw HTML omitted") {
+				t.Errorf("rendered HTML still contains 'raw HTML omitted' — WithUnsafe missing\nfull output:\n%s", html)
+			}
+		})
+	}
+}
+
+// TestParseMarkdownWithPartialsRespectsAllowRawHTML verifies the trust flag
+// gates raw-HTML passthrough on a per-call basis: trusted callers (file-based
+// content, BuildPage) get raw HTML through; untrusted callers (playground)
+// get it stripped.
+func TestParseMarkdownWithPartialsRespectsAllowRawHTML(t *testing.T) {
+	const xss = `<script>alert('xss')</script>`
+
+	t.Run("trusted_passes_script_through", func(t *testing.T) {
+		_, _, html, err := ParseMarkdownWithPartials([]byte(xss), "", true)
+		if err != nil {
+			t.Fatalf("ParseMarkdownWithPartials(true) error = %v", err)
+		}
+		if !strings.Contains(html, "<script>") {
+			t.Errorf("trusted parse should preserve <script>, got:\n%s", html)
+		}
+	})
+
+	t.Run("untrusted_strips_script", func(t *testing.T) {
+		_, _, html, err := ParseMarkdownWithPartials([]byte(xss), "", false)
+		if err != nil {
+			t.Fatalf("ParseMarkdownWithPartials(false) error = %v", err)
+		}
+		if strings.Contains(html, "<script>") {
+			t.Errorf("untrusted parse must strip <script>, got:\n%s", html)
+		}
+	})
+}
+
+// TestParseStringStripsRawHTML guards the playground path. ParseString is
+// the public entry point used by internal/server/playground.go to render
+// markdown submitted by users over HTTP. The renderer MUST omit raw HTML
+// here, otherwise a user can inject <script> and execute JS on the same
+// origin (the docs CSP allows 'unsafe-inline' for the document).
+func TestParseStringStripsRawHTML(t *testing.T) {
+	cases := []struct {
+		name string
+		md   string
+	}{
+		{"script_tag", `<script>alert('xss')</script>`},
+		{"img_with_onerror", `<img src=x onerror="alert('xss')">`},
+		{"iframe_with_javascript_url", `<iframe src="javascript:alert('xss')"></iframe>`},
+		// Markdown-native (not raw HTML): goldmark's URL sanitizer blocks
+		// these even without WithUnsafe, but the playground has no test
+		// pinning that guarantee — record it explicitly.
+		{"markdown_link_javascript_url", `[click me](javascript:alert('xss'))`},
+		{"markdown_image_data_url", `![](data:text/html,<script>alert(1)</script>)`},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			page, err := ParseString(tc.md)
+			if err != nil {
+				t.Fatalf("ParseString error = %v", err)
+			}
+			if strings.Contains(page.StaticHTML, "<script>") ||
+				strings.Contains(page.StaticHTML, "onerror=") ||
+				strings.Contains(page.StaticHTML, "javascript:") {
+				t.Errorf("playground rendering must not contain executable HTML, got:\n%s", page.StaticHTML)
+			}
+		})
+	}
+}
