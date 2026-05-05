@@ -772,6 +772,27 @@ func TestShardedRateLimitFallback(t *testing.T) {
 	}
 }
 
+// defaultCSP locks the byte-exact CSP value emitted when no security
+// overrides are configured. Touching this string means the default CSP
+// changed — review the change deliberately, then update both the test
+// and any operator-facing docs that quote the policy.
+const defaultCSP = "default-src 'self'; " +
+	"script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
+	"style-src 'self' 'unsafe-inline'; " +
+	"img-src 'self' data: https:; " +
+	"font-src 'self' data:; " +
+	"connect-src 'self'; " +
+	"frame-ancestors 'none'"
+
+func TestBuildCSP_ByteIdenticalDefault(t *testing.T) {
+	if got := buildCSP(nil); got != defaultCSP {
+		t.Errorf("default CSP drifted\n got: %s\nwant: %s", got, defaultCSP)
+	}
+	if got := buildCSP([]string{}); got != defaultCSP {
+		t.Errorf("empty-slice CSP drifted\n got: %s\nwant: %s", got, defaultCSP)
+	}
+}
+
 func TestBuildCSP(t *testing.T) {
 	cases := []struct {
 		name     string
