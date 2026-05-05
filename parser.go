@@ -155,7 +155,38 @@ type CodeBlock struct {
 	Line     int // Line number in source file
 }
 
+// newGoldmarkParser builds the shared goldmark configuration used by every
+// parse path in this package. allowRawHTML controls whether raw HTML in the
+// markdown body passes through to the rendered output (CommonMark default
+// is to omit it for safety).
+//
+// Pass true for content authored by the site owner (file-based pages, build
+// tools, programmatic test input) — that's the same trust posture as a Go
+// template and matches what Hugo, MkDocs, Docusaurus, mdBook do by default.
+//
+// Pass false for content sourced from arbitrary user input (the playground
+// receives markdown over HTTP). Without this guard a user can submit
+// <script>...</script> and execute JS on the same origin, since the docs
+// CSP allows 'unsafe-inline' for the document itself.
+func newGoldmarkParser(allowRawHTML bool) goldmark.Markdown {
+	opts := []goldmark.Option{
+		goldmark.WithExtensions(extension.GFM),
+		goldmark.WithParserOptions(
+			parser.WithAutoHeadingID(),
+		),
+	}
+	if allowRawHTML {
+		opts = append(opts, goldmark.WithRendererOptions(
+			gmhtml.WithUnsafe(),
+		))
+	}
+	return goldmark.New(opts...)
+}
+
 // ParseMarkdown parses a markdown file and extracts frontmatter and code blocks.
+// Treats the input as trusted (file-based) content — raw HTML in the markdown
+// body is preserved. For untrusted input use ParseMarkdownWithPartials with
+// allowRawHTML=false.
 func ParseMarkdown(content []byte) (*Frontmatter, []*CodeBlock, string, error) {
 	// Extract frontmatter
 	frontmatter, remaining, err := extractFrontmatter(content)
@@ -163,21 +194,7 @@ func ParseMarkdown(content []byte) (*Frontmatter, []*CodeBlock, string, error) {
 		return nil, nil, "", fmt.Errorf("failed to parse frontmatter: %w", err)
 	}
 
-	// Parse markdown with goldmark. WithUnsafe() lets raw HTML in markdown
-	// pass through to the rendered output — matches CommonMark behavior and
-	// what other static-site generators (Hugo, MkDocs, Docusaurus) do by
-	// default. Tinkerdown's threat model is author-controlled markdown, not
-	// arbitrary user input, so the default-omit behavior surprises authors
-	// who expect <iframe>, <details>, <video> etc. to render.
-	md := goldmark.New(
-		goldmark.WithExtensions(extension.GFM),
-		goldmark.WithParserOptions(
-			parser.WithAutoHeadingID(),
-		),
-		goldmark.WithRendererOptions(
-			gmhtml.WithUnsafe(),
-		),
-	)
+	md := newGoldmarkParser(true)
 
 	reader := text.NewReader(remaining)
 	doc := md.Parser().Parse(reader)
@@ -1190,7 +1207,13 @@ func ProcessPartials(content []byte, baseDir string, seen map[string]bool) ([]by
 
 // ParseMarkdownWithPartials parses markdown with partial file support.
 // baseDir is used to resolve relative paths in {{partial "file.md"}} directives.
-func ParseMarkdownWithPartials(content []byte, baseDir string) (*Frontmatter, []*CodeBlock, string, error) {
+//
+// allowRawHTML controls whether <script>, <iframe>, etc. in the markdown body
+// pass through to the rendered output. Pass true for trusted file-based or
+// programmatic content; pass false when the input came from a user
+// (playground via ParseString). See newGoldmarkParser for the threat-model
+// rationale.
+func ParseMarkdownWithPartials(content []byte, baseDir string, allowRawHTML bool) (*Frontmatter, []*CodeBlock, string, error) {
 	// First, extract frontmatter before processing partials
 	frontmatter, remaining, err := extractFrontmatter(content)
 	if err != nil {
@@ -1203,20 +1226,7 @@ func ParseMarkdownWithPartials(content []byte, baseDir string) (*Frontmatter, []
 		return nil, nil, "", err
 	}
 
-	// Now parse the processed content (without frontmatter since we already extracted it)
-	// We need to reconstruct the content for ParseMarkdown or parse directly here
-
-	// Parse markdown with goldmark. See the WithUnsafe rationale on the
-	// other goldmark.New site above.
-	md := goldmark.New(
-		goldmark.WithExtensions(extension.GFM),
-		goldmark.WithParserOptions(
-			parser.WithAutoHeadingID(),
-		),
-		goldmark.WithRendererOptions(
-			gmhtml.WithUnsafe(),
-		),
-	)
+	md := newGoldmarkParser(allowRawHTML)
 
 	reader := text.NewReader(processed)
 	doc := md.Parser().Parse(reader)

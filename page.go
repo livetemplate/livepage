@@ -59,9 +59,10 @@ func ParseFile(path string) (*Page, error) {
 		}
 	}
 
-	// Parse markdown with partial support
+	// Parse markdown with partial support. File-based content is trusted, so
+	// raw HTML in the markdown body passes through.
 	baseDir := filepath.Dir(absPath)
-	fm, codeBlocks, staticHTML, err := ParseMarkdownWithPartials(processedContent, baseDir)
+	fm, codeBlocks, staticHTML, err := ParseMarkdownWithPartials(processedContent, baseDir, true)
 	if err != nil {
 		// Wrap with file context
 		return nil, NewParseError(absPath, 1, fmt.Sprintf("Failed to parse markdown: %v", err))
@@ -180,11 +181,14 @@ func (pc *PageConfig) MergeFromFrontmatter(fm *Frontmatter) {
 
 // ParseString parses markdown content from a string and creates a Page.
 // This is useful for the playground where content comes from user input.
+// Raw HTML in the body is omitted to prevent XSS — playground submissions
+// are untrusted.
 func ParseString(content string) (*Page, error) {
 	// Note: preprocessAutoTasks is skipped here — playground input uses explicit
 	// lvt blocks rather than auto-detected task sections from file-based markdown.
-	// Parse markdown (no partials support for string input)
-	fm, codeBlocks, staticHTML, err := ParseMarkdownWithPartials([]byte(content), "")
+	// Parse markdown (no partials support for string input). allowRawHTML=false
+	// because content is user-submitted; <script>/<iframe>/<style> get stripped.
+	fm, codeBlocks, staticHTML, err := ParseMarkdownWithPartials([]byte(content), "", false)
 	if err != nil {
 		return nil, NewParseError("playground", 1, fmt.Sprintf("Failed to parse markdown: %v", err))
 	}
@@ -219,11 +223,14 @@ func ParseString(content string) (*Page, error) {
 // BuildPage creates a Page from raw content with a specified ID and source file.
 // This is useful for testing and programmatic page creation.
 // The content should be valid markdown with optional frontmatter.
+//
+// Treats input as trusted (programmatic/test callers control the content) —
+// raw HTML in the markdown body is preserved.
 func BuildPage(id, sourceFile string, content []byte) (*Page, error) {
 	// Note: preprocessAutoTasks is skipped here — programmatic/test callers
 	// provide pre-built content with explicit lvt blocks.
 	// Parse markdown (no partials support for programmatic input)
-	fm, codeBlocks, staticHTML, err := ParseMarkdownWithPartials(content, "")
+	fm, codeBlocks, staticHTML, err := ParseMarkdownWithPartials(content, "", true)
 	if err != nil {
 		return nil, NewParseError(sourceFile, 1, fmt.Sprintf("Failed to parse markdown: %v", err))
 	}
