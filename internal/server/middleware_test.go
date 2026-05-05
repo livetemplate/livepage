@@ -771,3 +771,79 @@ func TestShardedRateLimitFallback(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildCSP(t *testing.T) {
+	cases := []struct {
+		name     string
+		frameSrc []string
+		want     []string // substrings that must appear
+		notWant  []string // substrings that must NOT appear
+	}{
+		{
+			name:     "no frame-src when nil",
+			frameSrc: nil,
+			want:     []string{"default-src 'self'", "frame-ancestors 'none'"},
+			notWant:  []string{"frame-src"},
+		},
+		{
+			name:     "no frame-src when empty slice",
+			frameSrc: []string{},
+			want:     []string{"default-src 'self'"},
+			notWant:  []string{"frame-src"},
+		},
+		{
+			name:     "single origin",
+			frameSrc: []string{"https://lt-landing-demo.fly.dev"},
+			want:     []string{"frame-src 'self' https://lt-landing-demo.fly.dev"},
+		},
+		{
+			name:     "multiple origins separated by spaces",
+			frameSrc: []string{"https://a.example.com", "https://b.example.com"},
+			want:     []string{"frame-src 'self' https://a.example.com https://b.example.com"},
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := buildCSP(c.frameSrc)
+			for _, sub := range c.want {
+				if !strings.Contains(got, sub) {
+					t.Errorf("CSP missing %q\nfull: %s", sub, got)
+				}
+			}
+			for _, sub := range c.notWant {
+				if strings.Contains(got, sub) {
+					t.Errorf("CSP unexpectedly contains %q\nfull: %s", sub, got)
+				}
+			}
+		})
+	}
+}
+
+func TestSecurityHeadersMiddleware_FrameSrcEmittedFromConfig(t *testing.T) {
+	mw := SecurityHeadersMiddleware([]string{"https://upstream.example.com"})
+	wrapped := mw(okHandler())
+	w := httptest.NewRecorder()
+	wrapped.ServeHTTP(w, httptest.NewRequest("GET", "/", nil))
+
+	csp := w.Header().Get("Content-Security-Policy")
+	if !strings.Contains(csp, "frame-src 'self' https://upstream.example.com") {
+		t.Errorf("expected frame-src directive with upstream origin, got: %s", csp)
+	}
+	// Sanity-check the unrelated security headers still ship.
+	if got := w.Header().Get("X-Frame-Options"); got != "DENY" {
+		t.Errorf("X-Frame-Options = %q, want DENY", got)
+	}
+}
+
+func TestSecurityHeadersMiddleware_NoFrameSrcByDefault(t *testing.T) {
+	mw := SecurityHeadersMiddleware(nil)
+	wrapped := mw(okHandler())
+	w := httptest.NewRecorder()
+	wrapped.ServeHTTP(w, httptest.NewRequest("GET", "/", nil))
+
+	csp := w.Header().Get("Content-Security-Policy")
+	if strings.Contains(csp, "frame-src") {
+		t.Errorf("frame-src should be omitted when not configured, got: %s", csp)
+	}
+}

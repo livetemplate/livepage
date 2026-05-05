@@ -78,27 +78,43 @@ func CORSMiddleware(origins []string, authHeaderName string) func(http.Handler) 
 }
 
 // SecurityHeadersMiddleware adds security headers to all responses.
-func SecurityHeadersMiddleware() func(http.Handler) http.Handler {
+// frameSrc is appended to the CSP frame-src directive (in addition to
+// 'self') and is typically sourced from config.SecurityConfig.FrameSrc.
+// Pass nil when no cross-origin iframes are needed.
+func SecurityHeadersMiddleware(frameSrc []string) func(http.Handler) http.Handler {
+	csp := buildCSP(frameSrc)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("X-Frame-Options", "DENY")
 			w.Header().Set("X-Content-Type-Options", "nosniff")
 			w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
-			// CSP: allow self, inline styles (needed for PicoCSS and LVT rendering),
-			// unsafe-eval (needed for Mermaid.js), and data: URIs for fonts/images.
-			// connect-src 'self' covers same-origin WebSocket (ws/wss) connections.
-			w.Header().Set("Content-Security-Policy",
-				"default-src 'self'; "+
-					"script-src 'self' 'unsafe-inline' 'unsafe-eval'; "+
-					"style-src 'self' 'unsafe-inline'; "+
-					"img-src 'self' data: https:; "+
-					"font-src 'self' data:; "+
-					"connect-src 'self'; "+
-					"frame-ancestors 'none'")
+			w.Header().Set("Content-Security-Policy", csp)
 
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// buildCSP composes the Content-Security-Policy header value. The base
+// policy mirrors what tinkerdown has emitted since v0.1.x: self-only
+// scripts/styles plus inline (PicoCSS, LVT renders inline), unsafe-eval
+// (Mermaid runtime), data: URIs (fonts/images), self-only connect-src
+// (covers same-origin ws/wss). When frameSrc is non-empty a frame-src
+// directive is emitted with 'self' plus each provided origin verbatim;
+// otherwise frame-src is omitted and inherits default-src 'self', which
+// blocks cross-origin iframes.
+func buildCSP(frameSrc []string) string {
+	csp := "default-src 'self'; " +
+		"script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
+		"style-src 'self' 'unsafe-inline'; " +
+		"img-src 'self' data: https:; " +
+		"font-src 'self' data:; " +
+		"connect-src 'self'; " +
+		"frame-ancestors 'none'"
+	if len(frameSrc) > 0 {
+		csp += "; frame-src 'self' " + strings.Join(frameSrc, " ")
+	}
+	return csp
 }
 
 // evictionLogInterval is the minimum time between eviction log messages.

@@ -146,7 +146,7 @@ func NewWithConfig(rootDir string, cfg *config.Config) *Server {
 		handler = CORSMiddleware(cfg.API.GetCORSOrigins(), authHeader)(handler)
 
 		// Apply security headers (outermost)
-		handler = SecurityHeadersMiddleware()(handler)
+		handler = SecurityHeadersMiddleware(cfg.Security.FrameSrc)(handler)
 
 		srv.apiRoutes = handler
 
@@ -395,14 +395,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Frame-Options", "DENY")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
-	w.Header().Set("Content-Security-Policy",
-		"default-src 'self'; "+
-			"script-src 'self' 'unsafe-inline' 'unsafe-eval'; "+
-			"style-src 'self' 'unsafe-inline'; "+
-			"img-src 'self' data: https:; "+
-			"font-src 'self' data:; "+
-			"connect-src 'self'; "+
-			"frame-ancestors 'none'")
+	w.Header().Set("Content-Security-Policy", buildCSP(s.config.Security.FrameSrc))
 
 	// Strip the configured version prefix (if any) so the rest of routing
 	// can be prefix-agnostic. With prefix unset this is a no-op. Both

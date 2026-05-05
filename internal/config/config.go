@@ -27,6 +27,7 @@ type Config struct {
 	API         *APIConfig              `yaml:"api,omitempty"`
 	Webhooks    map[string]*Webhook     `yaml:"webhooks,omitempty"`
 	Outputs     map[string]*OutputConfig `yaml:"outputs,omitempty"`
+	Security    SecurityConfig          `yaml:"security,omitempty"`
 
 	// VersionPrefix, when non-empty, becomes a URL path segment that is
 	// stripped from incoming requests before route resolution. Routes serve
@@ -460,6 +461,21 @@ type NavSection struct {
 type NavPage struct {
 	Title string `yaml:"title"` // Page title (e.g., "Installation")
 	Path  string `yaml:"path"`  // Page path (e.g., "getting-started/installation.md")
+}
+
+// SecurityConfig exposes site-level security knobs that change emitted
+// security response headers. Currently scoped to CSP overrides; further
+// fields can be added without breaking existing configs because the
+// struct is yaml-omitempty.
+type SecurityConfig struct {
+	// FrameSrc lists origins appended to the CSP frame-src directive,
+	// in addition to the implicit 'self'. Set this when the site embeds
+	// cross-origin iframes (e.g., a separately-deployed app loaded as a
+	// live demo on a docs page). Each entry is emitted verbatim, so use
+	// scheme + host (e.g., "https://lt-landing-demo.fly.dev"). When the
+	// list is empty no frame-src directive is emitted, falling back to
+	// default-src 'self' which blocks cross-origin frames.
+	FrameSrc []string `yaml:"frame_src,omitempty"`
 }
 
 // ServerConfig holds server-related configuration
