@@ -771,3 +771,120 @@ func TestShardedRateLimitFallback(t *testing.T) {
 		}
 	}
 }
+
+// defaultCSP locks the byte-exact CSP value emitted when no security
+// overrides are configured. Touching this string means the default CSP
+// changed — review the change deliberately, then update both the test
+// and any operator-facing docs that quote the policy.
+const defaultCSP = "default-src 'self'; " +
+	"script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
+	"style-src 'self' 'unsafe-inline'; " +
+	"img-src 'self' data: https:; " +
+	"font-src 'self' data:; " +
+	"connect-src 'self'; " +
+	"frame-ancestors 'none'"
+
+func TestBuildCSP_ByteIdenticalDefault(t *testing.T) {
+	if got := buildCSP(nil); got != defaultCSP {
+		t.Errorf("default CSP drifted\n got: %s\nwant: %s", got, defaultCSP)
+	}
+	if got := buildCSP([]string{}); got != defaultCSP {
+		t.Errorf("empty-slice CSP drifted\n got: %s\nwant: %s", got, defaultCSP)
+	}
+}
+
+func TestBuildCSP(t *testing.T) {
+	cases := []struct {
+		name     string
+		frameSrc []string
+		want     []string // substrings that must appear
+		notWant  []string // substrings that must NOT appear
+	}{
+		{
+			name:     "no frame-src when nil",
+			frameSrc: nil,
+			want:     []string{"default-src 'self'", "frame-ancestors 'none'"},
+			notWant:  []string{"frame-src"},
+		},
+		{
+			name:     "no frame-src when empty slice",
+			frameSrc: []string{},
+			want:     []string{"default-src 'self'"},
+			notWant:  []string{"frame-src"},
+		},
+		{
+			name:     "single origin",
+			frameSrc: []string{"https://lt-landing-demo.fly.dev"},
+			want:     []string{"frame-src 'self' https://lt-landing-demo.fly.dev"},
+		},
+		{
+			name:     "multiple origins separated by spaces",
+			frameSrc: []string{"https://a.example.com", "https://b.example.com"},
+			want:     []string{"frame-src 'self' https://a.example.com https://b.example.com"},
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := buildCSP(c.frameSrc)
+			for _, sub := range c.want {
+				if !strings.Contains(got, sub) {
+					t.Errorf("CSP missing %q\nfull: %s", sub, got)
+				}
+			}
+			for _, sub := range c.notWant {
+				if strings.Contains(got, sub) {
+					t.Errorf("CSP unexpectedly contains %q\nfull: %s", sub, got)
+				}
+			}
+		})
+	}
+}
+
+func TestSecurityHeadersMiddleware_FrameSrcEmittedFromConfig(t *testing.T) {
+	mw := SecurityHeadersMiddleware([]string{"https://upstream.example.com"})
+	wrapped := mw(okHandler())
+	w := httptest.NewRecorder()
+	wrapped.ServeHTTP(w, httptest.NewRequest("GET", "/", nil))
+
+	csp := w.Header().Get("Content-Security-Policy")
+	if !strings.Contains(csp, "frame-src 'self' https://upstream.example.com") {
+		t.Errorf("expected frame-src directive with upstream origin, got: %s", csp)
+	}
+	// Sanity-check the unrelated security headers still ship.
+	if got := w.Header().Get("X-Frame-Options"); got != "DENY" {
+		t.Errorf("X-Frame-Options = %q, want DENY", got)
+	}
+}
+
+func TestSecurityHeadersMiddleware_NoFrameSrcByDefault(t *testing.T) {
+	mw := SecurityHeadersMiddleware(nil)
+	wrapped := mw(okHandler())
+	w := httptest.NewRecorder()
+	wrapped.ServeHTTP(w, httptest.NewRequest("GET", "/", nil))
+
+	csp := w.Header().Get("Content-Security-Policy")
+	if strings.Contains(csp, "frame-src") {
+		t.Errorf("frame-src should be omitted when not configured, got: %s", csp)
+	}
+}
+
+// TestServeHTTP_PageRouteEmitsConfiguredFrameSrc covers the second CSP
+// write site — the inline header set in Server.ServeHTTP for non-API
+// page routes. The middleware-path tests above don't exercise this path,
+// and a regression here would silently strip frame-src from every page
+// route while passing the middleware tests.
+func TestServeHTTP_PageRouteEmitsConfiguredFrameSrc(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Security.FrameSrc = []string{"https://lt-landing-demo.fly.dev"}
+	srv := NewWithConfig(t.TempDir(), cfg)
+
+	req := httptest.NewRequest("GET", "/nonexistent-page-but-headers-still-set", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	csp := w.Header().Get("Content-Security-Policy")
+	if !strings.Contains(csp, "frame-src 'self' https://lt-landing-demo.fly.dev") {
+		t.Errorf("page-route CSP missing configured frame-src; got: %s", csp)
+	}
+}
