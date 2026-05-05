@@ -479,3 +479,34 @@ func TestConfigValidateOutputs(t *testing.T) {
 		})
 	}
 }
+
+func TestSecurityConfigValidate(t *testing.T) {
+	cases := []struct {
+		name      string
+		frameSrc  []string
+		wantError bool
+	}{
+		{name: "empty list", frameSrc: nil, wantError: false},
+		{name: "single valid origin", frameSrc: []string{"https://lt-landing-demo.fly.dev"}, wantError: false},
+		{name: "multiple valid origins", frameSrc: []string{"https://a.example.com", "https://b.example.com:8443"}, wantError: false},
+		{name: "rejects semicolon (CSP injection)", frameSrc: []string{"https://evil.com; script-src *"}, wantError: true},
+		{name: "rejects newline (header split)", frameSrc: []string{"https://evil.com\nX-XSS: 0"}, wantError: true},
+		{name: "rejects carriage return", frameSrc: []string{"https://evil.com\r"}, wantError: true},
+		{name: "rejects bare space", frameSrc: []string{"https://evil.com script-src *"}, wantError: true},
+		{name: "rejects empty entry", frameSrc: []string{""}, wantError: true},
+		{name: "rejects schemeless host", frameSrc: []string{"lt-landing-demo.fly.dev"}, wantError: true},
+		{name: "rejects scheme-only", frameSrc: []string{"https://"}, wantError: true},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			err := SecurityConfig{FrameSrc: tt.frameSrc}.Validate()
+			if tt.wantError && err == nil {
+				t.Errorf("Validate() expected error for %v, got nil", tt.frameSrc)
+			}
+			if !tt.wantError && err != nil {
+				t.Errorf("Validate() unexpected error for %v: %v", tt.frameSrc, err)
+			}
+		})
+	}
+}

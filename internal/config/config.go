@@ -3,8 +3,10 @@ package config
 import (
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -471,11 +473,32 @@ type SecurityConfig struct {
 	// FrameSrc lists origins appended to the CSP frame-src directive,
 	// in addition to the implicit 'self'. Set this when the site embeds
 	// cross-origin iframes (e.g., a separately-deployed app loaded as a
-	// live demo on a docs page). Each entry is emitted verbatim, so use
+	// live demo on a docs page). Validate() rejects entries that contain
+	// CSP/header-injection characters or that don't parse as a URI. Use
 	// scheme + host (e.g., "https://lt-landing-demo.fly.dev"). When the
 	// list is empty no frame-src directive is emitted, falling back to
 	// default-src 'self' which blocks cross-origin frames.
 	FrameSrc []string `yaml:"frame_src,omitempty"`
+}
+
+// Validate ensures every FrameSrc entry is safe to emit verbatim into a
+// CSP header value. CSP directives are separated by `;`, and HTTP header
+// values must not contain CR/LF, so any of those characters in an
+// operator-supplied origin would either smuggle a new directive (e.g.,
+// widening script-src) or split the response header entirely. URL
+// parsing additionally rejects obviously malformed values so that a
+// typo surfaces at startup instead of as a silently-broken iframe.
+func (c SecurityConfig) Validate() error {
+	for _, origin := range c.FrameSrc {
+		if strings.ContainsAny(origin, ";\r\n \t") {
+			return fmt.Errorf("security.frame_src entry %q contains an invalid character (no spaces, tabs, semicolons, or newlines allowed)", origin)
+		}
+		u, err := url.Parse(origin)
+		if err != nil || u.Scheme == "" || u.Host == "" {
+			return fmt.Errorf("security.frame_src entry %q is not a valid absolute URL (expected scheme://host)", origin)
+		}
+	}
+	return nil
 }
 
 // ServerConfig holds server-related configuration
@@ -728,6 +751,13 @@ func Load(configPath string) (*Config, error) {
 	config := DefaultConfig() // Start with defaults
 	if err := yaml.Unmarshal(data, config); err != nil {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
+	}
+
+	// Reject configs that would emit a malformed CSP header before
+	// any handler ever sees a request. A silently-broken CSP is much
+	// worse than a clear startup failure.
+	if err := config.Security.Validate(); err != nil {
+		return nil, err
 	}
 
 	return config, nil
