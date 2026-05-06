@@ -76,7 +76,9 @@ func TestInclude_HotReload(t *testing.T) {
 	var initial string
 	if err := chromedp.Run(ctx,
 		chromedp.Navigate(url+"/"),
-		chromedp.Sleep(2*time.Second),
+		// Wait for the rendered include block to appear instead of
+		// sleeping a fixed duration — flakiness-resistant under load.
+		chromedp.WaitVisible("pre.language-go", chromedp.ByQuery),
 		chromedp.OuterHTML("html", &initial),
 	); err != nil {
 		t.Fatalf("navigate: %v", err)
@@ -100,7 +102,7 @@ func TestInclude_HotReload(t *testing.T) {
 	var reloaded string
 	if err := chromedp.Run(ctx,
 		chromedp.Navigate(url+"/"),
-		chromedp.Sleep(2*time.Second),
+		chromedp.WaitVisible("pre.language-go", chromedp.ByQuery),
 		chromedp.OuterHTML("html", &reloaded),
 	); err != nil {
 		t.Fatalf("re-navigate: %v", err)
@@ -189,7 +191,9 @@ func navigateAndCaptureInclude(t *testing.T, dir, path string) (string, []string
 	var html string
 	if err := chromedp.Run(ctx,
 		chromedp.Navigate(url+path),
-		chromedp.Sleep(2*time.Second),
+		// body is always present after Navigate's DOMContentLoaded;
+		// avoids a fixed sleep that flakes under load.
+		chromedp.WaitVisible("body", chromedp.ByQuery),
 		chromedp.OuterHTML("html", &html),
 	); err != nil {
 		t.Fatalf("navigate: %v", err)

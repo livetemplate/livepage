@@ -108,6 +108,14 @@ func PreprocessWithLinks(content []byte, baseDir, root string, link LinkOptions)
 			// `include=` could accidentally trigger substitution.
 			out = append(out, line)
 			closer := -1
+			// CommonMark §4.5 allows the closing fence to carry up to 3
+			// leading spaces and to use ≥ the opener's backtick count.
+			// We approximate with an exact-fence equality check after
+			// TrimSpace — adequate for the docs we generate (authors
+			// always close with the same fence they opened) and a known
+			// approximation. If a future authoring tool emits a longer
+			// closer, the unmatched-block falls through to the include
+			// path with closer == -1 → block left as-is.
 			for j := i + 1; j < len(lines); j++ {
 				if strings.TrimSpace(lines[j]) == fence {
 					closer = j
@@ -385,6 +393,14 @@ func lineFragment(lineRange string) string {
 // thin wrappers for clarity at the call sites where we distinguish
 // attribute-context from text-content escaping. Both are safe for
 // the same input class; the names document intent.
+//
+// Why both are correct here without further sanitisation: the
+// rendered href is assembled from a scheme-allowlisted RepoURL +
+// `url.PathEscape` per path segment, and the rendered text is the
+// file's content (already trusted-on-disk by the caller's path
+// confinement). If a future change ever introduces untrusted input
+// into the href construction, that change would need its own
+// sanitisation pass beyond html.EscapeString.
 func escapeAttr(s string) string { return html.EscapeString(s) }
 func escapeText(s string) string { return html.EscapeString(s) }
 
