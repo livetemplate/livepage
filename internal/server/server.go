@@ -709,6 +709,13 @@ func (s *Server) servePage(w http.ResponseWriter, r *http.Request, route *Route)
 	// For now, just serve the static HTML
 	// TODO: Add WebSocket support for interactivity
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// HTML pages are dynamic by nature: site config, frontmatter, and
+	// rendered partials change without a URL change, so a stale cached
+	// HTML response paired with fresh fingerprinted assets produces
+	// hard-to-explain "first paint missing styles" / "refresh fixes it"
+	// breakage. Force every navigation to revalidate; assets keep their
+	// long max-age=31536000 because their URLs change on rebuild.
+	w.Header().Set("Cache-Control", "no-cache, must-revalidate")
 
 	html := s.renderPage(route.Page, r.URL.Path, r.Host, detectWSScheme(r))
 	w.Write([]byte(html))
