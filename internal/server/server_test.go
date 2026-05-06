@@ -149,6 +149,14 @@ This is a test page.`
 	if !strings.Contains(body, "Test Content") {
 		t.Error("Response does not contain page content")
 	}
+
+	// HTML responses must opt out of caching so that intermediate caches
+	// (browser, CDN, fly.io edge) can't pin a stale render alongside
+	// fresh long-cached static assets — a divergence that produces the
+	// "first paint missing styles, refresh fixes it" symptom class.
+	if got := resp.Header.Get("Cache-Control"); got != "no-cache, must-revalidate" {
+		t.Errorf("Cache-Control = %q, want %q", got, "no-cache, must-revalidate")
+	}
 }
 
 func TestServerNotFound(t *testing.T) {
