@@ -41,6 +41,13 @@ export class EmbedLvtBlock extends BaseBlock {
     // delegator with the other, leaving one of the regions inert
     // on clicks. Disambiguating by block id keeps each delegator
     // independent.
+    //
+    // The suffix is safe because LiveTemplateClient.connect() (called
+    // below with `#${this.mountId} [data-lvt-id]`) matches on the
+    // *exact* attribute value, not a prefix — so any unique string
+    // appended to the original id continues to identify a single
+    // wrapper, while the per-id event-delegator key derived from the
+    // attribute is now unique across multiple embeds.
     const pending = this.element.querySelector<HTMLElement>(
       "[data-lvt-id-pending]",
     );
