@@ -2403,7 +2403,7 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
     <div class="page-toolbar">
         <!-- Presentation Mode Toggle -->
         <button id="presentation-toggle" class="presentation-btn" title="Toggle presentation mode (F key)" aria-label="Toggle presentation mode">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <rect x="2" y="7" width="20" height="15" rx="2" ry="2"/>
                 <polyline points="17 2 12 7 7 2"/>
             </svg>
@@ -2412,7 +2412,7 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
         <!-- Theme Toggle -->
         <div class="theme-toggle">
             <button id="theme-light" title="Light theme" aria-label="Light theme">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <circle cx="12" cy="12" r="5"/>
                     <line x1="12" y1="1" x2="12" y2="3"/>
                     <line x1="12" y1="21" x2="12" y2="23"/>
@@ -2425,12 +2425,12 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
                 </svg>
             </button>
             <button id="theme-dark" title="Dark theme" aria-label="Dark theme">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
                 </svg>
             </button>
             <button id="theme-auto" title="Auto theme (system preference)" aria-label="Auto theme">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
                     <line x1="8" y1="21" x2="16" y2="21"/>
                     <line x1="12" y1="17" x2="12" y2="21"/>
