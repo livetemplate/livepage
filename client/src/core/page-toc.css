@@ -3,8 +3,17 @@
  * For on-page section navigation nested under current page in sidebar
  */
 
-/* Nested sub-navigation list */
+/* Nested sub-navigation list. The explicit display rules on the <ul>
+ * and <li> are necessary because this list lives inside a <nav> in the
+ * sidebar, and PicoCSS's `nav ul { display: flex }` /
+ * `nav li { display: inline-block }` defaults would otherwise lay the
+ * TOC entries out horizontally — packed across the sidebar width
+ * instead of stacked under the active page. The outer .nav-pages
+ * override (in the docs-site inline CSS) catches the parent <ul> but
+ * not this nested one, so this rule has to assert the same explicit
+ * fallback for the inner level. */
 .page-toc-list {
+  display: block;
   list-style: none;
   margin: 0.25rem 0 0.5rem 0;
   padding: 0;
@@ -18,6 +27,7 @@
 }
 
 .page-toc-item {
+  display: list-item;
   position: relative;
 }
 
