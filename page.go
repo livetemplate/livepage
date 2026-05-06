@@ -100,6 +100,13 @@ func ParseFile(path string) (*Page, error) {
 	}
 	var includedFiles []string
 	var includeWarnings []string
+	// baseDir == root is intentional in v1: includes are confined to the
+	// markdown file's own directory tree, not the broader site root. This
+	// keeps each page self-contained — moving a page also moves anything
+	// it cites — and avoids ambiguous "../../some-other-page/snippet"
+	// references whose meaning would change with site layout. Widening
+	// `root` to the discovery root is a future option if a clear use case
+	// emerges, but the call site is the place to track that decision.
 	processedContent, includedFiles, includeWarnings = include.PreprocessWithLinks(processedContent, includeBaseDir, includeBaseDir, linkOpts)
 	for _, w := range includeWarnings {
 		fmt.Fprintf(os.Stderr, "warning: %s\n", w)

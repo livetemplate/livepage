@@ -52,3 +52,12 @@ by tinkerdown.
   that's a normal Go-deploy concern, not a docs concern.
 - The reader cannot see *stale* code: the snippets render directly
   from the files at request time, no copy-paste drift.
+
+## Note on the sibling `literate-linked-include/` example
+
+The sibling `examples/literate-linked-include/` example contains a
+near-identical `_app/` (counter.go, counter.tmpl, main.go) with its
+own `go.mod`. The duplication is intentional: each example must be
+clone-and-run independently, so each owns its module graph. When
+bumping `livetemplate` or `lvt`, update both `_app/go.mod` files
+together to keep them in sync.
