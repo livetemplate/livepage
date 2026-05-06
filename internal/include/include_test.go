@@ -418,11 +418,60 @@ func TestPreprocess_RejectsNonHTTPSchemes(t *testing.T) {
 		"data:text/html,<script>alert(1)</script>",
 		"file:///etc/passwd",
 		"vbscript:msgbox",
+		"ftp://example.com/repo",
 	} {
 		out, _, _ := PreprocessWithLinks([]byte(md), root, root, LinkOptions{RepoURL: evil})
 		if strings.Contains(string(out), "tinkerdown-include-source") {
 			t.Errorf("footer should be omitted for non-http(s) RepoURL %q; got:\n%s", evil, out)
 		}
+	}
+}
+
+func TestPreprocess_NoFooterWhenIncludeOutsidePageDir(t *testing.T) {
+	root := t.TempDir()
+	pageDir := filepath.Join(root, "guides")
+	otherDir := filepath.Join(root, "lib")
+	if err := os.MkdirAll(pageDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(otherDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(otherDir, "src.go")
+	if err := os.WriteFile(src, []byte("body"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Include sits in a sibling directory of the page; filepath.Rel
+	// from pageDir to src returns "../lib/src.go", which the footer
+	// logic detects via the "..-prefix" check and skips.
+	md := "```go include=\"../lib/src.go\"\n```\n"
+	out, _, _ := PreprocessWithLinks([]byte(md), pageDir, root, LinkOptions{
+		RepoURL: "https://github.com/foo/bar",
+	})
+	if strings.Contains(string(out), "tinkerdown-include-source") {
+		t.Errorf("footer should be omitted when include is outside pageDir; got:\n%s", out)
+	}
+	// The snippet itself still renders.
+	if !strings.Contains(string(out), "body") {
+		t.Errorf("expected snippet body to render despite missing footer; got:\n%s", out)
+	}
+}
+
+func TestSliceRanges_RejectsLargeFiles(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "big.txt")
+	// Write maxIncludeBytes+1 bytes — just past the cap.
+	big := make([]byte, maxIncludeBytes+1)
+	for i := range big {
+		big[i] = 'a'
+	}
+	if err := os.WriteFile(path, big, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Slice(path, ""); err == nil {
+		t.Fatal("expected size-cap error, got nil")
+	} else if !strings.Contains(err.Error(), "too large") {
+		t.Errorf("expected 'too large' in error, got: %v", err)
 	}
 }
 

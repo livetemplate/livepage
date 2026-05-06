@@ -423,7 +423,7 @@ func Resolve(baseDir, root, includePath string) (string, error) {
 	}
 
 	rel, err := filepath.Rel(resolvedRoot, resolvedCandidate)
-	if err != nil || strings.HasPrefix(rel, "..") || rel == ".." {
+	if err != nil || strings.HasPrefix(rel, "..") {
 		return "", fmt.Errorf("include %q escapes the page root", includePath)
 	}
 	return resolvedCandidate, nil
@@ -447,14 +447,37 @@ func Slice(absPath, lineRange string) (string, error) {
 	return SliceRanges(absPath, lineRange, "")
 }
 
+// maxIncludeBytes is the upper bound for any single included file's
+// size. Pages cite snippets, not log files; rejecting at this size
+// avoids accidentally pulling a 1 GB binary into the docs build.
+const maxIncludeBytes = 10 << 20 // 10 MB
+
+// readFileBounded reads absPath but rejects files larger than
+// maxIncludeBytes with a clear error rather than allocating the
+// whole thing.
+func readFileBounded(absPath string) ([]byte, error) {
+	fi, err := os.Stat(absPath)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", absPath, err)
+	}
+	if fi.Size() > maxIncludeBytes {
+		return nil, fmt.Errorf("read %s: file too large (%d bytes, max %d)", absPath, fi.Size(), maxIncludeBytes)
+	}
+	data, err := os.ReadFile(absPath)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", absPath, err)
+	}
+	return data, nil
+}
+
 // SliceRanges is Slice with an explicit separator inserted between
 // joined ranges. Useful for multi-range includes — pass
 // LanguageEllipsis(lang) to get a syntax-highlighted "// ..." line
 // (or its language equivalent) between ranges.
 func SliceRanges(absPath, lineRange, separator string) (string, error) {
-	data, err := os.ReadFile(absPath)
+	data, err := readFileBounded(absPath)
 	if err != nil {
-		return "", fmt.Errorf("read %s: %w", absPath, err)
+		return "", err
 	}
 	if lineRange == "" {
 		return string(data), nil
@@ -506,9 +529,9 @@ func FindRegion(absPath, name string) (start, end int, err error) {
 	if name == "" {
 		return 0, 0, fmt.Errorf("region name is empty")
 	}
-	data, err := os.ReadFile(absPath)
+	data, err := readFileBounded(absPath)
 	if err != nil {
-		return 0, 0, fmt.Errorf("read %s: %w", absPath, err)
+		return 0, 0, err
 	}
 	startMarker := ">>> region:" + name
 	endMarker := "<<< region:" + name
