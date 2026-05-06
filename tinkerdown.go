@@ -41,6 +41,23 @@ type Page struct {
 	// conditionally inject the script and avoid penalising pages without
 	// any diagrams.
 	HasMermaid bool
+
+	// EmbedRoutes is the set of (path, upstream) pairs declared by
+	// ` ```embed-lvt path="..." upstream="..." ` blocks on this page.
+	// The server walks every page after Discover() and turns these into
+	// auto-registered reverse-proxy routes, so authors don't have to
+	// duplicate the upstream coordinates in tinkerdown.yaml.
+	EmbedRoutes []EmbedRoute
+}
+
+// EmbedRoute pairs a docs-side path with an upstream HTTP origin. The
+// server registers a reverse-proxy at `Path` forwarding to `Upstream`
+// for both HTTP and WebSocket upgrades, so the embed-lvt block's
+// browser-side connection can reach the deployed app via the docs
+// origin.
+type EmbedRoute struct {
+	Path     string
+	Upstream string
 }
 
 // PageConfig contains configuration for a page.

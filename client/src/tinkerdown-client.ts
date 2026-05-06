@@ -11,6 +11,7 @@ import { BaseBlock } from "./blocks/base-block";
 import { ServerBlock } from "./blocks/server-block";
 import { InteractiveBlock } from "./blocks/interactive-block";
 import { WasmBlock } from "./blocks/wasm-block";
+import { EmbedLvtBlock } from "./blocks/embed-lvt-block";
 
 export class TinkerdownClient {
   private options: TinkerdownClientOptions;
@@ -262,6 +263,15 @@ export class TinkerdownClient {
 
       case "wasm":
         block = new WasmBlock(config, this.persistence, this.options.debug);
+        break;
+
+      case "embed-lvt":
+        // Embed blocks own their LiveTemplateClient and talk directly
+        // to the remote app's WebSocket. Tinkerdown's shared
+        // MessageRouter doesn't proxy their messages — they're a
+        // separate session by design. We still register them in the
+        // blocks map for lifecycle (destroy on unregister).
+        block = new EmbedLvtBlock(config, this.persistence, this.options.debug);
         break;
 
       default:

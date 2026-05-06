@@ -11,22 +11,22 @@ import (
 
 // Pre-compiled regexes for auto-rendering (tables, lists, selects) (performance optimization)
 var (
-	tableRegex          = regexp.MustCompile(`(?s)<table([^>]*lvt-source="[^"]+[^>]*)>(.*?)</table>`)
-	ulListRegex         = regexp.MustCompile(`(?s)<ul([^>]*lvt-source="[^"]+[^>]*)>(.*?)</ul>`)
-	olListRegex         = regexp.MustCompile(`(?s)<ol([^>]*lvt-source="[^"]+[^>]*)>(.*?)</ol>`)
-	lvtSourceRegex      = regexp.MustCompile(`\s*lvt-source="[^"]*"`)
-	lvtColumnsRegex     = regexp.MustCompile(`\s*lvt-columns="[^"]*"`)
-	lvtActionsRegex     = regexp.MustCompile(`\s*lvt-actions="[^"]*"`)
-	lvtEmptyRegex       = regexp.MustCompile(`\s*lvt-empty="[^"]*"`)
-	lvtFieldRegex       = regexp.MustCompile(`\s*lvt-field="[^"]*"`)
-	lvtDatatableRegex   = regexp.MustCompile(`\s*lvt-datatable`)
-	columnsAttrRegex    = regexp.MustCompile(`lvt-columns="([^"]+)"`)
-	actionsAttrRegex    = regexp.MustCompile(`lvt-actions="([^"]+)"`)
-	emptyAttrRegex      = regexp.MustCompile(`lvt-empty="([^"]+)"`)
-	fieldAttrRegex      = regexp.MustCompile(`lvt-field="([^"]+)"`)
-	tableDetectRegex    = regexp.MustCompile(`(?i)<table[^>]*lvt-source=`)
-	selectDetectRegex   = regexp.MustCompile(`(?i)<select[^>]*lvt-source=`)
-	listDetectRegex     = regexp.MustCompile(`(?i)<(ul|ol)[^>]*lvt-source=`)
+	tableRegex        = regexp.MustCompile(`(?s)<table([^>]*lvt-source="[^"]+[^>]*)>(.*?)</table>`)
+	ulListRegex       = regexp.MustCompile(`(?s)<ul([^>]*lvt-source="[^"]+[^>]*)>(.*?)</ul>`)
+	olListRegex       = regexp.MustCompile(`(?s)<ol([^>]*lvt-source="[^"]+[^>]*)>(.*?)</ol>`)
+	lvtSourceRegex    = regexp.MustCompile(`\s*lvt-source="[^"]*"`)
+	lvtColumnsRegex   = regexp.MustCompile(`\s*lvt-columns="[^"]*"`)
+	lvtActionsRegex   = regexp.MustCompile(`\s*lvt-actions="[^"]*"`)
+	lvtEmptyRegex     = regexp.MustCompile(`\s*lvt-empty="[^"]*"`)
+	lvtFieldRegex     = regexp.MustCompile(`\s*lvt-field="[^"]*"`)
+	lvtDatatableRegex = regexp.MustCompile(`\s*lvt-datatable`)
+	columnsAttrRegex  = regexp.MustCompile(`lvt-columns="([^"]+)"`)
+	actionsAttrRegex  = regexp.MustCompile(`lvt-actions="([^"]+)"`)
+	emptyAttrRegex    = regexp.MustCompile(`lvt-empty="([^"]+)"`)
+	fieldAttrRegex    = regexp.MustCompile(`lvt-field="([^"]+)"`)
+	tableDetectRegex  = regexp.MustCompile(`(?i)<table[^>]*lvt-source=`)
+	selectDetectRegex = regexp.MustCompile(`(?i)<select[^>]*lvt-source=`)
+	listDetectRegex   = regexp.MustCompile(`(?i)<(ul|ol)[^>]*lvt-source=`)
 )
 
 // ParseFile parses a markdown file and creates a Page.
@@ -365,9 +365,40 @@ func (p *Page) buildBlocks(codeBlocks []*CodeBlock, sourceFile string) error {
 			}
 			p.InteractiveBlocks[block.ID] = block
 
+		case "embed-lvt":
+			// Server-side embed of a separately deployed LiveTemplate
+			// app. The placeholder emitted by injectBlockAttributes
+			// carries the upstream coordinates the request-time fetcher
+			// (ProcessEmbedLvt) needs.
+			//
+			// We enforce one parse-time invariant: the block is a pure
+			// pointer, so any non-empty body is an authoring mistake
+			// (the body has no semantic meaning and would silently
+			// disappear from the rendered page).
+			if strings.TrimSpace(cb.Content) != "" {
+				return NewParseError(sourceFile, cb.Line,
+					"embed-lvt block must have an empty body — it is a pointer-only block",
+				).WithHint("Remove the body and rely on attributes (server, path, upstream, session, height, timeout) only")
+			}
+			// When the author supplies `upstream=`, the server
+			// auto-registers a reverse-proxy from `path` to that
+			// upstream — saves the author from duplicating the
+			// coordinates in tinkerdown.yaml. We collect the pairs here;
+			// the server wires them up after Discover().
+			if up := cb.Metadata["upstream"]; up != "" {
+				path := cb.Metadata["path"]
+				if path == "" {
+					path = "/"
+				}
+				p.EmbedRoutes = append(p.EmbedRoutes, EmbedRoute{
+					Path:     path,
+					Upstream: up,
+				})
+			}
+
 		default:
 			return NewParseError(sourceFile, cb.Line, fmt.Sprintf("Unknown block type: %s", cb.Type)).
-				WithHint(fmt.Sprintf("Valid block types are: server, wasm, lvt"))
+				WithHint("Valid block types are: server, wasm, lvt, embed-lvt")
 		}
 	}
 

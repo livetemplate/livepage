@@ -240,6 +240,10 @@ func (s *Server) Discover() error {
 
 		// Parse schedules from all discovered pages
 		s.parseSchedulesFromRoutes()
+
+		// Merge auto-proxy routes from embed-lvt blocks (same as the
+		// legacy tutorial-mode path below).
+		s.registerAutoEmbedRoutes()
 		return nil
 	}
 
@@ -301,6 +305,12 @@ func (s *Server) Discover() error {
 
 	// Sort routes (index routes first)
 	sortRoutes(s.routes)
+
+	// Merge auto-proxy routes declared by embed-lvt blocks into the
+	// runtime proxy table. Authors can write `embed-lvt path="/x/"
+	// upstream="http://..."` and tinkerdown wires up the reverse-proxy
+	// without a separate `routes:` entry in tinkerdown.yaml.
+	s.registerAutoEmbedRoutes()
 
 	// Parse schedules from all discovered pages
 	s.parseSchedulesFromRoutes()
@@ -711,6 +721,10 @@ func (s *Server) servePage(w http.ResponseWriter, r *http.Request, route *Route)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 	html := s.renderPage(route.Page, r.URL.Path, r.Host, detectWSScheme(r))
+	// Resolve embed-lvt placeholders against their upstream LiveTemplate
+	// apps. Runs per-request so each visitor gets a fresh upstream session
+	// and forwards their cookies/auth context.
+	html = tinkerdown.ProcessEmbedLvt(html, r)
 	w.Write([]byte(html))
 }
 
@@ -1263,6 +1277,76 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
         .tinkerdown-interactive-block:hover {
             transform: translateY(-2px);
             box-shadow: 0 8px 24px var(--card-shadow);
+        }
+
+        /* Literate-docs demo wrapper: pairs a template source view with
+         * its live interactive block. The wrapper itself is a transparent
+         * grouping element; children keep their own card styling but
+         * share margins so they read as one demo.
+         *
+         * We use descendant (not direct-child) selectors because Prism's
+         * post-processor wraps the <pre> inside a <div class="code-block-
+         * wrapper">, so the immediate child of .tinkerdown-lvt-demo is
+         * that wrapper, not the <pre> we authored. */
+        .tinkerdown-lvt-demo {
+            margin: 2rem 0;
+            border: 1px solid var(--card-border);
+            border-radius: 16px;
+            overflow: hidden;
+            background: var(--card-bg);
+            box-shadow: 0 4px 16px var(--card-shadow);
+        }
+        .tinkerdown-lvt-demo .code-block-wrapper,
+        .tinkerdown-lvt-demo > pre {
+            margin: 0;
+            border-radius: 0;
+            border: 0;
+            border-bottom: 1px solid var(--card-border);
+            box-shadow: none;
+        }
+        .tinkerdown-lvt-demo .tinkerdown-interactive-block,
+        .tinkerdown-lvt-demo .tinkerdown-embed-lvt {
+            margin: 0;
+            border-radius: 0;
+            border: 0;
+            box-shadow: none;
+            background: transparent;
+        }
+        .tinkerdown-lvt-demo .tinkerdown-interactive-block:hover,
+        .tinkerdown-lvt-demo .tinkerdown-embed-lvt:hover {
+            transform: none;
+            box-shadow: none;
+        }
+        .tinkerdown-lvt-demo::before {
+            content: "Source";
+            display: block;
+            padding: 0.5rem 1rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--muted-color, #888);
+            background: rgba(127, 127, 127, 0.08);
+            border-bottom: 1px solid var(--card-border);
+        }
+        .tinkerdown-lvt-demo .tinkerdown-interactive-block::before,
+        .tinkerdown-lvt-demo .tinkerdown-embed-lvt::before {
+            content: "Live preview";
+            display: block;
+            margin-bottom: 0.75rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--muted-color, #888);
+            padding: 1rem 1rem 0;
+        }
+        @media (min-width: 900px) {
+            .tinkerdown-lvt-demo {
+                margin-left: calc((800px - 100%%) / 2 * -1);
+                margin-right: calc((800px - 100%%) / 2 * -1);
+                max-width: 1000px;
+            }
         }
 
         /* Chart containers */
