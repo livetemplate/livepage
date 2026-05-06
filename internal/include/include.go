@@ -287,6 +287,12 @@ func renderSourceFooter(link LinkOptions, pageDir, absPath, lineRange string) st
 	if link.RepoURL == "" {
 		return ""
 	}
+	// Reject non-http(s) schemes — frontmatter is author-controlled but a
+	// javascript: or data: URL in source_repo would inject an XSS vector
+	// through the rendered <a href="...">. Allowlist beats escape-only.
+	if !strings.HasPrefix(link.RepoURL, "https://") && !strings.HasPrefix(link.RepoURL, "http://") {
+		return ""
+	}
 	relToPage, err := filepath.Rel(pageDir, absPath)
 	if err != nil || strings.HasPrefix(relToPage, "..") {
 		// Included file lives outside the page dir — we don't have a

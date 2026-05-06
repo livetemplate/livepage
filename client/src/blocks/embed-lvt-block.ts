@@ -45,9 +45,11 @@ export class EmbedLvtBlock extends BaseBlock {
       "[data-lvt-id-pending]",
     );
     if (pending) {
-      const original = pending.getAttribute("data-lvt-id-pending") || "";
-      pending.setAttribute("data-lvt-id", `${original}-${this.id}`);
-      pending.removeAttribute("data-lvt-id-pending");
+      const original = pending.getAttribute("data-lvt-id-pending");
+      if (original) {
+        pending.setAttribute("data-lvt-id", `${original}-${this.id}`);
+        pending.removeAttribute("data-lvt-id-pending");
+      }
     }
 
     const inner = this.element.querySelector<HTMLElement>("[data-lvt-id]");

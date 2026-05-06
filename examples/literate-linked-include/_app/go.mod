@@ -1,4 +1,4 @@
-module example.com/literate-counter
+module example.com/literate-linked-counter
 
 go 1.22
 

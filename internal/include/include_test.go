@@ -406,6 +406,26 @@ func TestPreprocess_NoFooterWhenRepoUnset(t *testing.T) {
 	}
 }
 
+func TestPreprocess_RejectsNonHTTPSchemes(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "src.go")
+	if err := os.WriteFile(src, []byte("body"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	md := "```go include=\"./src.go\"\n```\n"
+	for _, evil := range []string{
+		"javascript:alert(1)",
+		"data:text/html,<script>alert(1)</script>",
+		"file:///etc/passwd",
+		"vbscript:msgbox",
+	} {
+		out, _, _ := PreprocessWithLinks([]byte(md), root, root, LinkOptions{RepoURL: evil})
+		if strings.Contains(string(out), "tinkerdown-include-source") {
+			t.Errorf("footer should be omitted for non-http(s) RepoURL %q; got:\n%s", evil, out)
+		}
+	}
+}
+
 func TestSliceRanges_MultiRange(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "file.txt")
