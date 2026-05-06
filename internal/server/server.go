@@ -1064,6 +1064,18 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
     </script>`
 	}
 
+	// Conditionally include Prism Line Numbers and Line Highlight plugins
+	// (~30 KB combined) only on pages that have `include=` blocks.
+	// Pages without source-include snippets pay no cost.
+	prismIncludeCSS := ""
+	prismIncludeJS := ""
+	if len(page.IncludedFiles) > 0 {
+		prismIncludeCSS = `<link href="/assets/prism-line-highlight.css" rel="stylesheet" />
+    <link href="/assets/prism-line-numbers.css" rel="stylesheet" />`
+		prismIncludeJS = `<script defer src="/assets/prism-line-highlight.js"></script>
+    <script defer src="/assets/prism-line-numbers.js"></script>`
+	}
+
 	// Basic HTML wrapper with the static content
 	html := fmt.Sprintf(`<!DOCTYPE html>
 <html lang="en">
@@ -2568,8 +2580,7 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
 
     <!-- Prism.js for syntax highlighting (embedded) -->
     <link href="/assets/prism.css" rel="stylesheet" />
-    <link href="/assets/prism-line-highlight.css" rel="stylesheet" />
-    <link href="/assets/prism-line-numbers.css" rel="stylesheet" />
+    %s
 </head>
 <body>
     <!-- Unified Toolbar -->
@@ -2910,8 +2921,7 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
     <!-- Prism.js for syntax highlighting (embedded). defer eliminates render-block
          and preserves source order so language plugins load after prism core. -->
     <script defer src="/assets/prism.js"></script>
-    <script defer src="/assets/prism-line-highlight.js"></script>
-    <script defer src="/assets/prism-line-numbers.js"></script>
+    %s
     <script defer src="/assets/prism-go.js"></script>
     <script defer src="/assets/prism-javascript.js"></script>
     <script defer src="/assets/prism-jsx.js"></script>
@@ -2931,7 +2941,7 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
     %s
 %s
 </body>
-</html>`, wsURL, showSidebar, page.Title, seoTags, stylingOverrideCSS, sidebar, contentWithNav, defaultTheme, mermaidScript, chartScript)
+</html>`, wsURL, showSidebar, page.Title, seoTags, stylingOverrideCSS, prismIncludeCSS, sidebar, contentWithNav, defaultTheme, prismIncludeJS, mermaidScript, chartScript)
 
 	return html
 }
@@ -3136,7 +3146,15 @@ func (s *Server) isPageFile(filePath string) bool {
 // `LANG include="..."` fences. Watcher events arrive with the path
 // relative to s.rootDir; pages store IncludedFiles as absolutes — so
 // we compare on absolute paths.
+//
+// Reads s.routes / s.siteManager via s.mu to avoid racing Discover().
+// Skips the .md fast path: if the watcher fired for a .md file the
+// existing isPageFile branch handles it; we'd never need to also
+// declare it an included-file candidate.
 func (s *Server) isIncludedFile(filePath string) bool {
+	if filepath.Ext(filePath) == ".md" {
+		return false
+	}
 	abs := filePath
 	if !filepath.IsAbs(abs) {
 		abs = filepath.Join(s.rootDir, filePath)
@@ -3145,6 +3163,8 @@ func (s *Server) isIncludedFile(filePath string) bool {
 	if err != nil {
 		return false
 	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	pages := s.collectPagesForAutoRoutes()
 	for _, page := range pages {
 		for _, f := range page.IncludedFiles {

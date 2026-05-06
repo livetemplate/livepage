@@ -85,8 +85,17 @@ func ParseFile(path string) (*Page, error) {
 		if linkOpts.Branch == "" {
 			linkOpts.Branch = DefaultSourceRef
 		}
+		// source_path normally names the markdown file itself
+		// (e.g. "examples/foo/index.md"); we want the page's
+		// directory for resolving included files. If the author
+		// passed a directory (no extension), treat it as such.
 		if fmPre.SourcePath != "" {
-			linkOpts.PagePathInRepo = filepath.ToSlash(filepath.Dir(fmPre.SourcePath))
+			sp := filepath.ToSlash(fmPre.SourcePath)
+			if filepath.Ext(sp) == "" {
+				linkOpts.PagePathInRepo = strings.TrimRight(sp, "/")
+			} else {
+				linkOpts.PagePathInRepo = filepath.ToSlash(filepath.Dir(sp))
+			}
 		}
 	}
 	var includedFiles []string

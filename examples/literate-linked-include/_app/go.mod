@@ -1,10 +1,10 @@
 module example.com/literate-counter
 
-go 1.26.0
+go 1.22
 
 require (
-	github.com/livetemplate/livetemplate v0.8.23-0.20260501143434-d21651c45827
-	github.com/livetemplate/lvt v0.0.0
+	github.com/livetemplate/livetemplate v0.8.23
+	github.com/livetemplate/lvt v0.1.6
 )
 
 require (
@@ -35,9 +35,4 @@ require (
 	golang.org/x/sys v0.40.0 // indirect
 	golang.org/x/text v0.35.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
-)
-
-replace (
-	github.com/livetemplate/livetemplate => ../../../../../../livetemplate
-	github.com/livetemplate/lvt => ../../../../../../lvt
 )

@@ -47,10 +47,11 @@ func TestEmbedLvt_ServerSideFetchAndInline(t *testing.T) {
 		t.Fatal("expected upstream content inlined in docs HTML")
 	}
 	// EmbedLvtBlock renames data-lvt-id-pending back to data-lvt-id
-	// client-side before connecting, so chromedp's rendered HTML
-	// contains the original id.
-	if !strings.Contains(htmlContent, fmt.Sprintf(`data-lvt-id="%s"`, upstreamWrapperID)) {
-		t.Fatal("expected upstream wrapper id restored client-side")
+	// client-side before connecting, suffixing the original upstream id
+	// with the block's unique id so multiple embeds of the same upstream
+	// don't collide on LiveTemplate's per-id event delegator.
+	if !strings.Contains(htmlContent, fmt.Sprintf(`data-lvt-id="%s-`, upstreamWrapperID)) {
+		t.Fatal("expected upstream wrapper id (suffixed with block id) restored client-side")
 	}
 	if !strings.Contains(htmlContent, `data-block-type="embed-lvt"`) {
 		t.Fatal("expected client-discovery container")

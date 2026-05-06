@@ -17,6 +17,8 @@ package include
 
 import (
 	"fmt"
+	"html"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -26,11 +28,12 @@ import (
 )
 
 // fenceOpenerRe matches a code-block fence opener with at least three
-// backticks, capturing fence chars, language, and the rest of the
-// info string. Only standard backtick fences are recognized in v1
+// backticks, capturing leading indentation (CommonMark allows up to
+// three spaces), fence chars, language, and the rest of the info
+// string. Only standard backtick fences are recognized in v1
 // (tilde fences exist in CommonMark but tinkerdown's own examples
 // universally use backticks).
-var fenceOpenerRe = regexp.MustCompile("^(`{3,})([A-Za-z0-9_+-]*)(.*)$")
+var fenceOpenerRe = regexp.MustCompile("^( {0,3})(`{3,})([A-Za-z0-9_+-]*)(.*)$")
 
 // includeAttrRe pulls the `include="..."` value out of a fence info
 // suffix; tolerant of single quotes too.
@@ -91,7 +94,10 @@ func PreprocessWithLinks(content []byte, baseDir, root string, link LinkOptions)
 			out = append(out, line)
 			continue
 		}
-		fence, lang, rest := match[1], match[2], match[3]
+		// match[1]=indent (CommonMark allows up to 3 spaces); we
+		// don't need it for emitted raw HTML but still pass-through
+		// preserves it via the original line copy.
+		fence, lang, rest := match[2], match[3], match[4]
 		incMatch := includeAttrRe.FindStringSubmatch(rest)
 		if incMatch == nil {
 			// Not an include block. Copy this opener AND its body
@@ -146,6 +152,16 @@ func PreprocessWithLinks(content []byte, baseDir, root string, link LinkOptions)
 			out = append(out, line)
 			continue
 		}
+		// Include fences are pointer-only — the body is always
+		// replaced with the resolved file slice. Authoring a non-
+		// empty body silently discards content; warn so the author
+		// doesn't think their inline content survived.
+		for j := i + 1; j < closer; j++ {
+			if strings.TrimSpace(lines[j]) != "" {
+				warnings = append(warnings, fmt.Sprintf("include %q: non-empty fence body is ignored — include= replaces the body", incMatch[1]))
+				break
+			}
+		}
 
 		// Resolve, slice, dedent. On any failure, pass the original
 		// (empty) block through with a warning so the page still
@@ -195,23 +211,6 @@ func PreprocessWithLinks(content []byte, baseDir, root string, link LinkOptions)
 		// from the source are preserved.
 		text = strings.TrimSuffix(text, "\n")
 
-		// Emit a fresh fence with the same fence/lang and the body
-		// replaced. We deliberately drop include="..." and lines="..."
-		// from the rendered fence info so the post-render code block
-		// looks identical to a hand-authored one — clean Prism class,
-		// clean DOM, no leaked authoring metadata.
-		cleanInfo := rest
-		cleanInfo = strings.ReplaceAll(cleanInfo, incMatch[0], "")
-		if l := linesAttrRe.FindString(rest); l != "" {
-			cleanInfo = strings.ReplaceAll(cleanInfo, l, "")
-		}
-		if r := regionAttrRe.FindString(rest); r != "" {
-			cleanInfo = strings.ReplaceAll(cleanInfo, r, "")
-		}
-		if h := highlightAttrRe.FindString(rest); h != "" {
-			cleanInfo = strings.ReplaceAll(cleanInfo, h, "")
-		}
-		cleanInfo = strings.TrimSpace(cleanInfo)
 		// Emit raw HTML for every include — gives us the <pre> handle
 		// that Prism's Line Numbers plugin (always on) and Line
 		// Highlight plugin (when highlight= is set) read their config
@@ -305,17 +304,32 @@ func renderSourceFooter(link LinkOptions, pageDir, absPath, lineRange string) st
 	if branch == "" {
 		branch = "main"
 	}
-	url := strings.TrimRight(link.RepoURL, "/") + "/blob/" + branch + "/" + repoPath
+	// URL-encode each path segment so spaces or non-ASCII in repo
+	// paths don't produce a malformed link. PathEscape leaves
+	// path-safe characters untouched, which keeps typical URLs
+	// human-readable.
+	href := strings.TrimRight(link.RepoURL, "/") + "/blob/" + url.PathEscape(branch) + "/" + escapePath(repoPath)
 	if frag := lineFragment(lineRange); frag != "" {
-		url += frag
+		href += frag
 	}
 
 	label := filepath.Base(absPath)
 	if r := lineLabel(lineRange); r != "" {
 		label += ":" + r
 	}
-	return `<p class="tinkerdown-include-source"><a href="` + escapeAttr(url) +
+	return `<p class="tinkerdown-include-source"><a href="` + escapeAttr(href) +
 		`" target="_blank" rel="noopener">` + escapeText(label) + `</a></p>`
+}
+
+// escapePath URL-encodes each forward-slash-separated segment of p,
+// preserving the slashes. Used for repo-relative paths in source-link
+// hrefs.
+func escapePath(p string) string {
+	parts := strings.Split(p, "/")
+	for i, s := range parts {
+		parts[i] = url.PathEscape(s)
+	}
+	return strings.Join(parts, "/")
 }
 
 // lineLabel returns the human-readable suffix for the link label —
@@ -361,28 +375,12 @@ func lineFragment(lineRange string) string {
 	return fmt.Sprintf("#L%d-L%d", start, end)
 }
 
-// escapeAttr / escapeText keep the footer safe for raw-HTML pass-
-// through — the URL and label flow from authored frontmatter and
-// resolved file paths, both trustable here, but escaping costs
-// nothing and keeps the output well-formed.
-func escapeAttr(s string) string {
-	r := strings.NewReplacer(
-		`&`, "&amp;",
-		`"`, "&quot;",
-		`<`, "&lt;",
-		`>`, "&gt;",
-	)
-	return r.Replace(s)
-}
-
-func escapeText(s string) string {
-	r := strings.NewReplacer(
-		`&`, "&amp;",
-		`<`, "&lt;",
-		`>`, "&gt;",
-	)
-	return r.Replace(s)
-}
+// escapeAttr / escapeText delegate to html.EscapeString — kept as
+// thin wrappers for clarity at the call sites where we distinguish
+// attribute-context from text-content escaping. Both are safe for
+// the same input class; the names document intent.
+func escapeAttr(s string) string { return html.EscapeString(s) }
+func escapeText(s string) string { return html.EscapeString(s) }
 
 // Resolve canonicalizes an include path supplied in markdown. It
 // resolves relative paths against baseDir (the directory of the
