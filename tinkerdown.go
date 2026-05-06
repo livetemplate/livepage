@@ -4,6 +4,17 @@ package tinkerdown
 
 import "github.com/livetemplate/tinkerdown/internal/schedule"
 
+// DefaultSourceRef is the git ref used to construct GitHub source
+// links from `LANG include="..."` blocks when the page's frontmatter
+// doesn't pin one explicitly via `source_ref`. The tinkerdown binary
+// sets this at startup to its build-time version (via
+// `cmd/tinkerdown/main.go`'s ldflags-injected version), so released
+// docs always link at the matching tag.
+//
+// For `dev` builds (no ldflags) and library callers that don't set
+// it, the fallback in renderSourceFooter resolves to "main".
+var DefaultSourceRef string
+
 // Page represents a parsed tinkerdown tutorial/guide/playground.
 type Page struct {
 	ID                string
@@ -48,6 +59,12 @@ type Page struct {
 	// auto-registered reverse-proxy routes, so authors don't have to
 	// duplicate the upstream coordinates in tinkerdown.yaml.
 	EmbedRoutes []EmbedRoute
+
+	// IncludedFiles holds the absolute paths of files referenced by
+	// ` ```LANG include="..." ` fences on this page. The watcher uses
+	// this list to broadcast a reload when any included file changes,
+	// so docs stay in sync with the real source they cite.
+	IncludedFiles []string
 }
 
 // EmbedRoute pairs a docs-side path with an upstream HTTP origin. The

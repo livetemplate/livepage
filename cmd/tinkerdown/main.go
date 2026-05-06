@@ -7,13 +7,25 @@ import (
 	"os"
 	"strings"
 
+	"github.com/livetemplate/tinkerdown"
 	"github.com/livetemplate/tinkerdown/cmd/tinkerdown/commands"
 )
 
 // version is set via ldflags during build: -ldflags="-X main.version=1.0.0"
 var version = "dev"
 
-func main() { os.Exit(run()) }
+func main() {
+	// Propagate the binary's release version to the library so
+	// `LANG include="..."` blocks can construct GitHub source links
+	// at the matching tag — pages don't need to hardcode `source_ref`
+	// in frontmatter for releases. "dev" builds (no ldflags) leave
+	// DefaultSourceRef empty, and the link footer falls back to
+	// "main" so links still resolve in development.
+	if version != "" && version != "dev" {
+		tinkerdown.DefaultSourceRef = version
+	}
+	os.Exit(run())
+}
 
 func run() int {
 	if len(os.Args) < 2 {

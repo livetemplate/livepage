@@ -51,6 +51,32 @@ func GetPrismCSS() ([]byte, error) {
 	return prismFS.ReadFile("vendor/prism/prism-tomorrow.min.css")
 }
 
+// GetPrismLineHighlightJS returns the Prism Line Highlight plugin JS,
+// vendored from prismjs@1.29.0. Used by `LANG include="..." highlight="3-5"`
+// fences to draw an emphasis overlay on selected lines.
+func GetPrismLineHighlightJS() ([]byte, error) {
+	return prismFS.ReadFile("vendor/prism/prism-line-highlight.min.js")
+}
+
+// GetPrismLineHighlightCSS returns the Prism Line Highlight plugin CSS.
+func GetPrismLineHighlightCSS() ([]byte, error) {
+	return prismFS.ReadFile("vendor/prism/prism-line-highlight.min.css")
+}
+
+// GetPrismLineNumbersJS returns the Prism Line Numbers plugin JS, which
+// numbers lines in the gutter — used by every `LANG include="..."`
+// block so the snippet has stable coordinates the footer label
+// (`counter.go:13-35`) and the optional `highlight=` overlay can refer
+// to.
+func GetPrismLineNumbersJS() ([]byte, error) {
+	return prismFS.ReadFile("vendor/prism/prism-line-numbers.min.js")
+}
+
+// GetPrismLineNumbersCSS returns the Prism Line Numbers plugin CSS.
+func GetPrismLineNumbersCSS() ([]byte, error) {
+	return prismFS.ReadFile("vendor/prism/prism-line-numbers.min.css")
+}
+
 // SupportedPrismLanguages is the whitelist of available Prism language components
 var SupportedPrismLanguages = map[string]bool{
 	"go":         true,

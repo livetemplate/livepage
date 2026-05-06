@@ -122,6 +122,7 @@ type Frontmatter struct {
 	// repository + the page's own relative path).
 	SourceRepo string `yaml:"source_repo,omitempty"` // e.g. "https://github.com/livetemplate/livetemplate"
 	SourcePath string `yaml:"source_path,omitempty"` // e.g. "docs/guides/progressive-complexity.md"
+	SourceRef  string `yaml:"source_ref,omitempty"`  // git ref for source links (tag/branch/commit). Defaults to "main".
 
 	// Chart customization (keyed by heading slug)
 	Charts map[string]ChartOptions `yaml:"charts,omitempty"`
