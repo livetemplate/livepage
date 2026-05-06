@@ -1649,6 +1649,15 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
              * value on overscroll-behavior keeps nav scroll from chaining
              * into the page when the sidebar reaches its end. */
             overflow-y: auto;
+            /* Per CSS spec, setting overflow-y to anything but `visible`
+             * makes the orthogonal axis behave as `auto` too. Without an
+             * explicit overflow-x, content that bleeds slightly past the
+             * sidebar's content box (e.g. PicoCSS's nav ul with negative
+             * horizontal margins, or any deeply-padded link) produces a
+             * tiny horizontal scrollbar — making the sidebar "float"
+             * horizontally during vertical scroll on touch devices. Hide
+             * horizontal overflow so the sidebar locks to its column. */
+            overflow-x: hidden;
             overscroll-behavior: contain;
         }
 
