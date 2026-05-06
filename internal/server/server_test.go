@@ -157,6 +157,40 @@ This is a test page.`
 	if got := resp.Header.Get("Cache-Control"); got != "no-cache, must-revalidate" {
 		t.Errorf("Cache-Control = %q, want %q", got, "no-cache, must-revalidate")
 	}
+
+	// Every inline SVG in the page chrome must declare its rendered
+	// dimensions as HTML attributes (width="..." height="...") rather
+	// than relying solely on a CSS rule like `.theme-toggle button svg
+	// { width: 1.1rem }` to size them. Without explicit attributes,
+	// browsers render an SVG at its intrinsic ~300×150 default for the
+	// brief window between HTML parsing and the inline <style> block
+	// being applied — which manifests as a giant logo-blob covering
+	// the toolbar on first paint, only resolving on reload because by
+	// then the CSS is in cache and applies before paint. Pinning
+	// dimensions in markup makes the size correct from the first byte.
+	svgIdx := 0
+	for i := 0; i < len(body); {
+		open := strings.Index(body[i:], "<svg")
+		if open == -1 {
+			break
+		}
+		open += i
+		close := strings.Index(body[open:], ">")
+		if close == -1 {
+			break
+		}
+		tag := body[open : open+close+1]
+		i = open + close + 1
+		// Skip the body-content mermaid SVG, which carries its own
+		// explicit width/height (verified separately by mermaid tests).
+		if strings.Contains(tag, `id="container"`) {
+			continue
+		}
+		if !strings.Contains(tag, "width=") || !strings.Contains(tag, "height=") {
+			t.Errorf("SVG #%d in page chrome lacks width/height attributes — will render at intrinsic 300x150 before CSS applies. Tag: %s", svgIdx, tag)
+		}
+		svgIdx++
+	}
 }
 
 func TestServerNotFound(t *testing.T) {
