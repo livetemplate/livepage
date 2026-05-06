@@ -13,6 +13,12 @@ import "github.com/livetemplate/tinkerdown/internal/schedule"
 //
 // For `dev` builds (no ldflags) and library callers that don't set
 // it, the fallback in renderSourceFooter resolves to "main".
+//
+// Concurrency contract: this is a single-writer, set-once-at-startup
+// global. Production code only writes it before any goroutines start,
+// during main() init. Tests must not mutate it from parallel test
+// bodies — if a test needs a different ref, pass it through the page's
+// frontmatter `source_ref` field instead.
 var DefaultSourceRef string
 
 // Page represents a parsed tinkerdown tutorial/guide/playground.

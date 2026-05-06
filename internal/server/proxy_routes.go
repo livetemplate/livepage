@@ -141,6 +141,12 @@ func (s *Server) registerAutoEmbedRoutes() {
 // collectPagesForAutoRoutes returns every page in the server's known
 // route table — covers both the legacy tutorial path (s.routes) and the
 // site-mode path (s.siteManager).
+//
+// Lock contract: this function is itself lock-free, so callers must
+// hold s.mu (read or write) for the duration of any iteration that
+// reads from the returned slice's pages while Discover may run
+// concurrently. Both existing callers (refreshWatcherIncludes under
+// the write lock, isIncludedFile under the read lock) honor this.
 func (s *Server) collectPagesForAutoRoutes() []*tinkerdown.Page {
 	if s.siteManager != nil {
 		nodes := s.siteManager.AllPages()
