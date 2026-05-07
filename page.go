@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/livetemplate/tinkerdown/internal/include"
 )
 
 // Pre-compiled regexes for auto-rendering (tables, lists, selects) (performance optimization)
@@ -57,6 +59,57 @@ func ParseFile(path string) (*Page, error) {
 		for _, w := range tableWarnings {
 			fmt.Fprintf(os.Stderr, "warning: %s\n", w)
 		}
+	}
+
+	// Pre-process: substitute `include="..." lines="..."` fence bodies
+	// with the resolved file slice, so goldmark renders a regular code
+	// block with the included content. v1 confines includes to the
+	// markdown file's parent directory tree — sibling layouts (a
+	// shared snippet folder up the tree) are an additive feature.
+	//
+	// Pull `source_repo` + `source_path` from the page's frontmatter
+	// (lightweight pre-parse — same trick auto-tables uses) so each
+	// substituted block can carry a "View on GitHub →" footer
+	// pointing at the cited line range. Optional: when source_repo is
+	// not set, footers are silently omitted.
+	includeBaseDir := filepath.Dir(absPath)
+	linkOpts := include.LinkOptions{}
+	if fmPre, _, fmErr := extractFrontmatter(processedContent); fmErr == nil {
+		linkOpts.RepoURL = fmPre.SourceRepo
+		// Frontmatter source_ref pins explicitly. Otherwise fall back
+		// to the running tinkerdown's build version, set by
+		// cmd/tinkerdown/main.go at startup. For unreleased ("dev")
+		// builds DefaultSourceRef stays empty and renderSourceFooter
+		// uses "main".
+		linkOpts.Branch = fmPre.SourceRef
+		if linkOpts.Branch == "" {
+			linkOpts.Branch = DefaultSourceRef
+		}
+		// source_path normally names the markdown file itself
+		// (e.g. "examples/foo/index.md"); we want the page's
+		// directory for resolving included files. If the author
+		// passed a directory (no extension), treat it as such.
+		if fmPre.SourcePath != "" {
+			sp := filepath.ToSlash(fmPre.SourcePath)
+			if filepath.Ext(sp) == "" {
+				linkOpts.PagePathInRepo = strings.TrimRight(sp, "/")
+			} else {
+				linkOpts.PagePathInRepo = filepath.ToSlash(filepath.Dir(sp))
+			}
+		}
+	}
+	var includedFiles []string
+	var includeWarnings []string
+	// baseDir == root is intentional in v1: includes are confined to the
+	// markdown file's own directory tree, not the broader site root. This
+	// keeps each page self-contained — moving a page also moves anything
+	// it cites — and avoids ambiguous "../../some-other-page/snippet"
+	// references whose meaning would change with site layout. Widening
+	// `root` to the discovery root is a future option if a clear use case
+	// emerges, but the call site is the place to track that decision.
+	processedContent, includedFiles, includeWarnings = include.PreprocessWithLinks(processedContent, includeBaseDir, includeBaseDir, linkOpts)
+	for _, w := range includeWarnings {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", w)
 	}
 
 	// Parse markdown with partial support. File-based content is trusted, so
@@ -115,6 +168,7 @@ func ParseFile(path string) (*Page, error) {
 	}
 	page.HasCharts = fm.HasCharts
 	page.HasMermaid = fm.HasMermaid
+	page.IncludedFiles = includedFiles
 	page.Description = fm.Description
 	page.Image = fm.Image
 

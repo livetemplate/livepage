@@ -5,17 +5,25 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/fsnotify/fsnotify"
 )
 
 // Watcher watches for file changes and triggers reload.
 type Watcher struct {
-	watcher   *fsnotify.Watcher
-	rootDir   string
-	onReload  func(filePath string) error
-	done      chan bool
-	debug     bool
+	watcher  *fsnotify.Watcher
+	rootDir  string
+	onReload func(filePath string) error
+	done     chan bool
+	debug    bool
+
+	// extra is the set of absolute paths to non-.md files that should
+	// also trigger a reload when changed — typically files referenced
+	// by ` ```LANG include="..." ` fences. Mutable across re-discovery
+	// so the watcher can pick up new includes without restarting.
+	extra   map[string]struct{}
+	extraMu sync.RWMutex
 }
 
 // NewWatcher creates a new file watcher for the given directory.
@@ -81,21 +89,33 @@ func (w *Watcher) Start() {
 					return
 				}
 
-				// Only respond to write/create events for .md files
+				// Respond to write/create events for .md files OR for
+				// any file in the explicitly-tracked extra set (typically
+				// files included by `LANG include="..."` fences).
 				if event.Op&fsnotify.Write == fsnotify.Write || event.Op&fsnotify.Create == fsnotify.Create {
-					if filepath.Ext(event.Name) == ".md" {
-						relPath, err := filepath.Rel(w.rootDir, event.Name)
-						if err != nil {
-							relPath = event.Name
-						}
+					relPath, err := filepath.Rel(w.rootDir, event.Name)
+					if err != nil {
+						relPath = event.Name
+					}
 
-						if w.debug {
-							log.Printf("[Watch] File changed: %s", relPath)
+					interesting := filepath.Ext(event.Name) == ".md"
+					if !interesting {
+						if absPath, absErr := filepath.Abs(event.Name); absErr == nil {
+							w.extraMu.RLock()
+							_, interesting = w.extra[absPath]
+							w.extraMu.RUnlock()
 						}
+					}
+					if !interesting {
+						continue
+					}
 
-						if err := w.onReload(relPath); err != nil {
-							log.Printf("[Watch] Reload failed for %s: %v", relPath, err)
-						}
+					if w.debug {
+						log.Printf("[Watch] File changed: %s", relPath)
+					}
+
+					if err := w.onReload(relPath); err != nil {
+						log.Printf("[Watch] Reload failed for %s: %v", relPath, err)
 					}
 				}
 
@@ -116,4 +136,28 @@ func (w *Watcher) Start() {
 func (w *Watcher) Stop() error {
 	close(w.done)
 	return w.watcher.Close()
+}
+
+// SetExtraFiles records the absolute paths of non-`.md` files whose
+// changes should also trigger reload. The Server calls this after each
+// Discover() with the union of every page's IncludedFiles, so docs
+// stay in sync with the real source they cite. Each call replaces the
+// previous set (idempotent across re-discovery).
+//
+// The watcher relies on its existing recursive directory adds — as
+// long as the included file lives under rootDir, fsnotify already
+// emits events for it; SetExtraFiles only flips the "interesting"
+// bit so the event loop doesn't filter it out alongside other
+// non-.md noise.
+func (w *Watcher) SetExtraFiles(paths []string) {
+	w.extraMu.Lock()
+	defer w.extraMu.Unlock()
+	w.extra = make(map[string]struct{}, len(paths))
+	for _, p := range paths {
+		abs, err := filepath.Abs(p)
+		if err != nil {
+			abs = p
+		}
+		w.extra[abs] = struct{}{}
+	}
 }

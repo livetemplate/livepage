@@ -312,10 +312,37 @@ func (s *Server) Discover() error {
 	// without a separate `routes:` entry in tinkerdown.yaml.
 	s.registerAutoEmbedRoutes()
 
+	// Make the watcher fire on changes to files referenced by any
+	// page's `LANG include="..."` fences, so docs stay in sync with
+	// the cited source. Idempotent across re-discovery.
+	s.refreshWatcherIncludes()
+
 	// Parse schedules from all discovered pages
 	s.parseSchedulesFromRoutes()
 
 	return nil
+}
+
+// refreshWatcherIncludes pushes the union of every page's
+// IncludedFiles into the watcher's extra-paths set. Caller must hold
+// s.mu (Discover already does).
+func (s *Server) refreshWatcherIncludes() {
+	if s.watcher == nil {
+		return
+	}
+	pages := s.collectPagesForAutoRoutes()
+	seen := map[string]struct{}{}
+	var paths []string
+	for _, page := range pages {
+		for _, f := range page.IncludedFiles {
+			if _, ok := seen[f]; ok {
+				continue
+			}
+			seen[f] = struct{}{}
+			paths = append(paths, f)
+		}
+	}
+	s.watcher.SetExtraFiles(paths)
 }
 
 // parseSchedulesFromRoutes registers schedules from all discovered pages.
@@ -625,6 +652,55 @@ func (s *Server) serveAsset(w http.ResponseWriter, r *http.Request) {
 	// Serve Prism.js CSS theme
 	if path == "prism.css" {
 		css, err := assets.GetPrismCSS()
+		if err != nil {
+			http.Error(w, "Asset not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "text/css")
+		w.Header().Set("Cache-Control", "public, max-age=31536000")
+		w.Write(css)
+		return
+	}
+
+	// Serve Prism Line Highlight plugin (used by `LANG include="..."
+	// highlight="3-5"` blocks). Must be registered BEFORE the
+	// generic prism-LANG.js handler since "line-highlight" isn't a
+	// language whitelisted by GetPrismLanguage.
+	if path == "prism-line-highlight.js" {
+		js, err := assets.GetPrismLineHighlightJS()
+		if err != nil {
+			http.Error(w, "Asset not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/javascript")
+		w.Header().Set("Cache-Control", "public, max-age=31536000")
+		w.Write(js)
+		return
+	}
+	if path == "prism-line-highlight.css" {
+		css, err := assets.GetPrismLineHighlightCSS()
+		if err != nil {
+			http.Error(w, "Asset not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "text/css")
+		w.Header().Set("Cache-Control", "public, max-age=31536000")
+		w.Write(css)
+		return
+	}
+	if path == "prism-line-numbers.js" {
+		js, err := assets.GetPrismLineNumbersJS()
+		if err != nil {
+			http.Error(w, "Asset not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/javascript")
+		w.Header().Set("Cache-Control", "public, max-age=31536000")
+		w.Write(js)
+		return
+	}
+	if path == "prism-line-numbers.css" {
+		css, err := assets.GetPrismLineNumbersCSS()
 		if err != nil {
 			http.Error(w, "Asset not found", http.StatusNotFound)
 			return
@@ -988,6 +1064,18 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
     </script>`
 	}
 
+	// Conditionally include Prism Line Numbers and Line Highlight plugins
+	// (~30 KB combined) only on pages that have `include=` blocks.
+	// Pages without source-include snippets pay no cost.
+	prismIncludeCSS := ""
+	prismIncludeJS := ""
+	if len(page.IncludedFiles) > 0 {
+		prismIncludeCSS = `<link href="/assets/prism-line-highlight.css" rel="stylesheet" />
+    <link href="/assets/prism-line-numbers.css" rel="stylesheet" />`
+		prismIncludeJS = `<script defer src="/assets/prism-line-highlight.js"></script>
+    <script defer src="/assets/prism-line-numbers.js"></script>`
+	}
+
 	// Basic HTML wrapper with the static content
 	html := fmt.Sprintf(`<!DOCTYPE html>
 <html lang="en">
@@ -1347,6 +1435,24 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
                 margin-right: calc((800px - 100%%) / 2 * -1);
                 max-width: 1000px;
             }
+        }
+
+        /* Footer link below an include snippet — subtle, unobtrusive,
+         * sits flush with the code block right edge. */
+        .tinkerdown-include-source {
+            margin: -0.5rem 0 1.5rem;
+            text-align: right;
+            font-size: 0.85em;
+            color: var(--muted-color, #888);
+        }
+        .tinkerdown-include-source a {
+            color: inherit;
+            text-decoration: none;
+            border-bottom: 1px dotted currentColor;
+        }
+        .tinkerdown-include-source a:hover {
+            color: var(--primary, #06f);
+            border-bottom-color: var(--primary, #06f);
         }
 
         /* Chart containers */
@@ -2474,6 +2580,7 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
 
     <!-- Prism.js for syntax highlighting (embedded) -->
     <link href="/assets/prism.css" rel="stylesheet" />
+    %s
 </head>
 <body>
     <!-- Unified Toolbar -->
@@ -2814,6 +2921,7 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
     <!-- Prism.js for syntax highlighting (embedded). defer eliminates render-block
          and preserves source order so language plugins load after prism core. -->
     <script defer src="/assets/prism.js"></script>
+    %s
     <script defer src="/assets/prism-go.js"></script>
     <script defer src="/assets/prism-javascript.js"></script>
     <script defer src="/assets/prism-jsx.js"></script>
@@ -2833,7 +2941,7 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
     %s
 %s
 </body>
-</html>`, wsURL, showSidebar, page.Title, seoTags, stylingOverrideCSS, sidebar, contentWithNav, defaultTheme, mermaidScript, chartScript)
+</html>`, wsURL, showSidebar, page.Title, seoTags, stylingOverrideCSS, prismIncludeCSS, sidebar, contentWithNav, defaultTheme, prismIncludeJS, mermaidScript, chartScript)
 
 	return html
 }
@@ -2975,6 +3083,7 @@ func (s *Server) EnableWatch(debug bool) error {
 		// Check if this is a page file or a source file
 		isPageFile := s.isPageFile(filePath)
 		isSourceFile := s.isTrackedSourceFile(filePath)
+		isIncludedFile := s.isIncludedFile(filePath)
 
 		if isPageFile && isSourceFile && s.isRecentSourceWrite(filePath) {
 			// File was modified by a source action (e.g., checkbox toggle).
@@ -2992,6 +3101,14 @@ func (s *Server) EnableWatch(debug bool) error {
 			}
 
 			// Broadcast reload to all connected clients
+			s.BroadcastReload(filePath)
+		} else if isIncludedFile {
+			// File is referenced by `LANG include="..."` on at least one
+			// page — re-discover so the included content is re-read,
+			// then broadcast reload.
+			if err := s.Discover(); err != nil {
+				return fmt.Errorf("failed to re-discover pages: %w", err)
+			}
 			s.BroadcastReload(filePath)
 		} else {
 			// For non-page files (external source files), just refresh affected sources
@@ -3020,6 +3137,40 @@ func (s *Server) isPageFile(filePath string) bool {
 	for _, route := range s.routes {
 		if route.FilePath == filePath {
 			return true
+		}
+	}
+	return false
+}
+
+// isIncludedFile reports whether filePath is referenced by any page's
+// `LANG include="..."` fences. Watcher events arrive with the path
+// relative to s.rootDir; pages store IncludedFiles as absolutes — so
+// we compare on absolute paths.
+//
+// Reads s.routes / s.siteManager via s.mu to avoid racing Discover().
+// Skips the .md fast path: if the watcher fired for a .md file the
+// existing isPageFile branch handles it; we'd never need to also
+// declare it an included-file candidate.
+func (s *Server) isIncludedFile(filePath string) bool {
+	if filepath.Ext(filePath) == ".md" {
+		return false
+	}
+	abs := filePath
+	if !filepath.IsAbs(abs) {
+		abs = filepath.Join(s.rootDir, filePath)
+	}
+	abs, err := filepath.Abs(abs)
+	if err != nil {
+		return false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	pages := s.collectPagesForAutoRoutes()
+	for _, page := range pages {
+		for _, f := range page.IncludedFiles {
+			if f == abs {
+				return true
+			}
 		}
 	}
 	return false

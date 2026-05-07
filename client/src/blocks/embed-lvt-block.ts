@@ -31,15 +31,32 @@ export class EmbedLvtBlock extends BaseBlock {
     // data-lvt-id to data-lvt-id-pending so LiveTemplateClient's
     // module-level autoInit (which scans for [data-lvt-id] on
     // DOMContentLoaded and tries to connect with default URLs) cannot
-    // race with us. Rename it back here, before our own connect call,
-    // so livetemplate's connect() finds the wrapper as expected.
+    // race with us. Rename it back here, before our own connect call.
+    //
+    // Critically: rename to a unique-per-block id, not the original.
+    // LiveTemplate generates one wrapperID per *template*, not per
+    // session — so two embeds of the same upstream would otherwise
+    // share a data-lvt-id and collide on the LiveTemplate event
+    // delegator's per-id key. The collision silently shadows one
+    // delegator with the other, leaving one of the regions inert
+    // on clicks. Disambiguating by block id keeps each delegator
+    // independent.
+    //
+    // The suffix is safe because LiveTemplateClient.connect() (called
+    // below with `#${this.mountId} [data-lvt-id]`) matches on the
+    // *exact* attribute value, not a prefix — so any unique string
+    // appended to the original id continues to identify a single
+    // wrapper, while the per-id event-delegator key derived from the
+    // attribute is now unique across multiple embeds.
     const pending = this.element.querySelector<HTMLElement>(
       "[data-lvt-id-pending]",
     );
     if (pending) {
-      const id = pending.getAttribute("data-lvt-id-pending");
-      if (id) pending.setAttribute("data-lvt-id", id);
-      pending.removeAttribute("data-lvt-id-pending");
+      const original = pending.getAttribute("data-lvt-id-pending");
+      if (original) {
+        pending.setAttribute("data-lvt-id", `${original}-${this.id}`);
+        pending.removeAttribute("data-lvt-id-pending");
+      }
     }
 
     const inner = this.element.querySelector<HTMLElement>("[data-lvt-id]");
