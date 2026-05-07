@@ -4,6 +4,23 @@ package tinkerdown
 
 import "github.com/livetemplate/tinkerdown/internal/schedule"
 
+// DefaultSourceRef is the git ref used to construct GitHub source
+// links from `LANG include="..."` blocks when the page's frontmatter
+// doesn't pin one explicitly via `source_ref`. The tinkerdown binary
+// sets this at startup to its build-time version (via
+// `cmd/tinkerdown/main.go`'s ldflags-injected version), so released
+// docs always link at the matching tag.
+//
+// For `dev` builds (no ldflags) and library callers that don't set
+// it, the fallback in renderSourceFooter resolves to "main".
+//
+// Concurrency contract: this is a single-writer, set-once-at-startup
+// global. Production code only writes it before any goroutines start,
+// during main() init. Tests must not mutate it from parallel test
+// bodies — if a test needs a different ref, pass it through the page's
+// frontmatter `source_ref` field instead.
+var DefaultSourceRef string
+
 // Page represents a parsed tinkerdown tutorial/guide/playground.
 type Page struct {
 	ID                string
@@ -41,6 +58,29 @@ type Page struct {
 	// conditionally inject the script and avoid penalising pages without
 	// any diagrams.
 	HasMermaid bool
+
+	// EmbedRoutes is the set of (path, upstream) pairs declared by
+	// ` ```embed-lvt path="..." upstream="..." ` blocks on this page.
+	// The server walks every page after Discover() and turns these into
+	// auto-registered reverse-proxy routes, so authors don't have to
+	// duplicate the upstream coordinates in tinkerdown.yaml.
+	EmbedRoutes []EmbedRoute
+
+	// IncludedFiles holds the absolute paths of files referenced by
+	// ` ```LANG include="..." ` fences on this page. The watcher uses
+	// this list to broadcast a reload when any included file changes,
+	// so docs stay in sync with the real source they cite.
+	IncludedFiles []string
+}
+
+// EmbedRoute pairs a docs-side path with an upstream HTTP origin. The
+// server registers a reverse-proxy at `Path` forwarding to `Upstream`
+// for both HTTP and WebSocket upgrades, so the embed-lvt block's
+// browser-side connection can reach the deployed app via the docs
+// origin.
+type EmbedRoute struct {
+	Path     string
+	Upstream string
 }
 
 // PageConfig contains configuration for a page.

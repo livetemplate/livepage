@@ -2,7 +2,7 @@
  * Core types for Tinkerdown Client
  */
 
-export type BlockType = "server" | "wasm" | "interactive" | "lvt";
+export type BlockType = "server" | "wasm" | "interactive" | "lvt" | "embed-lvt";
 
 export interface BlockMetadata {
   id: string;

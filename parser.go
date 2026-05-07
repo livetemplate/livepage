@@ -25,33 +25,33 @@ import (
 
 // SourceConfig represents a data source configuration for lvt-source blocks.
 type SourceConfig struct {
-	Type        string            `yaml:"type"`                   // exec, pg, rest, csv, json, markdown, sqlite, wasm
-	Cmd         string            `yaml:"cmd,omitempty"`          // For exec type
-	Query       string            `yaml:"query,omitempty"`        // For pg type
-	From        string            `yaml:"from,omitempty"`         // For rest type: API endpoint URL
-	File        string            `yaml:"file,omitempty"`         // For csv/json/markdown types
-	Anchor      string            `yaml:"anchor,omitempty"`       // For markdown: section anchor (e.g., "#todos")
-	DB          string            `yaml:"db,omitempty"`           // For sqlite: database file path
-	Table       string            `yaml:"table,omitempty"`        // For sqlite: table name
-	Path        string            `yaml:"path,omitempty"`         // For wasm: path to .wasm file
+	Type        string                 `yaml:"type"`                   // exec, pg, rest, csv, json, markdown, sqlite, wasm
+	Cmd         string                 `yaml:"cmd,omitempty"`          // For exec type
+	Query       string                 `yaml:"query,omitempty"`        // For pg type
+	From        string                 `yaml:"from,omitempty"`         // For rest type: API endpoint URL
+	File        string                 `yaml:"file,omitempty"`         // For csv/json/markdown types
+	Anchor      string                 `yaml:"anchor,omitempty"`       // For markdown: section anchor (e.g., "#todos")
+	DB          string                 `yaml:"db,omitempty"`           // For sqlite: database file path
+	Table       string                 `yaml:"table,omitempty"`        // For sqlite: table name
+	Path        string                 `yaml:"path,omitempty"`         // For wasm: path to .wasm file
 	QueryFile   string                 `yaml:"query_file,omitempty"`   // For graphql: path to .graphql file
 	Variables   map[string]interface{} `yaml:"variables,omitempty"`    // For graphql: query variables
 	Headers     map[string]string      `yaml:"headers,omitempty"`      // For rest: HTTP headers (env vars expanded)
-	QueryParams map[string]string `yaml:"query_params,omitempty"` // For rest: URL query parameters
-	ResultPath  string            `yaml:"result_path,omitempty"`  // For rest: dot-path to extract array (e.g., "data.items")
-	Readonly    *bool             `yaml:"readonly,omitempty"`     // For markdown/sqlite: read-only mode (default: true)
-	Options     map[string]string `yaml:"options,omitempty"`
-	Manual      bool              `yaml:"manual,omitempty"`    // For exec: require Run button click
-	Format      string            `yaml:"format,omitempty"`    // For exec: output format (json, lines, csv)
-	Delimiter   string            `yaml:"delimiter,omitempty"` // For exec CSV: field delimiter (default ",")
-	Env         map[string]string `yaml:"env,omitempty"`       // For exec: environment variables (env vars expanded)
-	Timeout     string            `yaml:"timeout,omitempty"`   // For exec/rest: timeout (e.g., "30s", "1m")
-	AutoBind    *bool             `yaml:"auto_bind,omitempty"` // Set to false to exclude from auto-table matching
+	QueryParams map[string]string      `yaml:"query_params,omitempty"` // For rest: URL query parameters
+	ResultPath  string                 `yaml:"result_path,omitempty"`  // For rest: dot-path to extract array (e.g., "data.items")
+	Readonly    *bool                  `yaml:"readonly,omitempty"`     // For markdown/sqlite: read-only mode (default: true)
+	Options     map[string]string      `yaml:"options,omitempty"`
+	Manual      bool                   `yaml:"manual,omitempty"`    // For exec: require Run button click
+	Format      string                 `yaml:"format,omitempty"`    // For exec: output format (json, lines, csv)
+	Delimiter   string                 `yaml:"delimiter,omitempty"` // For exec CSV: field delimiter (default ",")
+	Env         map[string]string      `yaml:"env,omitempty"`       // For exec: environment variables (env vars expanded)
+	Timeout     string                 `yaml:"timeout,omitempty"`   // For exec/rest: timeout (e.g., "30s", "1m")
+	AutoBind    *bool                  `yaml:"auto_bind,omitempty"` // Set to false to exclude from auto-table matching
 
 	// For computed sources
-	GroupBy   string            `yaml:"group_by,omitempty"`   // Field to group by
-	Aggregate map[string]string `yaml:"aggregate,omitempty"`  // Field → aggregation expression
-	Filter    string            `yaml:"filter,omitempty"`     // Optional filter expression
+	GroupBy   string            `yaml:"group_by,omitempty"`  // Field to group by
+	Aggregate map[string]string `yaml:"aggregate,omitempty"` // Field → aggregation expression
+	Filter    string            `yaml:"filter,omitempty"`    // Optional filter expression
 }
 
 // StylingConfig represents styling/theme configuration.
@@ -107,6 +107,14 @@ type Frontmatter struct {
 	// Top-level convenience options
 	Sidebar *bool `yaml:"sidebar,omitempty"` // Show navigation sidebar (overrides features.sidebar)
 
+	// LvtShowSource toggles the page-level default for ` ```lvt ` block source
+	// display. When true, every ` ```lvt ` block on the page renders both its
+	// template source as a syntax-highlighted code listing AND the live
+	// interactive widget. Per-block `show-source` / `hide-source` flags
+	// override this default. Defaults to nil/false to preserve existing
+	// behavior — opt-in for documentation pages.
+	LvtShowSource *bool `yaml:"lvt_show_source,omitempty"`
+
 	// Source provenance — used to render an "Edit this page" link that
 	// points at the canonical source file in its origin repo. Useful when
 	// a page was synced from another repo and the docs site is not the
@@ -114,6 +122,12 @@ type Frontmatter struct {
 	// repository + the page's own relative path).
 	SourceRepo string `yaml:"source_repo,omitempty"` // e.g. "https://github.com/livetemplate/livetemplate"
 	SourcePath string `yaml:"source_path,omitempty"` // e.g. "docs/guides/progressive-complexity.md"
+	// SourceRef pins the git ref used in include source-link footers
+	// (tag/branch/commit). Resolution order: this field if set;
+	// otherwise tinkerdown.DefaultSourceRef (populated from the
+	// binary's release version by cmd/tinkerdown/main.go); otherwise
+	// "main".
+	SourceRef string `yaml:"source_ref,omitempty"`
 
 	// Chart customization (keyed by heading slug)
 	Charts map[string]ChartOptions `yaml:"charts,omitempty"`
@@ -244,7 +258,7 @@ func ParseMarkdown(content []byte) (*Frontmatter, []*CodeBlock, string, error) {
 
 	// Post-process HTML to add data attributes to livemdtools blocks
 	html := htmlBuf.String()
-	html = injectBlockAttributes(html, codeBlocks, frontmatter.Sources)
+	html = injectBlockAttributes(html, codeBlocks, frontmatter)
 
 	// Process status banners (> ✅ message)
 	html = processStatusBanners(html)
@@ -329,7 +343,12 @@ func extractFrontmatter(content []byte) (*Frontmatter, []byte, error) {
 }
 
 // injectBlockAttributes post-processes HTML to wrap livemdtools code blocks with data attributes.
-func injectBlockAttributes(html string, blocks []*CodeBlock, sources map[string]SourceConfig) string {
+func injectBlockAttributes(html string, blocks []*CodeBlock, fm *Frontmatter) string {
+	var sources map[string]SourceConfig
+	if fm != nil {
+		sources = fm.Sources
+	}
+
 	// For each livemdtools block, find its HTML representation and wrap it
 	for i, block := range blocks {
 		// Determine readonly/editable
@@ -349,6 +368,57 @@ func injectBlockAttributes(html string, blocks []*CodeBlock, sources map[string]
 			// Auto-generate: type-index (e.g., "server-0", "lvt-1")
 			// Must match the index used in buildBlocks()
 			blockID = fmt.Sprintf("%s-%d", block.Type, i)
+		}
+
+		// For embed-lvt blocks, emit a placeholder div carrying the
+		// upstream coordinates. The server-side fetcher (ProcessEmbedLvt
+		// in embed_lvt.go, called from servePage) replaces this
+		// placeholder with the live remote HTML at request time, so
+		// each visitor gets a fresh upstream session and inherits any
+		// shared cookies for auth.
+		if block.Type == "embed-lvt" {
+			placeholder := fmt.Sprintf(
+				`<div class="tinkerdown-embed-lvt" data-tinkerdown-block data-block-id="%s" data-block-type="embed-lvt"`,
+				escapeHTML(blockID),
+			)
+			if v, ok := block.Metadata["server"]; ok {
+				placeholder += fmt.Sprintf(` data-embed-server="%s"`, escapeHTML(v))
+			}
+			if v, ok := block.Metadata["path"]; ok {
+				placeholder += fmt.Sprintf(` data-embed-path="%s"`, escapeHTML(v))
+			}
+			if v, ok := block.Metadata["session"]; ok {
+				placeholder += fmt.Sprintf(` data-embed-session="%s"`, escapeHTML(v))
+			}
+			if v, ok := block.Metadata["height"]; ok {
+				placeholder += fmt.Sprintf(` style="min-height:%s"`, escapeHTML(v))
+			}
+			if v, ok := block.Metadata["timeout"]; ok {
+				placeholder += fmt.Sprintf(` data-embed-timeout="%s"`, escapeHTML(v))
+			}
+			if v, ok := block.Metadata["upstream"]; ok {
+				placeholder += fmt.Sprintf(` data-embed-upstream="%s"`, escapeHTML(v))
+			}
+			// Honor show-source / hide-source for embed-lvt the same way
+			// as for local lvt blocks. ProcessEmbedLvt reads the data
+			// attribute and pairs the upstream HTML source with the live
+			// wrapper in a tinkerdown-lvt-demo card.
+			if effectiveLvtShowSource(block, fm) {
+				placeholder += ` data-show-source="true"`
+			}
+			placeholder += `></div>`
+
+			oldPre := fmt.Sprintf(`<pre><code class="language-%s">`, block.Language)
+			preStart := strings.Index(html, oldPre)
+			if preStart != -1 {
+				codeEnd := strings.Index(html[preStart:], "</code></pre>")
+				if codeEnd != -1 {
+					before := html[:preStart]
+					after := html[preStart+codeEnd+len("</code></pre>"):]
+					html = before + placeholder + after
+				}
+			}
+			continue
 		}
 
 		// For interactive (lvt) blocks, replace with a container div instead of code block
@@ -386,10 +456,32 @@ func injectBlockAttributes(html string, blocks []*CodeBlock, sources map[string]
 				// Find the end of this code block
 				codeEnd := strings.Index(html[preStart:], "</code></pre>")
 				if codeEnd != -1 {
-					// Replace the entire <pre><code>...</code></pre> with our container
+					preEnd := preStart + codeEnd + len("</code></pre>")
 					before := html[:preStart]
-					after := html[preStart+codeEnd+len("</code></pre>"):]
-					html = before + container + after
+					original := html[preStart:preEnd]
+					after := html[preEnd:]
+
+					if effectiveLvtShowSource(block, fm) {
+						// Render template source as syntax-highlighted code
+						// AND the live container, paired in a demo wrapper.
+						// Re-tag the source view as language-html so client
+						// highlighters give it sensible coloring (lvt isn't
+						// a known language to most highlighters).
+						sourceView := strings.Replace(
+							original,
+							`<pre><code class="language-lvt">`,
+							`<pre><code class="language-html">`,
+							1,
+						)
+						html = before +
+							`<div class="tinkerdown-lvt-demo tinkerdown-lvt-demo-stacked">` +
+							sourceView +
+							container +
+							`</div>` +
+							after
+					} else {
+						html = before + container + after
+					}
 				}
 			}
 			continue
@@ -443,6 +535,22 @@ func containsFlag(flags []string, flag string) bool {
 		if f == flag {
 			return true
 		}
+	}
+	return false
+}
+
+// effectiveLvtShowSource resolves the per-block "show template source"
+// decision. Per-block flags win over the page-level default; the page
+// default wins over the built-in default of false.
+func effectiveLvtShowSource(block *CodeBlock, fm *Frontmatter) bool {
+	if containsFlag(block.Flags, "show-source") {
+		return true
+	}
+	if containsFlag(block.Flags, "hide-source") {
+		return false
+	}
+	if fm != nil && fm.LvtShowSource != nil {
+		return *fm.LvtShowSource
 	}
 	return false
 }
@@ -839,7 +947,7 @@ type ChartOptions struct {
 
 // chartData is the JSON structure passed to Chart.js via data attributes.
 type chartData struct {
-	Labels   []string     `json:"labels"`
+	Labels   []string       `json:"labels"`
 	Datasets []chartDataset `json:"datasets"`
 }
 
@@ -868,10 +976,10 @@ func processCharts(htmlStr string, chartOpts map[string]ChartOptions) (string, b
 		fullMatchEnd := m[1]
 
 		// Extract heading parts
-		headingText := htmlStr[m[6]:m[7]]   // "Sales by Region"
+		headingText := htmlStr[m[6]:m[7]] // "Sales by Region"
 		chartType := ""
 		if m[8] >= 0 {
-			chartType = htmlStr[m[8]:m[9]]  // "bar"
+			chartType = htmlStr[m[8]:m[9]] // "bar"
 		}
 		headingClose := htmlStr[m[10]:m[11]] // </h2>
 
@@ -1082,6 +1190,12 @@ func parseCodeBlock(fenced *ast.FencedCodeBlock, source []byte, lineOffset int) 
 	if language == "lvt" {
 		blockType = "lvt"
 	}
+	// Special case: if language is "embed-lvt", it's a server-side embed
+	// of a separately deployed LiveTemplate app. The block has no Go code
+	// or template body — only attributes that point at the upstream.
+	if language == "embed-lvt" {
+		blockType = "embed-lvt"
+	}
 
 	for _, part := range remaining {
 		if strings.Contains(part, "=") {
@@ -1099,6 +1213,11 @@ func parseCodeBlock(fenced *ast.FencedCodeBlock, source []byte, lineOffset int) 
 				flags = append(flags, part)
 			case "interactive":
 				// Interactive is a special flag for lvt blocks
+				flags = append(flags, part)
+			case "show-source", "hide-source":
+				// Per-block override of the page's lvt_show_source
+				// default. show-source: render template source AND live
+				// widget. hide-source: live widget only.
 				flags = append(flags, part)
 			default:
 				// Unknown flag, ignore
@@ -1119,13 +1238,21 @@ func parseCodeBlock(fenced *ast.FencedCodeBlock, source []byte, lineOffset int) 
 		buf.Write(line.Value(source))
 	}
 
+	// Empty fenced bodies have no segments — guard against At(0)
+	// panicking. Line numbers fall back to 0 in that case; not great
+	// for error messages but better than crashing parse.
+	line := 0
+	if fenced.Lines().Len() > 0 {
+		line = lineOffset + fenced.Lines().At(0).Start
+	}
+
 	return &CodeBlock{
 		Type:     blockType,
 		Language: language,
 		Flags:    flags,
 		Metadata: metadata,
 		Content:  buf.String(),
-		Line:     lineOffset + fenced.Lines().At(0).Start,
+		Line:     line,
 	}, nil
 }
 
@@ -1272,7 +1399,7 @@ func ParseMarkdownWithPartials(content []byte, baseDir string, allowRawHTML bool
 
 	// Post-process HTML to add data attributes
 	htmlStr := htmlBuf.String()
-	htmlStr = injectBlockAttributes(htmlStr, codeBlocks, frontmatter.Sources)
+	htmlStr = injectBlockAttributes(htmlStr, codeBlocks, frontmatter)
 
 	// Process status banners (> ✅ message)
 	htmlStr = processStatusBanners(htmlStr)
