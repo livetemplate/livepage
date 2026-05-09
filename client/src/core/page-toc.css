@@ -3,22 +3,22 @@
  * For on-page section navigation nested under current page in sidebar
  */
 
-/* Nested sub-navigation list. The `!important` on display is load-
- * bearing for two reasons stacked on top of each other:
+/* Nested sub-navigation list. PicoCSS's `nav ul { display: flex }` /
+ * `nav li { display: inline-block }` would otherwise lay TOC entries
+ * out horizontally across the sidebar. A plain `.page-toc-list {
+ * display: block }` is sufficient to win the cascade — class
+ * specificity (0,1,0) beats the type selector (0,0,2) — but esbuild's
+ * CSS minifier strips `display: block` from <ul> selectors as a
+ * "redundant default" optimization (block IS the user-agent default
+ * for <ul>; the minifier doesn't see the cascade context). Once the
+ * override is gone, PicoCSS's `nav ul` rule is the only `display`
+ * declaration left, and the items flow horizontally.
  *
- * 1. PicoCSS's cascade — `nav ul { display: flex }` and
- *    `nav li { display: inline-block }` win on selector specificity
- *    against a plain `.page-toc-list { display: block }`, so without
- *    an override the TOC entries pack horizontally across the sidebar.
- * 2. esbuild's CSS minifier strips `display: block` from <ul>
- *    selectors as "redundant default" — silently undoing the cascade
- *    fix on every release build. PR #254 originally added plain
- *    `display: block`; the bundled asset shipped without it because
- *    of (2), causing the bug to keep regressing.
- *
- * `!important` is the minimum hammer that survives both cases:
- * specificity-trumps-cascade AND minifier-doesn't-touch. Same logic
- * applies to .page-toc-item below. */
+ * PR #254 added plain `display: block`; it was silently dropped from
+ * the bundled asset on every release build, causing the bug to keep
+ * regressing. `!important` survives the minifier — that's the actual
+ * mechanism here, not specificity. Same logic applies to
+ * .page-toc-item below. */
 .page-toc-list {
   display: block !important;
   list-style: none;
