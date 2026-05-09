@@ -76,9 +76,7 @@ func ValidateCommand(args []string) error {
 
 		totalFiles++
 
-		// Validate the file by attempting to parse it. Use absDir as the
-		// site root so cross-page `include="../other-page/_app/..."`
-		// references validate the same way they resolve at serve time.
+		// Site root = absDir so cross-page includes validate as serve sees them.
 		_, err = tinkerdown.ParseFileInSite(path, absDir)
 		if err != nil {
 			// Collect error

@@ -87,12 +87,9 @@ func ParseFileInSite(path, siteRoot string) (*Page, error) {
 	if err != nil || strings.HasPrefix(rel, "..") {
 		return nil, fmt.Errorf("path %q is not under siteRoot %q", path, siteRoot)
 	}
-	// Thread the resolved absolute root (not the caller's raw value) so a
-	// relative siteRoot like "./site" reaches include.Resolve already
-	// canonicalised — otherwise a relative root could pass the precondition
-	// check above (which uses absRoot internally) but misbehave during
-	// per-include resolution.
-	return parseFile(path, absRoot)
+	// Threading absRoot (not raw siteRoot) so relative inputs like
+	// "./site" reach include.Resolve already canonicalised.
+	return parseFile(absPath, absRoot)
 }
 
 func parseFile(path, siteRoot string) (*Page, error) {
@@ -161,12 +158,8 @@ func parseFile(path, siteRoot string) (*Page, error) {
 	}
 	var includedFiles []string
 	var includeWarnings []string
-	// includeRoot defaults to the markdown file's own directory (single-
-	// page mode, library callers). When siteRoot is provided (multi-page
-	// site), the root widens to the whole site so cross-page refs like
-	// `../recipes/foo/_app/x.go` resolve. Paths that escape includeRoot
-	// are still rejected — this is a widening, not a removal of the
-	// confinement check.
+	// Empty siteRoot keeps the v1 page-root confinement; non-empty widens
+	// to the whole site without removing the boundary.
 	includeRoot := includeBaseDir
 	if siteRoot != "" {
 		includeRoot = siteRoot
