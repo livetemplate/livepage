@@ -98,12 +98,22 @@ func (s *ExecSource) Name() string {
 // cmd: "./script.sh" means "the script.sh next to my tinkerdown.yaml".
 // Bare names like 'curl' and absolute paths pass through unchanged so
 // PATH lookup still works as expected.
+//
+// The returned path is made absolute so that cmd.Dir's chdir does not
+// re-prefix it inside the child process. With cmd.Dir == siteDir, leaving
+// the result relative would cause the kernel to look up
+// 'siteDir/<joined>' relative to the post-chdir CWD, double-nesting the
+// prefix and producing ENOENT.
 func resolveCmdPath(cmdName, siteDir string) string {
 	if siteDir == "" {
 		return cmdName
 	}
 	if strings.HasPrefix(cmdName, "./") || strings.HasPrefix(cmdName, "../") {
-		return filepath.Join(siteDir, cmdName)
+		joined := filepath.Join(siteDir, cmdName)
+		if abs, err := filepath.Abs(joined); err == nil {
+			return abs
+		}
+		return joined
 	}
 	return cmdName
 }
