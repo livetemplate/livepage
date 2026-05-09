@@ -70,7 +70,7 @@ func (m *Manager) discoverFromConfig() error {
 			absPath := filepath.Join(m.rootDir, filePath)
 
 			// Parse the page
-			parsed, err := tinkerdown.ParseFile(absPath)
+			parsed, err := tinkerdown.ParseFileInSite(absPath, m.rootDir)
 			if err != nil {
 				return fmt.Errorf("failed to parse %s: %w", filePath, err)
 			}
@@ -103,7 +103,7 @@ func (m *Manager) discoverFromConfig() error {
 		homePath := m.config.Site.Home
 		absPath := filepath.Join(m.rootDir, homePath)
 
-		parsed, err := tinkerdown.ParseFile(absPath)
+		parsed, err := tinkerdown.ParseFileInSite(absPath, m.rootDir)
 		if err != nil {
 			return fmt.Errorf("failed to parse home page %s: %w", homePath, err)
 		}
@@ -163,7 +163,7 @@ func (m *Manager) discoverFromFiles() error {
 		}
 
 		// Parse the page
-		parsed, err := tinkerdown.ParseFile(path)
+		parsed, err := tinkerdown.ParseFileInSite(path, m.rootDir)
 		if err != nil {
 			return fmt.Errorf("failed to parse %s: %w", relPath, err)
 		}
@@ -389,7 +389,7 @@ func (m *Manager) Reload(filePath string) error {
 	}
 
 	// Re-parse the file
-	parsed, err := tinkerdown.ParseFile(filePath)
+	parsed, err := tinkerdown.ParseFileInSite(filePath, m.rootDir)
 	if err != nil {
 		return fmt.Errorf("failed to parse %s: %w", relPath, err)
 	}

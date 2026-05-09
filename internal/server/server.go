@@ -283,7 +283,7 @@ func (s *Server) Discover() error {
 		pattern := mdToPattern(relPath)
 
 		// Parse the page
-		page, err := tinkerdown.ParseFile(path)
+		page, err := tinkerdown.ParseFileInSite(path, s.rootDir)
 		if err != nil {
 			log.Printf("Warning: Failed to parse %s: %v", relPath, err)
 			return nil // Continue with other files

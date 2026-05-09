@@ -31,8 +31,34 @@ var (
 	listDetectRegex   = regexp.MustCompile(`(?i)<(ul|ol)[^>]*lvt-source=`)
 )
 
-// ParseFile parses a markdown file and creates a Page.
+// ParseFile parses a markdown file and creates a Page. Includes
+// (`include="..."` fence attributes) are confined to the markdown
+// file's own directory tree.
+//
+// To allow includes to reach files elsewhere within a site (e.g. a
+// recipes/ page citing a shared `_app/` directory), use
+// ParseFileInSite — which widens the include-confinement root to the
+// site directory while still rejecting paths that escape it.
 func ParseFile(path string) (*Page, error) {
+	return parseFile(path, "")
+}
+
+// ParseFileInSite parses a markdown file as part of a multi-page site
+// rooted at siteRoot. Includes (`include="..."`) may reference files
+// anywhere within siteRoot, not just the page's own directory subtree;
+// paths that would escape siteRoot are still rejected.
+//
+// This is the entry point used by `tinkerdown serve` so cross-page
+// references like include="../recipes/counter/_app/counter.go" resolve
+// correctly. Library callers that don't want the wider scope (e.g.
+// rendering a single standalone .md file) should use ParseFile.
+//
+// If siteRoot is empty, behaves identically to ParseFile.
+func ParseFileInSite(path, siteRoot string) (*Page, error) {
+	return parseFile(path, siteRoot)
+}
+
+func parseFile(path, siteRoot string) (*Page, error) {
 	// Read file
 	content, err := os.ReadFile(path)
 	if err != nil {
@@ -63,9 +89,7 @@ func ParseFile(path string) (*Page, error) {
 
 	// Pre-process: substitute `include="..." lines="..."` fence bodies
 	// with the resolved file slice, so goldmark renders a regular code
-	// block with the included content. v1 confines includes to the
-	// markdown file's parent directory tree — sibling layouts (a
-	// shared snippet folder up the tree) are an additive feature.
+	// block with the included content.
 	//
 	// Pull `source_repo` + `source_path` from the page's frontmatter
 	// (lightweight pre-parse — same trick auto-tables uses) so each
@@ -100,14 +124,17 @@ func ParseFile(path string) (*Page, error) {
 	}
 	var includedFiles []string
 	var includeWarnings []string
-	// baseDir == root is intentional in v1: includes are confined to the
-	// markdown file's own directory tree, not the broader site root. This
-	// keeps each page self-contained — moving a page also moves anything
-	// it cites — and avoids ambiguous "../../some-other-page/snippet"
-	// references whose meaning would change with site layout. Widening
-	// `root` to the discovery root is a future option if a clear use case
-	// emerges, but the call site is the place to track that decision.
-	processedContent, includedFiles, includeWarnings = include.PreprocessWithLinks(processedContent, includeBaseDir, includeBaseDir, linkOpts)
+	// includeRoot defaults to the markdown file's own directory (single-
+	// page mode, library callers). When siteRoot is provided (multi-page
+	// site), the root widens to the whole site so cross-page refs like
+	// `../recipes/foo/_app/x.go` resolve. Paths that escape includeRoot
+	// are still rejected — this is a widening, not a removal of the
+	// confinement check.
+	includeRoot := includeBaseDir
+	if siteRoot != "" {
+		includeRoot = siteRoot
+	}
+	processedContent, includedFiles, includeWarnings = include.PreprocessWithLinks(processedContent, includeBaseDir, includeRoot, linkOpts)
 	for _, w := range includeWarnings {
 		fmt.Fprintf(os.Stderr, "warning: %s\n", w)
 	}
