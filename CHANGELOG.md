@@ -9,6 +9,40 @@ Earlier releases (v0.1.x) are documented in the
 [GitHub releases page](https://github.com/livetemplate/tinkerdown/releases).
 
 
+## [v0.2.1] - 2026-05-09
+
+### Added — Site-wide include resolution
+
+`tinkerdown serve` now resolves `include="..."` paths against the
+**site root** (the content directory passed to `serve`) instead of
+each markdown file's own parent directory. Cross-page references like
+`include="../recipes/counter/_app/counter.go"` from a page in
+`getting-started/` now succeed; paths that escape the site root are
+still rejected.
+
+Library API:
+
+- New `tinkerdown.ParseFileInSite(path, siteRoot)` — uses `siteRoot`
+  as the include-confinement boundary. Pass `siteRoot=""` to fall
+  back to page-root confinement.
+- Existing `tinkerdown.ParseFile(path)` is unchanged — single-page
+  callers (CLI tools, library users rendering one .md file) keep the
+  v0.2.0 page-root-confined default.
+
+Motivation: the v1 page-root confinement (per the comment in
+`page.go:103-109` of v0.2.0) made it impossible for a multi-page docs
+site to maintain a single source of truth for code samples shared
+across pages. The classic case: a "Getting Started" tutorial and a
+"Recipes" deep-dive that both want to include from the same
+deployable `_app/`. Site-wide root resolution unblocks that without
+removing the security boundary — paths still must stay under the
+site directory.
+
+The `serve` and `validate` commands automatically use `ParseFileInSite`
+with the configured content directory; no per-page frontmatter is
+needed.
+
+
 ## [v0.2.0] - 2026-05-07
 
 ### Added — Literate authoring primitives
@@ -124,4 +158,5 @@ without source-includes pay zero asset cost.
   around page-route iteration; short-circuit on `.md` events so
   watcher doesn't redundantly scan the include set during Discover.
 
+[v0.2.1]: https://github.com/livetemplate/tinkerdown/compare/v0.2.0...v0.2.1
 [v0.2.0]: https://github.com/livetemplate/tinkerdown/compare/v0.1.20...v0.2.0

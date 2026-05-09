@@ -31,8 +31,68 @@ var (
 	listDetectRegex   = regexp.MustCompile(`(?i)<(ul|ol)[^>]*lvt-source=`)
 )
 
-// ParseFile parses a markdown file and creates a Page.
+// ParseFile parses a markdown file and creates a Page. Includes
+// (`include="..."` fence attributes) are confined to the markdown
+// file's own directory tree.
+//
+// To allow includes to reach files elsewhere within a site (e.g. a
+// recipes/ page citing a shared `_app/` directory), use
+// ParseFileInSite — which widens the include-confinement root to the
+// site directory while still rejecting paths that escape it.
 func ParseFile(path string) (*Page, error) {
+	return parseFile(path, "")
+}
+
+// ParseFileInSite parses a markdown file as part of a multi-page site
+// rooted at siteRoot. Includes (`include="..."`) may reference files
+// anywhere within siteRoot, not just the page's own directory subtree;
+// paths that would escape siteRoot are still rejected.
+//
+// `path` must be located within siteRoot (otherwise every include —
+// including local ones in the page's own directory — would fail
+// confinement against a root that isn't an ancestor of the page). This
+// is enforced upfront with a clear error rather than producing
+// confusing per-include warnings later.
+//
+// This is the entry point used by `tinkerdown serve` so cross-page
+// references like include="../recipes/counter/_app/counter.go" resolve
+// correctly. Library callers that don't want the wider scope (e.g.
+// rendering a single standalone .md file) should use ParseFile.
+//
+// If siteRoot is empty, behaves identically to ParseFile (no
+// path-under-root check).
+func ParseFileInSite(path, siteRoot string) (*Page, error) {
+	if siteRoot == "" {
+		return parseFile(path, "")
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("resolve path %q: %w", path, err)
+	}
+	absRoot, err := filepath.Abs(siteRoot)
+	if err != nil {
+		return nil, fmt.Errorf("resolve siteRoot %q: %w", siteRoot, err)
+	}
+	// Symlink-canonicalise both before the prefix check so a
+	// symlinked tempdir (e.g. macOS /tmp → /private/tmp) doesn't
+	// false-positive as outside-the-root. Same trick include.Resolve
+	// uses for include candidates.
+	if r, err := filepath.EvalSymlinks(absPath); err == nil {
+		absPath = r
+	}
+	if r, err := filepath.EvalSymlinks(absRoot); err == nil {
+		absRoot = r
+	}
+	rel, err := filepath.Rel(absRoot, absPath)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return nil, fmt.Errorf("path %q is not under siteRoot %q", path, siteRoot)
+	}
+	// Threading absRoot (not raw siteRoot) so relative inputs like
+	// "./site" reach include.Resolve already canonicalised.
+	return parseFile(absPath, absRoot)
+}
+
+func parseFile(path, siteRoot string) (*Page, error) {
 	// Read file
 	content, err := os.ReadFile(path)
 	if err != nil {
@@ -63,9 +123,7 @@ func ParseFile(path string) (*Page, error) {
 
 	// Pre-process: substitute `include="..." lines="..."` fence bodies
 	// with the resolved file slice, so goldmark renders a regular code
-	// block with the included content. v1 confines includes to the
-	// markdown file's parent directory tree — sibling layouts (a
-	// shared snippet folder up the tree) are an additive feature.
+	// block with the included content.
 	//
 	// Pull `source_repo` + `source_path` from the page's frontmatter
 	// (lightweight pre-parse — same trick auto-tables uses) so each
@@ -100,14 +158,13 @@ func ParseFile(path string) (*Page, error) {
 	}
 	var includedFiles []string
 	var includeWarnings []string
-	// baseDir == root is intentional in v1: includes are confined to the
-	// markdown file's own directory tree, not the broader site root. This
-	// keeps each page self-contained — moving a page also moves anything
-	// it cites — and avoids ambiguous "../../some-other-page/snippet"
-	// references whose meaning would change with site layout. Widening
-	// `root` to the discovery root is a future option if a clear use case
-	// emerges, but the call site is the place to track that decision.
-	processedContent, includedFiles, includeWarnings = include.PreprocessWithLinks(processedContent, includeBaseDir, includeBaseDir, linkOpts)
+	// Empty siteRoot keeps the v1 page-root confinement; non-empty widens
+	// to the whole site without removing the boundary.
+	includeRoot := includeBaseDir
+	if siteRoot != "" {
+		includeRoot = siteRoot
+	}
+	processedContent, includedFiles, includeWarnings = include.PreprocessWithLinks(processedContent, includeBaseDir, includeRoot, linkOpts)
 	for _, w := range includeWarnings {
 		fmt.Fprintf(os.Stderr, "warning: %s\n", w)
 	}

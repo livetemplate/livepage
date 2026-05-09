@@ -3,6 +3,7 @@ package tinkerdown
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -282,5 +283,198 @@ steps: 5
 				t.Errorf("StepCount = %d, want %d", page.Config.StepCount, tt.wantSteps)
 			}
 		})
+	}
+}
+
+func TestParseFileInSite_PageRootConfinementByDefault(t *testing.T) {
+	// ParseFile (no siteRoot) preserves the v1 behavior: includes are
+	// confined to the markdown's own directory subtree. A `../` include
+	// pointing at a sibling page's _app/ is rejected.
+	siteDir := t.TempDir()
+	pageA := filepath.Join(siteDir, "pageA")
+	pageB := filepath.Join(siteDir, "pageB", "_app")
+	if err := os.MkdirAll(pageA, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(pageB, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pageB, "snippet.go"), []byte("package x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pageContent := "# Page A\n\n```go include=\"../pageB/_app/snippet.go\"\n```\n"
+	pageMD := filepath.Join(pageA, "index.md")
+	if err := os.WriteFile(pageMD, []byte(pageContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// ParseFile (legacy entry point) — page-root confined, the include
+	// fails (warning logged), block renders empty/passthrough. We assert
+	// the page DID render (heading present) AND the snippet content is
+	// NOT present — without the heading check, an empty StaticHTML
+	// would falsely pass.
+	page, err := ParseFile(pageMD)
+	if err != nil {
+		t.Fatalf("ParseFile error: %v", err)
+	}
+	if !strings.Contains(page.StaticHTML, "Page A") {
+		t.Fatalf("expected page to render its heading, got empty/missing StaticHTML: %q", page.StaticHTML)
+	}
+	if strings.Contains(page.StaticHTML, "package x") {
+		t.Errorf("ParseFile should reject ../ include via page-root confinement; rendered HTML contained 'package x'")
+	}
+}
+
+func TestParseFileInSite_RejectsPathOutsideSiteRoot(t *testing.T) {
+	// ParseFileInSite enforces an explicit precondition: the markdown
+	// path must be located within siteRoot. Otherwise every include —
+	// even a local `include="snippet.go"` in the page's own directory —
+	// would silently fail confinement against a root that isn't the
+	// page's ancestor. Better to fail fast with a clear error than
+	// produce confusing per-include warnings.
+	pageOutside := t.TempDir() // outside any site
+	siteRoot := t.TempDir()    // separate tree
+	pageMD := filepath.Join(pageOutside, "stranded.md")
+	if err := os.WriteFile(pageMD, []byte("# Stranded\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := ParseFileInSite(pageMD, siteRoot)
+	if err == nil {
+		t.Fatalf("expected error when path is not under siteRoot; got nil")
+	}
+	if !strings.Contains(err.Error(), "not under siteRoot") {
+		t.Errorf("expected 'not under siteRoot' in error; got: %v", err)
+	}
+}
+
+func TestParseFileInSite_AllowsSiblingPageIncludes(t *testing.T) {
+	// ParseFileInSite (with siteRoot) widens confinement to the whole
+	// site, so a page can include from a sibling page's _app/ — exactly
+	// what livetemplate/docs needs for /getting-started/your-first-app
+	// to cite /recipes/counter/_app/counter.go.
+	siteDir := t.TempDir()
+	pageA := filepath.Join(siteDir, "pageA")
+	pageB := filepath.Join(siteDir, "pageB", "_app")
+	if err := os.MkdirAll(pageA, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(pageB, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pageB, "snippet.go"), []byte("package x\n// sentinel\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pageMD := filepath.Join(pageA, "index.md")
+	if err := os.WriteFile(pageMD, []byte("# Page A\n\n```go include=\"../pageB/_app/snippet.go\"\n```\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	page, err := ParseFileInSite(pageMD, siteDir)
+	if err != nil {
+		t.Fatalf("ParseFileInSite error: %v", err)
+	}
+	if !strings.Contains(page.StaticHTML, "// sentinel") {
+		t.Errorf("ParseFileInSite should resolve ../ include into siteRoot; rendered HTML missing snippet content. Got:\n%s", page.StaticHTML)
+	}
+}
+
+func TestParseFileInSite_RejectsPathsEscapingSiteRoot(t *testing.T) {
+	// Confinement still applies — a page cannot reach outside siteRoot
+	// even when ParseFileInSite is used. siteRoot is the boundary, not
+	// a removed check.
+	siteDir := t.TempDir()
+	outside := t.TempDir() // separate tree; will not be under siteDir
+	if err := os.WriteFile(filepath.Join(outside, "secret.go"), []byte("package secret\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pageDir := filepath.Join(siteDir, "page")
+	if err := os.MkdirAll(pageDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	pageMD := filepath.Join(pageDir, "index.md")
+	rel, err := filepath.Rel(pageDir, filepath.Join(outside, "secret.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(pageMD, []byte("# X\n\n```go include=\""+rel+"\"\n```\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	page, err := ParseFileInSite(pageMD, siteDir)
+	if err != nil {
+		t.Fatalf("ParseFileInSite error: %v", err)
+	}
+	if strings.Contains(page.StaticHTML, "package secret") {
+		t.Errorf("ParseFileInSite should reject path escaping siteRoot; rendered HTML contained leaked content")
+	}
+}
+
+func TestParseFileInSite_EmptySiteRootBehavesLikeParseFile(t *testing.T) {
+	// Documents the public-API guarantee: passing siteRoot="" is
+	// equivalent to calling ParseFile. Lets callers pass through a
+	// configured-or-empty value without branching.
+	siteDir := t.TempDir()
+	pageA := filepath.Join(siteDir, "pageA")
+	pageB := filepath.Join(siteDir, "pageB", "_app")
+	if err := os.MkdirAll(pageA, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(pageB, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pageB, "snippet.go"), []byte("package x\n// sentinel\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pageMD := filepath.Join(pageA, "index.md")
+	if err := os.WriteFile(pageMD, []byte("# A\n\n```go include=\"../pageB/_app/snippet.go\"\n```\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	page, err := ParseFileInSite(pageMD, "")
+	if err != nil {
+		t.Fatalf("ParseFileInSite(empty siteRoot) error: %v", err)
+	}
+	if strings.Contains(page.StaticHTML, "// sentinel") {
+		t.Errorf("ParseFileInSite with empty siteRoot should fall back to page-root confinement; cross-page include leaked through")
+	}
+}
+
+func TestParseFileInSite_AcceptsRelativeSiteRoot(t *testing.T) {
+	// A relative siteRoot like "./site" must work the same as the
+	// equivalent absolute path. ParseFileInSite canonicalises siteRoot
+	// before threading it to the include resolver — otherwise a relative
+	// root would pass the precondition check (which uses an absolute
+	// copy internally) but fail or misbehave during per-include
+	// resolution where include.Resolve compares paths.
+	siteDir := t.TempDir()
+	pageA := filepath.Join(siteDir, "pageA")
+	pageB := filepath.Join(siteDir, "pageB", "_app")
+	if err := os.MkdirAll(pageA, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(pageB, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pageB, "snippet.go"), []byte("package x\n// sentinel\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pageMD := filepath.Join(pageA, "index.md")
+	if err := os.WriteFile(pageMD, []byte("# A\n\n```go include=\"../pageB/_app/snippet.go\"\n```\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Switch into siteDir's parent so we can pass a relative siteRoot.
+	// t.Chdir restores the working dir automatically and signals to Go's
+	// test runner that this test isn't safe to t.Parallel().
+	t.Chdir(filepath.Dir(siteDir))
+	relRoot := "./" + filepath.Base(siteDir)
+
+	page, err := ParseFileInSite(pageMD, relRoot)
+	if err != nil {
+		t.Fatalf("ParseFileInSite(relative siteRoot) error: %v", err)
+	}
+	if !strings.Contains(page.StaticHTML, "// sentinel") {
+		t.Errorf("relative siteRoot should resolve to abs path; rendered HTML missing snippet content")
 	}
 }
