@@ -3,17 +3,24 @@
  * For on-page section navigation nested under current page in sidebar
  */
 
-/* Nested sub-navigation list. The explicit display rules on the <ul>
- * and <li> are necessary because this list lives inside a <nav> in the
- * sidebar, and PicoCSS's `nav ul { display: flex }` /
- * `nav li { display: inline-block }` defaults would otherwise lay the
- * TOC entries out horizontally — packed across the sidebar width
- * instead of stacked under the active page. The outer .nav-pages
- * override (in the docs-site inline CSS) catches the parent <ul> but
- * not this nested one, so this rule has to assert the same explicit
- * fallback for the inner level. */
+/* Nested sub-navigation list. PicoCSS's `nav ul { display: flex }` /
+ * `nav li { display: inline-block }` would otherwise lay TOC entries
+ * out horizontally across the sidebar. A plain `.page-toc-list {
+ * display: block }` is sufficient to win the cascade — class
+ * specificity (0,1,0) beats the type selector (0,0,2) — but esbuild's
+ * CSS minifier strips `display: block` from <ul> selectors as a
+ * "redundant default" optimization (block IS the user-agent default
+ * for <ul>; the minifier doesn't see the cascade context). Once the
+ * override is gone, PicoCSS's `nav ul` rule is the only `display`
+ * declaration left, and the items flow horizontally.
+ *
+ * PR #254 added plain `display: block`; it was silently dropped from
+ * the bundled asset on every release build, causing the bug to keep
+ * regressing. `!important` survives the minifier — that's the actual
+ * mechanism here, not specificity. Same logic applies to
+ * .page-toc-item below. */
 .page-toc-list {
-  display: block;
+  display: block !important;
   list-style: none;
   margin: 0.25rem 0 0.5rem 0;
   padding: 0;
@@ -27,7 +34,8 @@
 }
 
 .page-toc-item {
-  display: list-item;
+  /* See .page-toc-list above for why !important is required. */
+  display: list-item !important;
   position: relative;
 }
 
@@ -85,6 +93,7 @@
 /* Responsive adjustments */
 @media (max-width: 768px) {
   .page-toc-list {
-    display: none; /* Hide on mobile - takes too much space */
+    /* !important matches the desktop rule's hammer so this wins on mobile. */
+    display: none !important;
   }
 }
