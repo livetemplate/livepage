@@ -62,31 +62,37 @@ func ParseFile(path string) (*Page, error) {
 // If siteRoot is empty, behaves identically to ParseFile (no
 // path-under-root check).
 func ParseFileInSite(path, siteRoot string) (*Page, error) {
-	if siteRoot != "" {
-		absPath, err := filepath.Abs(path)
-		if err != nil {
-			return nil, fmt.Errorf("resolve path %q: %w", path, err)
-		}
-		absRoot, err := filepath.Abs(siteRoot)
-		if err != nil {
-			return nil, fmt.Errorf("resolve siteRoot %q: %w", siteRoot, err)
-		}
-		// Symlink-canonicalise both before the prefix check so a
-		// symlinked tempdir (e.g. macOS /tmp → /private/tmp) doesn't
-		// false-positive as outside-the-root. Same trick include.Resolve
-		// uses for include candidates.
-		if r, err := filepath.EvalSymlinks(absPath); err == nil {
-			absPath = r
-		}
-		if r, err := filepath.EvalSymlinks(absRoot); err == nil {
-			absRoot = r
-		}
-		rel, err := filepath.Rel(absRoot, absPath)
-		if err != nil || strings.HasPrefix(rel, "..") {
-			return nil, fmt.Errorf("path %q is not under siteRoot %q", path, siteRoot)
-		}
+	if siteRoot == "" {
+		return parseFile(path, "")
 	}
-	return parseFile(path, siteRoot)
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("resolve path %q: %w", path, err)
+	}
+	absRoot, err := filepath.Abs(siteRoot)
+	if err != nil {
+		return nil, fmt.Errorf("resolve siteRoot %q: %w", siteRoot, err)
+	}
+	// Symlink-canonicalise both before the prefix check so a
+	// symlinked tempdir (e.g. macOS /tmp → /private/tmp) doesn't
+	// false-positive as outside-the-root. Same trick include.Resolve
+	// uses for include candidates.
+	if r, err := filepath.EvalSymlinks(absPath); err == nil {
+		absPath = r
+	}
+	if r, err := filepath.EvalSymlinks(absRoot); err == nil {
+		absRoot = r
+	}
+	rel, err := filepath.Rel(absRoot, absPath)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return nil, fmt.Errorf("path %q is not under siteRoot %q", path, siteRoot)
+	}
+	// Thread the resolved absolute root (not the caller's raw value) so a
+	// relative siteRoot like "./site" reaches include.Resolve already
+	// canonicalised — otherwise a relative root could pass the precondition
+	// check above (which uses absRoot internally) but misbehave during
+	// per-include resolution.
+	return parseFile(path, absRoot)
 }
 
 func parseFile(path, siteRoot string) (*Page, error) {

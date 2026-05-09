@@ -439,3 +439,47 @@ func TestParseFileInSite_EmptySiteRootBehavesLikeParseFile(t *testing.T) {
 		t.Errorf("ParseFileInSite with empty siteRoot should fall back to page-root confinement; cross-page include leaked through")
 	}
 }
+
+func TestParseFileInSite_AcceptsRelativeSiteRoot(t *testing.T) {
+	// A relative siteRoot like "./site" must work the same as the
+	// equivalent absolute path. ParseFileInSite canonicalises siteRoot
+	// before threading it to the include resolver — otherwise a relative
+	// root would pass the precondition check (which uses an absolute
+	// copy internally) but fail or misbehave during per-include
+	// resolution where include.Resolve compares paths.
+	siteDir := t.TempDir()
+	pageA := filepath.Join(siteDir, "pageA")
+	pageB := filepath.Join(siteDir, "pageB", "_app")
+	if err := os.MkdirAll(pageA, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(pageB, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pageB, "snippet.go"), []byte("package x\n// sentinel\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pageMD := filepath.Join(pageA, "index.md")
+	if err := os.WriteFile(pageMD, []byte("# A\n\n```go include=\"../pageB/_app/snippet.go\"\n```\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Switch into siteDir's parent so we can pass a relative siteRoot.
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	if err := os.Chdir(filepath.Dir(siteDir)); err != nil {
+		t.Fatal(err)
+	}
+	relRoot := "./" + filepath.Base(siteDir)
+
+	page, err := ParseFileInSite(pageMD, relRoot)
+	if err != nil {
+		t.Fatalf("ParseFileInSite(relative siteRoot) error: %v", err)
+	}
+	if !strings.Contains(page.StaticHTML, "// sentinel") {
+		t.Errorf("relative siteRoot should resolve to abs path; rendered HTML missing snippet content")
+	}
+}
