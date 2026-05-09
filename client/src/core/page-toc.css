@@ -3,17 +3,24 @@
  * For on-page section navigation nested under current page in sidebar
  */
 
-/* Nested sub-navigation list. The explicit display rules on the <ul>
- * and <li> are necessary because this list lives inside a <nav> in the
- * sidebar, and PicoCSS's `nav ul { display: flex }` /
- * `nav li { display: inline-block }` defaults would otherwise lay the
- * TOC entries out horizontally — packed across the sidebar width
- * instead of stacked under the active page. The outer .nav-pages
- * override (in the docs-site inline CSS) catches the parent <ul> but
- * not this nested one, so this rule has to assert the same explicit
- * fallback for the inner level. */
+/* Nested sub-navigation list. The `!important` on display is load-
+ * bearing for two reasons stacked on top of each other:
+ *
+ * 1. PicoCSS's cascade — `nav ul { display: flex }` and
+ *    `nav li { display: inline-block }` win on selector specificity
+ *    against a plain `.page-toc-list { display: block }`, so without
+ *    an override the TOC entries pack horizontally across the sidebar.
+ * 2. esbuild's CSS minifier strips `display: block` from <ul>
+ *    selectors as "redundant default" — silently undoing the cascade
+ *    fix on every release build. PR #254 originally added plain
+ *    `display: block`; the bundled asset shipped without it because
+ *    of (2), causing the bug to keep regressing.
+ *
+ * `!important` is the minimum hammer that survives both cases:
+ * specificity-trumps-cascade AND minifier-doesn't-touch. Same logic
+ * applies to .page-toc-item below. */
 .page-toc-list {
-  display: block;
+  display: block !important;
   list-style: none;
   margin: 0.25rem 0 0.5rem 0;
   padding: 0;
@@ -27,7 +34,8 @@
 }
 
 .page-toc-item {
-  display: list-item;
+  /* See .page-toc-list above for why !important is required. */
+  display: list-item !important;
   position: relative;
 }
 
@@ -85,6 +93,7 @@
 /* Responsive adjustments */
 @media (max-width: 768px) {
   .page-toc-list {
-    display: none; /* Hide on mobile - takes too much space */
+    /* !important matches the desktop rule's hammer so this win on mobile. */
+    display: none !important;
   }
 }
