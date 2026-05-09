@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -459,4 +460,45 @@ func TestResolveCmdPath(t *testing.T) {
 			assert.Equal(t, tc.want, got)
 		})
 	}
+}
+
+// Regression: a relative siteDir combined with cmd.Dir = siteDir caused execve
+// to double-nest the prefix (siteDir/siteDir/script.sh) after the child chdir.
+// resolveCmdPath must return an absolute path so cmd.Dir's chdir doesn't
+// re-prefix the path inside the child.
+func TestResolveCmdPath_RelativeSiteDir_ReturnsAbsolute(t *testing.T) {
+	got := resolveCmdPath("./script.sh", "examples/test")
+	assert.True(t, filepath.IsAbs(got), "expected absolute path, got: %s", got)
+	assert.True(t, strings.HasSuffix(got, filepath.Join("examples", "test", "script.sh")),
+		"expected suffix examples/test/script.sh, got: %s", got)
+}
+
+// Regression: end-to-end fetch with a relative siteDir must succeed. Before
+// the fix, this failed with `fork/exec examples/.../script.sh: no such file
+// or directory` because the resolved cmd.Path was relative and the child
+// chdir'd into siteDir before execve, double-nesting the prefix.
+func TestExecSourceFetch_RelativeSiteDir_DoesNotDoubleNest(t *testing.T) {
+	config.SetAllowExec(true)
+	defer config.SetAllowExec(false)
+
+	parent := t.TempDir()
+	siteDir := "site"
+	siteDirAbs := filepath.Join(parent, siteDir)
+	require.NoError(t, os.Mkdir(siteDirAbs, 0755))
+
+	scriptPath := filepath.Join(siteDirAbs, "data.sh")
+	scriptContent := `#!/usr/bin/env bash
+echo '[{"id":1,"name":"Alice"}]'
+`
+	require.NoError(t, os.WriteFile(scriptPath, []byte(scriptContent), 0755))
+
+	t.Chdir(parent)
+
+	src, err := NewExecSource("test", "./data.sh", siteDir)
+	require.NoError(t, err)
+
+	rows, err := src.Fetch(context.Background())
+	require.NoError(t, err, "relative siteDir + cmd.Dir = siteDir must not double-nest")
+	require.Len(t, rows, 1)
+	assert.Equal(t, float64(1), rows[0]["id"])
 }
