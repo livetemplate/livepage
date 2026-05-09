@@ -310,13 +310,41 @@ func TestParseFileInSite_PageRootConfinementByDefault(t *testing.T) {
 
 	// ParseFile (legacy entry point) — page-root confined, the include
 	// fails (warning logged), block renders empty/passthrough. We assert
-	// the snippet content is NOT present in the rendered HTML.
+	// the page DID render (heading present) AND the snippet content is
+	// NOT present — without the heading check, an empty StaticHTML
+	// would falsely pass.
 	page, err := ParseFile(pageMD)
 	if err != nil {
 		t.Fatalf("ParseFile error: %v", err)
 	}
-	if got := page.StaticHTML; got != "" && strings.Contains(got, "package x") {
+	if !strings.Contains(page.StaticHTML, "Page A") {
+		t.Fatalf("expected page to render its heading, got empty/missing StaticHTML: %q", page.StaticHTML)
+	}
+	if strings.Contains(page.StaticHTML, "package x") {
 		t.Errorf("ParseFile should reject ../ include via page-root confinement; rendered HTML contained 'package x'")
+	}
+}
+
+func TestParseFileInSite_RejectsPathOutsideSiteRoot(t *testing.T) {
+	// ParseFileInSite enforces an explicit precondition: the markdown
+	// path must be located within siteRoot. Otherwise every include —
+	// even a local `include="snippet.go"` in the page's own directory —
+	// would silently fail confinement against a root that isn't the
+	// page's ancestor. Better to fail fast with a clear error than
+	// produce confusing per-include warnings.
+	pageOutside := t.TempDir() // outside any site
+	siteRoot := t.TempDir()    // separate tree
+	pageMD := filepath.Join(pageOutside, "stranded.md")
+	if err := os.WriteFile(pageMD, []byte("# Stranded\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := ParseFileInSite(pageMD, siteRoot)
+	if err == nil {
+		t.Fatalf("expected error when path is not under siteRoot; got nil")
+	}
+	if !strings.Contains(err.Error(), "not under siteRoot") {
+		t.Errorf("expected 'not under siteRoot' in error; got: %v", err)
 	}
 }
 

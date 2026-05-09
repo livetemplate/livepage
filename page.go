@@ -48,13 +48,44 @@ func ParseFile(path string) (*Page, error) {
 // anywhere within siteRoot, not just the page's own directory subtree;
 // paths that would escape siteRoot are still rejected.
 //
+// `path` must be located within siteRoot (otherwise every include —
+// including local ones in the page's own directory — would fail
+// confinement against a root that isn't an ancestor of the page). This
+// is enforced upfront with a clear error rather than producing
+// confusing per-include warnings later.
+//
 // This is the entry point used by `tinkerdown serve` so cross-page
 // references like include="../recipes/counter/_app/counter.go" resolve
 // correctly. Library callers that don't want the wider scope (e.g.
 // rendering a single standalone .md file) should use ParseFile.
 //
-// If siteRoot is empty, behaves identically to ParseFile.
+// If siteRoot is empty, behaves identically to ParseFile (no
+// path-under-root check).
 func ParseFileInSite(path, siteRoot string) (*Page, error) {
+	if siteRoot != "" {
+		absPath, err := filepath.Abs(path)
+		if err != nil {
+			return nil, fmt.Errorf("resolve path %q: %w", path, err)
+		}
+		absRoot, err := filepath.Abs(siteRoot)
+		if err != nil {
+			return nil, fmt.Errorf("resolve siteRoot %q: %w", siteRoot, err)
+		}
+		// Symlink-canonicalise both before the prefix check so a
+		// symlinked tempdir (e.g. macOS /tmp → /private/tmp) doesn't
+		// false-positive as outside-the-root. Same trick include.Resolve
+		// uses for include candidates.
+		if r, err := filepath.EvalSymlinks(absPath); err == nil {
+			absPath = r
+		}
+		if r, err := filepath.EvalSymlinks(absRoot); err == nil {
+			absRoot = r
+		}
+		rel, err := filepath.Rel(absRoot, absPath)
+		if err != nil || strings.HasPrefix(rel, "..") {
+			return nil, fmt.Errorf("path %q is not under siteRoot %q", path, siteRoot)
+		}
+	}
 	return parseFile(path, siteRoot)
 }
 

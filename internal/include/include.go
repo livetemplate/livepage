@@ -440,7 +440,7 @@ func Resolve(baseDir, root, includePath string) (string, error) {
 
 	rel, err := filepath.Rel(resolvedRoot, resolvedCandidate)
 	if err != nil || strings.HasPrefix(rel, "..") {
-		return "", fmt.Errorf("include %q escapes the page root", includePath)
+		return "", fmt.Errorf("include %q escapes the include root", includePath)
 	}
 	return resolvedCandidate, nil
 }
