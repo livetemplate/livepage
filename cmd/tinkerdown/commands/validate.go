@@ -189,9 +189,21 @@ func validateMermaidDiagrams(filePath string) ([]string, error) {
 
 	// Create a simple HTML page with Mermaid
 	for i, match := range matches {
-		mermaidCode := match[1]
+		hasError, err := validateOneMermaidDiagram(ctx, i, match[1])
+		if err != nil {
+			errors = append(errors, fmt.Sprintf("Diagram %d: Failed to validate (%v)", i+1, err))
+		} else if hasError {
+			errors = append(errors, fmt.Sprintf("Diagram %d: Mermaid syntax error detected", i+1))
+		}
+	}
 
-		html := fmt.Sprintf(`
+	return errors, nil
+}
+
+// validateOneMermaidDiagram validates a single mermaid diagram using a temp file that is
+// cleaned up when this function returns (defer is correct inside a function, not a loop).
+func validateOneMermaidDiagram(ctx context.Context, i int, mermaidCode string) (bool, error) {
+	html := fmt.Sprintf(`
 <!DOCTYPE html>
 <html>
 <head>
@@ -208,30 +220,20 @@ func validateMermaidDiagrams(filePath string) ([]string, error) {
 </html>
 `, mermaidCode)
 
-		// Write temporary HTML file
-		tmpFile := fmt.Sprintf("/tmp/mermaid-validate-%d.html", i)
-		if err := os.WriteFile(tmpFile, []byte(html), 0644); err != nil {
-			return nil, fmt.Errorf("failed to write temp file: %w", err)
-		}
-		defer os.Remove(tmpFile)
-
-		// Check for errors
-		var hasError bool
-		err = chromedp.Run(ctx,
-			chromedp.Navigate("file://"+tmpFile),
-			chromedp.Sleep(2*time.Second),
-			chromedp.Evaluate(`
-				document.body.textContent.includes('Syntax error') ||
-				document.body.textContent.includes('Parse error')
-			`, &hasError),
-		)
-
-		if err != nil {
-			errors = append(errors, fmt.Sprintf("Diagram %d: Failed to validate (%v)", i+1, err))
-		} else if hasError {
-			errors = append(errors, fmt.Sprintf("Diagram %d: Mermaid syntax error detected", i+1))
-		}
+	tmpFile := fmt.Sprintf("/tmp/mermaid-validate-%d.html", i)
+	if err := os.WriteFile(tmpFile, []byte(html), 0644); err != nil {
+		return false, fmt.Errorf("failed to write temp file: %w", err)
 	}
+	defer os.Remove(tmpFile)
 
-	return errors, nil
+	var hasError bool
+	err := chromedp.Run(ctx,
+		chromedp.Navigate("file://"+tmpFile),
+		chromedp.Sleep(2*time.Second),
+		chromedp.Evaluate(`
+			document.body.textContent.includes('Syntax error') ||
+			document.body.textContent.includes('Parse error')
+		`, &hasError),
+	)
+	return hasError, err
 }
