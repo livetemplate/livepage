@@ -465,14 +465,9 @@ func TestParseFileInSite_AcceptsRelativeSiteRoot(t *testing.T) {
 	}
 
 	// Switch into siteDir's parent so we can pass a relative siteRoot.
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(cwd) })
-	if err := os.Chdir(filepath.Dir(siteDir)); err != nil {
-		t.Fatal(err)
-	}
+	// t.Chdir restores the working dir automatically and signals to Go's
+	// test runner that this test isn't safe to t.Parallel().
+	t.Chdir(filepath.Dir(siteDir))
 	relRoot := "./" + filepath.Base(siteDir)
 
 	page, err := ParseFileInSite(pageMD, relRoot)
