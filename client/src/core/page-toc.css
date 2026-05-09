@@ -93,7 +93,7 @@
 /* Responsive adjustments */
 @media (max-width: 768px) {
   .page-toc-list {
-    /* !important matches the desktop rule's hammer so this win on mobile. */
+    /* !important matches the desktop rule's hammer so this wins on mobile. */
     display: none !important;
   }
 }
