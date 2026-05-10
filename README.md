@@ -74,7 +74,7 @@ The same primitive scales to other artifacts:
 | Artifact | What it looks like |
 |---|---|
 | **Dashboard / status report** | Frontmatter pulls from PostgreSQL or REST; tables, computed totals, and Mermaid diagrams render inline. ([examples/markdown-data-dashboard](examples/markdown-data-dashboard)) |
-| **Literate doc / runnable explainer** | Prose alongside live widgets, real source files cited by line range, and your deployed app embedded inline — the doc *is* the working code. See [Literate Authoring](docs/guides/literate-docs.md). ([examples/literate-counter-include](examples/literate-counter-include)) |
+| **Literate doc / runnable explainer** | Prose alongside live widgets, real source cited by line range, and your deployed app embedded inline — the doc *is* the working code. ([Literate Authoring guide](docs/guides/literate-docs.md), [examples/literate-counter-include](examples/literate-counter-include)) |
 | **Triage / standup board** | Action buttons mutate a shared SQLite or PostgreSQL source; every teammate's tab stays in sync over WebSocket. ([examples/standup-bot](examples/standup-bot), [examples/team-tasks](examples/team-tasks)) |
 | **Throwaway admin panel** | Point at a table you already have. Edit/delete/add for free. ([examples/auto-table-sqlite](examples/auto-table-sqlite)) |
 
