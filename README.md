@@ -1,25 +1,30 @@
 # Tinkerdown
 
-**This is ALPHA software under active development. No releases made yet**
+> **v0.2.x — early but tagged. Expect breaking changes between minors.**
 
-**Build data-driven apps with markdown**
+**Markdown is great for writing. HTML is great for showing. Tinkerdown lets you write the first and serve the second — from one file.**
 
 <p align="center">
   <img src="docs/assets/demo.svg" alt="Animated demo showing a markdown file with YAML frontmatter and lvt attributes being served by Tinkerdown into a live interactive task manager with table, status badges, and action buttons" width="960">
 </p>
 
-Tinkerdown is a CLI tool for creating interactive, data-driven applications using markdown files. Connect to databases, APIs, and files with zero boilerplate. Built on [LiveTemplate](https://github.com/livetemplate/livetemplate).
+Tinkerdown turns a single markdown file — frontmatter for data sources, prose for content, declarative attributes for interactivity — into a live, themed, URL-routable web app. Built on [LiveTemplate](https://github.com/livetemplate/livetemplate).
 
 ## Why Tinkerdown?
 
-Tinkerdown replaces typical app scaffolding with a single markdown file — data sources in YAML, layout in markdown, interactions via HTML attributes.
-
-- **One file = one app.** Data connections, layout, and interactions all live in one place. No build step, no node_modules, no boilerplate.
-- **AI gets it right.** A single declarative file with no component tree or state management means less surface area for LLMs to misconfigure.
-- **9 data sources out of the box.** SQLite, PostgreSQL, REST APIs, JSON, CSV, shell commands, markdown, WASM, and computed/derived sources. Point at existing infrastructure and get a working UI.
-- **Progressive complexity.** Write standard markdown — task lists become interactive, tables auto-bind to data sources. Need more control? Add HTML attributes. Need full custom layouts? Drop to Go templates. Each step builds on the last without rewriting. See the [Progressive Complexity Guide](docs/guides/progressive-complexity.md).
+- **One file, co-authorable.** The source stays human- and AI-editable markdown. The rich rendered page is a *result*, not the artifact you have to maintain.
+- **Declarative, not freeform.** Interactivity comes from a fixed vocabulary of `lvt-*` attributes — predictable for LLMs, consistent across pages, no generic LLM-output aesthetic.
+- **Live data, not a snapshot.** Bind to SQLite, PostgreSQL, REST, JSON, CSV, shell commands, markdown, WASM, or computed sources. The rendered page reflects current state, not a frozen export.
+- **Real URLs.** Every page is linkable, bookmarkable, deep-linkable. No in-memory SPA state hiding behind a single `/`.
 - **Git-native and self-hosted.** Plain text in a repo. Version history, search, collaboration, offline access, no subscriptions.
-- **Made for disposable software.** The admin panel for this sprint. The tracker for that hiring round. Software you'd never scaffold a React project for, but that's useful for days or weeks.
+- **Progressive complexity.** Standard markdown → declarative attributes → Go templates. Each step builds on the last without rewriting. See the [Progressive Complexity Guide](docs/guides/progressive-complexity.md).
+- **Disposable-software friendly.** The admin panel for this sprint. The tracker for that hiring round. The dashboard for the incident retro. Things you'd never scaffold a React app for, but that earn their keep for days or weeks.
+
+## Why not just ask Claude for an HTML file?
+
+That works — until you want to edit it. Generated HTML is opaque to hand-editing; the next change means another full re-prompt instead of a five-second text edit. And the data is whatever was true when the file was generated.
+
+Tinkerdown keeps the source you edit (markdown + frontmatter + a small attribute vocabulary) separate from the page you ship (themed HTML, live data, WebSocket reactivity). You — or your agent — change the markdown. Everything else updates.
 
 ## Quick Start
 
@@ -64,12 +69,39 @@ Run `tinkerdown serve` and get a fully interactive app with database persistence
   <img src="docs/assets/auto-table-demo.png" alt="Screenshot showing an auto-generated expense tracker with data table, edit/delete buttons per row, and an add form — all from a markdown table and YAML source definition" width="720">
 </p>
 
-**Need more control?** Use HTML attributes for explicit binding:
+The same primitive scales to other artifacts:
 
-```html
-<table lvt-source="tasks" lvt-columns="title,status" lvt-datatable lvt-actions="Complete,Delete">
-</table>
-```
+| Artifact | What it looks like |
+|---|---|
+| **Dashboard / status report** | Frontmatter pulls from PostgreSQL or REST; tables, computed totals, and Mermaid diagrams render inline. ([examples/markdown-data-dashboard](examples/markdown-data-dashboard)) |
+| **Interactive explainer** | Prose + live `lvt` code blocks + show-source listings, so the doc *is* the working demo. ([examples/literate-counter](examples/literate-counter)) |
+| **Triage / standup board** | Action buttons mutate a shared SQLite or PostgreSQL source; every teammate's tab stays in sync over WebSocket. ([examples/standup-bot](examples/standup-bot), [examples/team-tasks](examples/team-tasks)) |
+| **Throwaway admin panel** | Point at a table you already have. Edit/delete/add for free. ([examples/auto-table-sqlite](examples/auto-table-sqlite)) |
+
+**Need more control?** Tinkerdown has five complexity tiers. Each builds on the previous — nothing rewrites; start at the lowest tier that works:
+
+- **Tier 0 — pure markdown.** Standard checklists become interactive; toggles and adds persist to the file.
+  ```markdown
+  - [ ] Buy milk
+  - [x] Email Sarah
+  ```
+- **Tier 1 — markdown + YAML sources.** Frontmatter declares data; markdown tables auto-bind. *(Shown above.)*
+- **Tier 2 — `lvt-*` attributes.** Explicit HTML binding when auto-rendering isn't enough — custom forms, confirmation dialogs, datatables, cross-source selects.
+  ```html
+  <table lvt-source="tasks" lvt-columns="title,status" lvt-datatable lvt-actions="Complete,Delete">
+  </table>
+  ```
+- **Tier 3 — Go templates.** Conditionals, loops, and custom layouts inside ` ```lvt ` blocks; full access to `.Data`, `.Error`, `.Errors`.
+  ````markdown
+  ```lvt
+  {{range .Data}}
+  <div class="card"><h3>{{.Title}}</h3></div>
+  {{end}}
+  ```
+  ````
+- **Tier 4 — WASM sources.** Write a custom data source in TinyGo when built-ins don't fit; the module exports a `fetch` function and runs server-side.
+
+See the [Progressive Complexity Guide](docs/guides/progressive-complexity.md) for full examples and the escape hatches between tiers.
 
 ## Key Features
 
@@ -182,7 +214,9 @@ See [Configuration Reference](docs/reference/config.md) for when to use each app
 
 ## AI-Assisted Development
 
-Tinkerdown works great with AI assistants. Describe what you want:
+Tinkerdown's surface area is small on purpose: a fixed `lvt-*` attribute vocabulary, frontmatter with a small set of well-defined fields, and a single file that contains the whole app. That gives an LLM very few ways to be wrong.
+
+Describe what you want, and the agent drafts the markdown:
 
 ```
 Create a task manager with SQLite storage,
@@ -190,7 +224,9 @@ a table showing tasks with title/status/due date,
 a form to add tasks, and delete buttons on each row.
 ```
 
-See [AI Generation Guide](docs/guides/ai-generation.md) for tips on using Claude Code and other AI tools.
+The output is a `.md` file you can read, diff, and hand-edit. No component tree, no build config, no `node_modules` to reason about.
+
+See [AI Generation Guide](docs/guides/ai-generation.md) for tips on Claude Code, Cursor, and other agents.
 
 ## Documentation
 
@@ -232,3 +268,10 @@ MIT
 ## Contributing
 
 Contributions welcome! See [ROADMAP.md](ROADMAP.md) for planned features and current priorities.
+
+## Acknowledgements
+
+The framing in this README was sharpened by Thariq Shihipar's [*The Unreasonable Effectiveness of HTML*][source] and the [Hacker News discussion][hn] around it. Tinkerdown is our attempt at a structured answer to the markdown-vs-HTML tension that piece mapped out.
+
+[source]: https://thariqs.github.io/html-effectiveness/
+[hn]: https://news.ycombinator.com/item?id=48071940
