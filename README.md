@@ -270,7 +270,7 @@ Contributions welcome! See [ROADMAP.md](ROADMAP.md) for planned features and cur
 
 ## Acknowledgements
 
-The framing in this README was sharpened by Simon Willison's [post on the unreasonable effectiveness of HTML][simonw] and the [Hacker News discussion][hn] around it. Tinkerdown is our attempt at a structured answer to the markdown-vs-HTML tension that thread mapped out.
+The framing in this README was sharpened by Thariq Shihipar's [*The Unreasonable Effectiveness of HTML*][source] and the [Hacker News discussion][hn] around it. Tinkerdown is our attempt at a structured answer to the markdown-vs-HTML tension that piece mapped out.
 
-[simonw]: https://simonwillison.net/2026/May/8/unreasonable-effectiveness-of-html/
+[source]: https://thariqs.github.io/html-effectiveness/
 [hn]: https://news.ycombinator.com/item?id=48071940
