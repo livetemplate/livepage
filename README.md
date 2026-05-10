@@ -74,9 +74,26 @@ The same primitive scales to other artifacts:
 | Artifact | What it looks like |
 |---|---|
 | **Dashboard / status report** | Frontmatter pulls from PostgreSQL or REST; tables, computed totals, and Mermaid diagrams render inline. ([examples/markdown-data-dashboard](examples/markdown-data-dashboard)) |
-| **Interactive explainer** | Prose + live `lvt` code blocks + show-source listings, so the doc *is* the working demo. ([examples/literate-counter](examples/literate-counter)) |
+| **Literate doc / runnable explainer** | Prose alongside live widgets, real source cited by line range, and your deployed app embedded inline — the doc *is* the working code. ([Literate Authoring guide](docs/guides/literate-docs.md), [examples/literate-counter-include](examples/literate-counter-include)) |
 | **Triage / standup board** | Action buttons mutate a shared SQLite or PostgreSQL source; every teammate's tab stays in sync over WebSocket. ([examples/standup-bot](examples/standup-bot), [examples/team-tasks](examples/team-tasks)) |
 | **Throwaway admin panel** | Point at a table you already have. Edit/delete/add for free. ([examples/auto-table-sqlite](examples/auto-table-sqlite)) |
+
+**Literate authoring.** When the page itself is a tutorial, the same markdown can show real source *and* run it. The snippet below shows two of the three primitives: `include=` cites line ranges from your `.go` / `.tmpl` source files, and `embed-lvt` drops the running app inline. The third — `show-source` — pairs an inline ` ```lvt ` block with its highlighted template. No copy-pasted snippets to drift out of date.
+
+`````markdown
+```go include="./_app/counter.go" lines="5-8"
+```
+
+```go include="./_app/counter.go" lines="13-35" highlight="20"
+```
+
+```embed-lvt path="/apps/counter/" upstream="http://127.0.0.1:9090"
+```
+`````
+
+A literate doc in the wild: **[livetemplate.fly.dev/recipes/counter](https://livetemplate.fly.dev/recipes/counter/)** — prose, source listings, and a live counter on one page, all from a single markdown file.
+
+See the [Literate Authoring guide](docs/guides/literate-docs.md) for the full primitive set (line ranges, named regions, line highlights, source-link footers) and [examples/literate-counter-include](examples/literate-counter-include) for the canonical pattern.
 
 **Need more control?** Tinkerdown has five complexity tiers. Each builds on the previous — nothing rewrites; start at the lowest tier that works:
 
@@ -241,6 +258,7 @@ See [AI Generation Guide](docs/guides/ai-generation.md) for tips on Claude Code,
 - [Auto-Rendering](docs/guides/auto-rendering.md)
 - [Go Templates](docs/guides/go-templates.md)
 - [AI Generation](docs/guides/ai-generation.md)
+- [Literate Authoring](docs/guides/literate-docs.md)
 
 **Reference:**
 - [CLI Commands](docs/reference/cli.md)
