@@ -77,12 +77,30 @@ The same primitive scales to other artifacts:
 | **Triage / standup board** | Action buttons mutate a shared SQLite or Postgres source; every teammate's tab stays in sync over websockets. ([examples/standup-bot](examples/standup-bot), [examples/team-tasks](examples/team-tasks)) |
 | **Throwaway admin panel** | Point at a table you already have. Edit/delete/add for free. ([examples/auto-table-sqlite](examples/auto-table-sqlite)) |
 
-**Need more control?** Use HTML attributes for explicit binding:
+**Need more control?** Tinkerdown has five complexity tiers. Each builds on the previous — nothing rewrites; start at the lowest tier that works:
 
-```html
-<table lvt-source="tasks" lvt-columns="title,status" lvt-datatable lvt-actions="Complete,Delete">
-</table>
-```
+- **Tier 0 — pure markdown.** Standard checklists become interactive; toggles and adds persist to the file.
+  ```markdown
+  - [ ] Buy milk
+  - [x] Email Sarah
+  ```
+- **Tier 1 — markdown + YAML sources.** Frontmatter declares data; markdown tables auto-bind. *(Shown above.)*
+- **Tier 2 — `lvt-*` attributes.** Explicit HTML binding when auto-rendering isn't enough — custom forms, confirmation dialogs, datatables, cross-source selects.
+  ```html
+  <table lvt-source="tasks" lvt-columns="title,status" lvt-datatable lvt-actions="Complete,Delete">
+  </table>
+  ```
+- **Tier 3 — Go templates.** Conditionals, loops, and custom layouts inside ` ```lvt ` blocks; full access to `.Data`, `.Error`, `.Errors`.
+  ````markdown
+  ```lvt
+  {{range .Data}}
+  <div class="card"><h3>{{.Title}}</h3></div>
+  {{end}}
+  ```
+  ````
+- **Tier 4 — WASM sources.** Write a custom data source in TinyGo when built-ins don't fit; the module exports a `fetch` function and runs server-side.
+
+See the [Progressive Complexity Guide](docs/guides/progressive-complexity.md) for full examples and the escape hatches between tiers.
 
 ## Key Features
 
