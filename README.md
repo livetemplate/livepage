@@ -78,7 +78,7 @@ The same primitive scales to other artifacts:
 | **Triage / standup board** | Action buttons mutate a shared SQLite or PostgreSQL source; every teammate's tab stays in sync over WebSocket. ([examples/standup-bot](examples/standup-bot), [examples/team-tasks](examples/team-tasks)) |
 | **Throwaway admin panel** | Point at a table you already have. Edit/delete/add for free. ([examples/auto-table-sqlite](examples/auto-table-sqlite)) |
 
-**Literate authoring.** When the page itself is a tutorial, the same markdown can show real source *and* run it. Cite line ranges from your deployed `.go` / `.tmpl` files with `include=`, render templates next to their highlighted source with `show-source`, and drop in the running app with `embed-lvt` — no copy-pasted snippets to drift out of date.
+**Literate authoring.** When the page itself is a tutorial, the same markdown can show real source *and* run it. Three primitives compose freely: `include=` cites line ranges from your deployed `.go` / `.tmpl` files, `show-source` pairs an inline ` ```lvt ` block with its highlighted template, and `embed-lvt` drops the running app inline. No copy-pasted snippets to drift out of date.
 
 `````markdown
 ```go include="./_app/counter.go" lines="5-8"
