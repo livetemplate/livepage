@@ -91,6 +91,8 @@ The same primitive scales to other artifacts:
 ```
 `````
 
+A literate doc in the wild: **[livetemplate.fly.dev/recipes/counter](https://livetemplate.fly.dev/recipes/counter/)** — prose, source listings, and a live counter on one page, all from a single markdown file.
+
 See the [Literate Authoring guide](docs/guides/literate-docs.md) for the full primitive set (line ranges, named regions, line highlights, source-link footers) and [examples/literate-counter-include](examples/literate-counter-include) for the canonical pattern.
 
 **Need more control?** Tinkerdown has five complexity tiers. Each builds on the previous — nothing rewrites; start at the lowest tier that works:
