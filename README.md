@@ -13,17 +13,18 @@ Tinkerdown turns a single markdown file — frontmatter for data sources, prose 
 ## Why Tinkerdown?
 
 - **One file, co-authorable.** The source stays human- and AI-editable markdown. The rich rendered page is a *result*, not the artifact you have to maintain.
-- **Declarative, not freeform.** Interactivity comes from a fixed vocabulary of `lvt-*` attributes — predictable for LLMs, consistent across pages, no generic "another Claude page" aesthetic.
-- **Live data, not a snapshot.** Bind to SQLite, Postgres, REST, JSON, CSV, shell commands, markdown, WASM, or computed sources. The rendered page reflects current state, not a frozen export.
+- **Declarative, not freeform.** Interactivity comes from a fixed vocabulary of `lvt-*` attributes — predictable for LLMs, consistent across pages, no generic LLM-output aesthetic.
+- **Live data, not a snapshot.** Bind to SQLite, PostgreSQL, REST, JSON, CSV, shell commands, markdown, WASM, or computed sources. The rendered page reflects current state, not a frozen export.
 - **Real URLs.** Every page is linkable, bookmarkable, deep-linkable. No in-memory SPA state hiding behind a single `/`.
+- **Git-native and self-hosted.** Plain text in a repo. Version history, search, collaboration, offline access, no subscriptions.
 - **Progressive complexity.** Standard markdown → declarative attributes → Go templates. Each step builds on the last without rewriting. See the [Progressive Complexity Guide](docs/guides/progressive-complexity.md).
 - **Disposable-software friendly.** The admin panel for this sprint. The tracker for that hiring round. The dashboard for the incident retro. Things you'd never scaffold a React app for, but that earn their keep for days or weeks.
 
 ## Why not just ask Claude for an HTML file?
 
-That works — until you want to edit it. Generated HTML drifts from the prompt that produced it; the next change is another full re-prompt instead of a five-second text edit. And the data is whatever was true when the file was generated.
+That works — until you want to edit it. Generated HTML is opaque to hand-editing; the next change means another full re-prompt instead of a five-second text edit. And the data is whatever was true when the file was generated.
 
-Tinkerdown keeps the source you edit (markdown + frontmatter + a small attribute vocabulary) separate from the page you ship (themed HTML, live data, websocket reactivity). You — or your agent — change the markdown. Everything else updates.
+Tinkerdown keeps the source you edit (markdown + frontmatter + a small attribute vocabulary) separate from the page you ship (themed HTML, live data, WebSocket reactivity). You — or your agent — change the markdown. Everything else updates.
 
 ## Quick Start
 
@@ -72,9 +73,9 @@ The same primitive scales to other artifacts:
 
 | Artifact | What it looks like |
 |---|---|
-| **Dashboard / status report** | Frontmatter pulls from Postgres or REST; tables, computed totals, and Mermaid diagrams render inline. ([examples/markdown-data-dashboard](examples/markdown-data-dashboard)) |
-| **Interactive explainer** | Prose + live `lvt` widgets + show-source listings, so the doc *is* the working demo. ([examples/literate-counter](examples/literate-counter)) |
-| **Triage / standup board** | Action buttons mutate a shared SQLite or Postgres source; every teammate's tab stays in sync over websockets. ([examples/standup-bot](examples/standup-bot), [examples/team-tasks](examples/team-tasks)) |
+| **Dashboard / status report** | Frontmatter pulls from PostgreSQL or REST; tables, computed totals, and Mermaid diagrams render inline. ([examples/markdown-data-dashboard](examples/markdown-data-dashboard)) |
+| **Interactive explainer** | Prose + live `lvt` code blocks + show-source listings, so the doc *is* the working demo. ([examples/literate-counter](examples/literate-counter)) |
+| **Triage / standup board** | Action buttons mutate a shared SQLite or PostgreSQL source; every teammate's tab stays in sync over WebSocket. ([examples/standup-bot](examples/standup-bot), [examples/team-tasks](examples/team-tasks)) |
 | **Throwaway admin panel** | Point at a table you already have. Edit/delete/add for free. ([examples/auto-table-sqlite](examples/auto-table-sqlite)) |
 
 **Need more control?** Tinkerdown has five complexity tiers. Each builds on the previous — nothing rewrites; start at the lowest tier that works:
@@ -213,9 +214,9 @@ See [Configuration Reference](docs/reference/config.md) for when to use each app
 
 ## AI-Assisted Development
 
-Tinkerdown's surface area is small on purpose: a fixed `lvt-*` attribute vocabulary, frontmatter that's a YAML schema, and a single file that contains the whole app. That gives an LLM very few ways to be wrong.
+Tinkerdown's surface area is small on purpose: a fixed `lvt-*` attribute vocabulary, frontmatter with a small set of well-defined fields, and a single file that contains the whole app. That gives an LLM very few ways to be wrong.
 
-Describe what you want:
+Describe what you want, and the agent drafts the markdown:
 
 ```
 Create a task manager with SQLite storage,
