@@ -8,13 +8,14 @@ require (
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/lib/pq v1.10.9
-	github.com/livetemplate/livetemplate v0.8.16
+	github.com/livetemplate/livetemplate v0.9.0
 	github.com/livetemplate/lvt/components v0.0.0-20260228153051-c00a45caae95
 	github.com/rogpeppe/go-internal v1.14.1
 	github.com/stretchr/testify v1.11.0
 	github.com/tetratelabs/wazero v1.11.0
 	github.com/wailsapp/wails/v2 v2.11.0
 	github.com/yuin/goldmark v1.7.13
+	golang.org/x/net v0.49.0
 	golang.org/x/time v0.14.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.43.0
@@ -70,7 +71,6 @@ require (
 	golang.org/x/crypto v0.47.0 // indirect
 	golang.org/x/exp v0.0.0-20251219203646-944ab1f22d93 // indirect
 	golang.org/x/mod v0.33.0 // indirect
-	golang.org/x/net v0.49.0 // indirect
 	golang.org/x/sys v0.40.0 // indirect
 	golang.org/x/text v0.33.0 // indirect
 	golang.org/x/tools v0.41.0 // indirect

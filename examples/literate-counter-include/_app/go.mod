@@ -1,9 +1,9 @@
 module example.com/literate-counter
 
-go 1.22
+go 1.26.0
 
 require (
-	github.com/livetemplate/livetemplate v0.8.23
+	github.com/livetemplate/livetemplate v0.9.0
 	github.com/livetemplate/lvt v0.1.6
 )
 
