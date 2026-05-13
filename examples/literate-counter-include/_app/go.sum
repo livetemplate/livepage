@@ -86,8 +86,8 @@ github.com/ledongthuc/pdf v0.0.0-20220302134840-0c2507a12d80 h1:6Yzfa6GP0rIo/kUL
 github.com/ledongthuc/pdf v0.0.0-20220302134840-0c2507a12d80/go.mod h1:imJHygn/1yfhB7XSJJKlFZKl/J+dCPAknuiaGOshXAs=
 github.com/leodido/go-urn v1.4.0 h1:WT9HwE9SGECu3lg4d/dIA+jxlljEa1/ffXKmRjqdmIQ=
 github.com/leodido/go-urn v1.4.0/go.mod h1:bvxc+MVxLKB4z00jd1z+Dvzr47oO32F/QSNjSBOlFxI=
-github.com/livetemplate/livetemplate v0.8.23 h1:80/Lwa2iPqKhnJIHvPKWnRObMM2YoRxtAyZ9gE9tN+E=
-github.com/livetemplate/livetemplate v0.8.23/go.mod h1:GMvZKyPUq8LSGfgD3pftKOHa6v+I+RDYyff2mNjeAYs=
+github.com/livetemplate/livetemplate v0.9.0 h1:6vHNNpZLIY4gO08/Gth3vr1F3A3ANwSKTQvfuy1I8js=
+github.com/livetemplate/livetemplate v0.9.0/go.mod h1:GMvZKyPUq8LSGfgD3pftKOHa6v+I+RDYyff2mNjeAYs=
 github.com/livetemplate/lvt v0.1.6 h1:1rDU5hDo+EtZ0mT+868wYD9czF2EHEgdacS4kpIUPQ4=
 github.com/livetemplate/lvt v0.1.6/go.mod h1:OrTdx3zvh0WeuugVueQoRG3ILRNJe/dThErxKsos6Rw=
 github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 h1:6E+4a0GO5zZEnZ81pIr0yLvtUWk2if982qA3F3QD6H4=
