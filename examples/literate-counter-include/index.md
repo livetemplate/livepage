@@ -29,7 +29,7 @@ same pattern. `Mount` opts each connection in to peer fan-out via
 `ctx.Publish(ctx.SelfTopic(), ...)` so every connected embed and
 direct visitor stays in lockstep.
 
-```go include="./_app/counter.go" lines="13-35" highlight="20"
+```go include="./_app/counter.go" lines="13-59" highlight="38"
 ```
 
 ## The template
