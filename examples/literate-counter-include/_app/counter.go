@@ -34,13 +34,12 @@ func (c *CounterController) Mount(s Counter, ctx *livetemplate.Context) (Counter
 // stay in sync. Publishes triggered by a dispatched action are no-ops
 // (the framework's recursion guard), so no infinite loop.
 //
-// On a Publish error, the local state mutation has already committed
-// but peer connections receive nothing. In practice the framework
-// treats a Publish error as a hard connection error and triggers
-// reconnect+re-mount, so the divergence is transient. Production code
-// that can't tolerate even a transient divergence should publish first,
-// then mutate on success — but that order is incompatible with the
-// recursion-guard pattern Increment relies on, so we keep mutate-first.
+// Mutate-first ordering is safe even when Publish errors: the
+// livetemplate dispatcher only assigns the returned newState to the
+// connection's persisted state when the action returns (state, nil).
+// On (state, err), newState is discarded — both this connection AND
+// the peer connections that never received the failed Publish stay at
+// the pre-action state. No divergence by construction.
 func (c *CounterController) Increment(s Counter, ctx *livetemplate.Context) (Counter, error) {
 	s.Count++
 	if err := ctx.Publish(ctx.SelfTopic(), "Increment", nil); err != nil {

@@ -19,7 +19,7 @@ runs:
 ```go include="./_app/counter.go" lines="5-8"
 ```
 
-```go include="./_app/counter.go" lines="13-67"
+```go include="./_app/counter.go" lines="13-66"
 ```
 
 ```html include="./_app/counter.tmpl" lines="10-13"
