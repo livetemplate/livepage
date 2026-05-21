@@ -17,10 +17,10 @@ type CounterController struct{}
 // happen on every HTTP request and WS connect) are no-ops.
 //
 // We propagate the error rather than silently discarding it: SelfTopic()
-// is ACL-exempt today (livetemplate#415, v0.10.0), but a controller
-// that copies this pattern with a developer topic name MUST propagate
-// the error to trigger the keep-open lvt:error envelope path. Keeping
-// the propagation here makes the example safe-by-default for readers.
+// is ACL-exempt in livetemplate v0.10.0, but a controller that copies
+// this pattern with a developer topic name MUST propagate the error to
+// trigger the keep-open lvt:error envelope path. Keeping the propagation
+// here makes the example safe-by-default for readers.
 func (c *CounterController) Mount(s Counter, ctx *livetemplate.Context) (Counter, error) {
 	if err := ctx.Subscribe(ctx.SelfTopic()); err != nil {
 		return s, err
@@ -33,6 +33,14 @@ func (c *CounterController) Mount(s Counter, ctx *livetemplate.Context) (Counter
 // to every *other* subscribed connection so multiple embeds (and tabs)
 // stay in sync. Publishes triggered by a dispatched action are no-ops
 // (the framework's recursion guard), so no infinite loop.
+//
+// On a Publish error, the local state mutation has already committed
+// but peer connections receive nothing. In practice the framework
+// treats a Publish error as a hard connection error and triggers
+// reconnect+re-mount, so the divergence is transient. Production code
+// that can't tolerate even a transient divergence should publish first,
+// then mutate on success — but that order is incompatible with the
+// recursion-guard pattern Increment relies on, so we keep mutate-first.
 func (c *CounterController) Increment(s Counter, ctx *livetemplate.Context) (Counter, error) {
 	s.Count++
 	if err := ctx.Publish(ctx.SelfTopic(), "Increment", nil); err != nil {
