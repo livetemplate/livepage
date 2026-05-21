@@ -171,11 +171,25 @@ func validateMermaidDiagrams(filePath string) ([]string, error) {
 
 	var errors []string
 
-	// Create chrome context
+	// Create chrome context.
+	//
+	// --disable-dev-shm-usage is the critical flag on Ubuntu CI runners:
+	// the default /dev/shm is 64MB on Docker/Actions runners, Chrome's
+	// renderer OOMs trying to allocate shared memory there, and the
+	// fallback path manifests as "chrome failed to start: Failed to
+	// connect to the bus" (D-Bus negotiation failure after the shm OOM).
+	// Switching to /tmp via --disable-dev-shm-usage avoids both.
+	//
+	// --disable-extensions and --no-first-run shave a second or two off
+	// cold-start by skipping the default extension scan and welcome
+	// flow Chromium does on a fresh profile.
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.Flag("headless", true),
 		chromedp.Flag("disable-gpu", true),
 		chromedp.Flag("no-sandbox", true),
+		chromedp.Flag("disable-dev-shm-usage", true),
+		chromedp.Flag("disable-extensions", true),
+		chromedp.Flag("no-first-run", true),
 	)
 
 	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
@@ -184,7 +198,13 @@ func validateMermaidDiagrams(filePath string) ([]string, error) {
 	ctx, cancel := chromedp.NewContext(allocCtx)
 	defer cancel()
 
-	ctx, cancel = context.WithTimeout(ctx, 15*time.Second)
+	// Per-FILE deadline. Chrome cold-start can take 5-10s on a slow Ubuntu
+	// CI runner, and each diagram below adds Navigate + Sleep(2s) +
+	// Evaluate (~3s). 60s comfortably fits the worst case observed on CI
+	// (cold Chrome + several diagrams + occasional D-Bus init jitter)
+	// without masking real hangs. The previous 15s budget was tight on
+	// devbox and routinely missed on CI.
+	ctx, cancel = context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
 	// Create a simple HTML page with Mermaid

@@ -19,7 +19,7 @@ runs:
 ```go include="./_app/counter.go" lines="5-8"
 ```
 
-```go include="./_app/counter.go" lines="13-35"
+```go include="./_app/counter.go" lines="13-66"
 ```
 
 ```html include="./_app/counter.tmpl" lines="10-13"
@@ -34,11 +34,13 @@ runs:
 
 Click `+` in either region; the count moves in lockstep. The
 `session="tour"` attribute groups the two embeds as authoring intent;
-the actual state sharing is delivered by the handler's
-`ctx.BroadcastAction("Increment", nil)` line above — that line tells
-the runtime to apply `Increment` to every other connected client
-when one client clicks. Without it, each region's session would have
-its own count; with it, they stay synced.
+the actual state sharing is delivered by the Mount-side
+`ctx.Subscribe(ctx.SelfTopic())` opt-in plus the handler's
+`ctx.Publish(ctx.SelfTopic(), "Increment", nil)` line above — that
+pair tells the runtime to apply `Increment` on every other connected
+client that subscribed when one client clicks. Without the Subscribe,
+no peer registers as a receiver; without the Publish, no fan-out
+happens; with both, the two regions stay synced.
 
 ```embed-lvt path="/apps/counter/" upstream="http://127.0.0.1:9090" session="tour"
 ```

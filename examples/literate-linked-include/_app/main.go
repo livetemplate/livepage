@@ -10,10 +10,10 @@ import (
 )
 
 // sharedAuth puts every connection in the same session group, so
-// `ctx.BroadcastAction` from any tab/embed reaches everyone else.
-// Real apps use a per-user authenticator; here a constant groupID is
-// what makes the literate-linked tutorial demonstrate cross-region
-// state sharing.
+// `ctx.Publish(ctx.SelfTopic(), ...)` from any tab/embed reaches every
+// other subscribed peer. Real apps use a per-user authenticator; the
+// constant groupID here is what makes the literate-linked tutorial
+// demonstrate cross-region state sharing.
 type sharedAuth struct{}
 
 func (sharedAuth) Identify(r *http.Request) (string, error) {

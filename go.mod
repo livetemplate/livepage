@@ -8,7 +8,7 @@ require (
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/lib/pq v1.10.9
-	github.com/livetemplate/livetemplate v0.9.0
+	github.com/livetemplate/livetemplate v0.10.0
 	github.com/livetemplate/lvt/components v0.0.0-20260228153051-c00a45caae95
 	github.com/rogpeppe/go-internal v1.14.1
 	github.com/stretchr/testify v1.11.0

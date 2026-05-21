@@ -24,10 +24,12 @@ clones it per session, so two readers don't see each other's count.
 Action handlers are methods on a controller. When the reader clicks
 `+`, the runtime calls `Increment` with a clone of the current state
 and stores whatever you return. `Decrement` and `Reset` follow the
-same pattern. Each handler also calls `ctx.BroadcastAction(...)` so
-every connected embed and direct visitor stays in lockstep.
+same pattern. `Mount` opts each connection in to peer fan-out via
+`ctx.Subscribe(ctx.SelfTopic())`; each action handler then calls
+`ctx.Publish(ctx.SelfTopic(), ...)` so every connected embed and
+direct visitor stays in lockstep.
 
-```go include="./_app/counter.go" lines="13-35" highlight="20"
+```go include="./_app/counter.go" lines="13-66" highlight="45"
 ```
 
 ## The template
