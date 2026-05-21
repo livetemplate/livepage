@@ -13,9 +13,18 @@ type CounterController struct{}
 // Mount opts this connection in to peer fan-out for the session via
 // ctx.Subscribe(ctx.SelfTopic()). Without this opt-in, an Increment in
 // one tab's Publish would have no peer subscribers and the embeds would
-// drift. SelfTopic() is ACL-exempt; Subscribe always succeeds for it.
+// drift. Subscribe is idempotent per-connection, so re-Mounts (which
+// happen on every HTTP request and WS connect) are no-ops.
+//
+// We propagate the error rather than silently discarding it: SelfTopic()
+// is ACL-exempt today (livetemplate#415, v0.10.0), but a controller
+// that copies this pattern with a developer topic name MUST propagate
+// the error to trigger the keep-open lvt:error envelope path. Keeping
+// the propagation here makes the example safe-by-default for readers.
 func (c *CounterController) Mount(s Counter, ctx *livetemplate.Context) (Counter, error) {
-	_ = ctx.Subscribe(ctx.SelfTopic())
+	if err := ctx.Subscribe(ctx.SelfTopic()); err != nil {
+		return s, err
+	}
 	return s, nil
 }
 
