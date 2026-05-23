@@ -36,6 +36,7 @@ testdata/tmp/
 # Git worktrees
 .worktrees/
 *.sqlite
+*.db
 .worktrees/
 
 /tinkerdown
