@@ -200,10 +200,18 @@ func validateMermaidDiagrams(filePath string) ([]string, error) {
 	// a file with many diagrams hitting a sustained Chrome outage could
 	// run for N × 92s (3 attempts × 30s + 2 × 1s backoff per diagram)
 	// — for 10 diagrams that's ~15 min before the outer CI timeout
-	// kills it. 120s comfortably fits one diagram's worst case (90s)
+	// kills it. 120s comfortably fits one diagram's worst case (92s)
 	// plus a second diagram's warm-attempt time, while bounding total
 	// wall time even if every diagram exhausts retries. Most files
 	// have 0-2 diagrams that complete in seconds.
+	//
+	// Tradeoff worth knowing: if TWO diagrams both exhaust all retries
+	// back-to-back, the second gets ≤28s (120 - 92), shorter than the
+	// 30s per-attempt timeout. Its error surfaces as "per-file deadline
+	// expired" rather than "after 3 attempts" — same outcome, less
+	// triage clarity. If this pattern emerges in real CI logs, the fix
+	// is to widen the file budget rather than narrow per-attempt; in
+	// practice flakes have been single-diagram so far.
 	fileCtx, fileCancel := context.WithTimeout(allocCtx, 120*time.Second)
 	defer fileCancel()
 
@@ -272,10 +280,7 @@ func validateOneMermaidDiagramWithRetry(parentCtx context.Context, tmpFile strin
 		backoff        = time.Second
 	)
 
-	var (
-		hasError bool
-		lastErr  error
-	)
+	var lastErr error
 
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		// If the per-file budget has already expired, stop. Don't open
@@ -285,33 +290,8 @@ func validateOneMermaidDiagramWithRetry(parentCtx context.Context, tmpFile strin
 			return false, fmt.Errorf("per-file deadline expired before diagram could complete (after %d attempt(s)): %w", attempt-1, err)
 		}
 
-		// Reset hasError between attempts — chromedp's Evaluate writes
-		// to the bound &hasError. If a prior attempt's Evaluate
-		// succeeded (setting true) but a later chromedp action failed,
-		// the loop falls through and the stale true survives to the
-		// next iteration. We only RETURN hasError on lastErr == nil
-		// (so stale state can't escape this function), but resetting
-		// here keeps the invariant local-and-obvious for future
-		// readers.
-		hasError = false
-
-		// Fresh browser context per attempt — recreating the chromedp
-		// context recovers from a dead Chrome target (websocket
-		// closed, renderer crashed) that the previous attempt left in.
-		ctx, ctxCancel := chromedp.NewContext(parentCtx)
-		ctx, timeoutCancel := context.WithTimeout(ctx, attemptTimeout)
-
-		lastErr = chromedp.Run(ctx,
-			chromedp.Navigate("file://"+tmpFile),
-			chromedp.Sleep(2*time.Second),
-			chromedp.Evaluate(`
-				document.body.textContent.includes('Syntax error') ||
-				document.body.textContent.includes('Parse error')
-			`, &hasError),
-		)
-
-		timeoutCancel()
-		ctxCancel()
+		hasError, attemptErr := runOneMermaidAttempt(parentCtx, tmpFile, attemptTimeout)
+		lastErr = attemptErr
 
 		if lastErr == nil {
 			return hasError, nil
@@ -344,6 +324,31 @@ func validateOneMermaidDiagramWithRetry(parentCtx context.Context, tmpFile strin
 	}
 
 	return false, fmt.Errorf("after %d attempts: %w", maxAttempts, lastErr)
+}
+
+// runOneMermaidAttempt runs a single chromedp Navigate + Evaluate
+// against the temp HTML file holding one Mermaid diagram. Fresh
+// chromedp context per call (recovers from a dead Chrome target the
+// previous attempt may have left in); both cancels are deferred so
+// a panic inside chromedp.Run still frees the contexts cleanly. The
+// fresh local hasError var per call also obviates the "reset between
+// attempts" concern in the caller.
+func runOneMermaidAttempt(parentCtx context.Context, tmpFile string, timeout time.Duration) (bool, error) {
+	ctx, ctxCancel := chromedp.NewContext(parentCtx)
+	defer ctxCancel()
+	ctx, timeoutCancel := context.WithTimeout(ctx, timeout)
+	defer timeoutCancel()
+
+	var hasError bool
+	err := chromedp.Run(ctx,
+		chromedp.Navigate("file://"+tmpFile),
+		chromedp.Sleep(2*time.Second),
+		chromedp.Evaluate(`
+			document.body.textContent.includes('Syntax error') ||
+			document.body.textContent.includes('Parse error')
+		`, &hasError),
+	)
+	return hasError, err
 }
 
 // isTransientChromedpError returns true when err looks like one of the
