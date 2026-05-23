@@ -6,7 +6,11 @@
 // stay in parser.go. Three helpers do the work:
 //
 //   - Resolve confines a relative include path to a discovery root,
-//     so authors can't escape with "../../etc/passwd".
+//     so authors can't escape with "../../etc/passwd". An include path
+//     beginning with "/" is interpreted as project-root-relative
+//     (one level above the discovery root) rather than page-relative,
+//     so pages can cite source files that live outside the content tree
+//     without resorting to long "../../..." paths.
 //   - Slice reads the resolved file and returns either the whole text
 //     or a 1-indexed inclusive line range, clamping the end to the
 //     file's actual length when the author's range overruns.
@@ -271,7 +275,7 @@ func PreprocessWithLinks(content []byte, baseDir, root string, link LinkOptions)
 		// file at the cited line range. Skipped silently when the
 		// caller didn't provide enough info to construct a URL — the
 		// snippet alone is still useful.
-		if footer := renderSourceFooter(link, baseDir, absPath, linesAttr); footer != "" {
+		if footer := renderSourceFooter(link, baseDir, incPath, absPath, linesAttr); footer != "" {
 			out = append(out, "")
 			out = append(out, footer)
 		}
@@ -287,11 +291,14 @@ func PreprocessWithLinks(content []byte, baseDir, root string, link LinkOptions)
 // back to the included file's location in its source repository, or
 // an empty string when the caller didn't supply enough info.
 //
-// The path passed back to the link is computed relative to the
-// markdown page's directory and joined onto link.PagePathInRepo —
-// matches what tinkerdown already does for "Edit this page on
-// GitHub" links elsewhere in the codebase.
-func renderSourceFooter(link LinkOptions, pageDir, absPath, lineRange string) string {
+// For a site-rooted include (`incPath` begins with "/") the original
+// include string IS the repo-relative path — we use it directly and
+// skip the page-relative dance. For a page-relative include, the path
+// passed back to the link is computed relative to the markdown page's
+// directory and joined onto link.PagePathInRepo — matches what
+// tinkerdown already does for "Edit this page on GitHub" links
+// elsewhere in the codebase.
+func renderSourceFooter(link LinkOptions, pageDir, incPath, absPath, lineRange string) string {
 	if link.RepoURL == "" {
 		return ""
 	}
@@ -301,17 +308,27 @@ func renderSourceFooter(link LinkOptions, pageDir, absPath, lineRange string) st
 	if !strings.HasPrefix(link.RepoURL, "https://") && !strings.HasPrefix(link.RepoURL, "http://") {
 		return ""
 	}
-	relToPage, err := filepath.Rel(pageDir, absPath)
-	if err != nil || strings.HasPrefix(relToPage, "..") {
-		// Included file lives outside the page dir — we don't have a
-		// confident way to map it to the repo path, so skip the link.
-		return ""
-	}
-	relToPage = filepath.ToSlash(relToPage)
 
-	repoPath := relToPage
-	if link.PagePathInRepo != "" {
-		repoPath = strings.TrimRight(link.PagePathInRepo, "/") + "/" + relToPage
+	var repoPath string
+	if strings.HasPrefix(incPath, "/") {
+		// Site-rooted: the include attribute already names the path
+		// relative to the project (= repo) root. Use it verbatim and
+		// ignore PagePathInRepo, which only describes where the
+		// markdown page lives — irrelevant here.
+		repoPath = filepath.ToSlash(strings.TrimPrefix(incPath, "/"))
+	} else {
+		relToPage, err := filepath.Rel(pageDir, absPath)
+		if err != nil || strings.HasPrefix(relToPage, "..") {
+			// Included file lives outside the page dir — we don't have a
+			// confident way to map it to the repo path, so skip the link.
+			return ""
+		}
+		relToPage = filepath.ToSlash(relToPage)
+
+		repoPath = relToPage
+		if link.PagePathInRepo != "" {
+			repoPath = strings.TrimRight(link.PagePathInRepo, "/") + "/" + relToPage
+		}
 	}
 
 	branch := link.Branch
@@ -404,31 +421,34 @@ func lineFragment(lineRange string) string {
 func escapeAttr(s string) string { return html.EscapeString(s) }
 func escapeText(s string) string { return html.EscapeString(s) }
 
-// Resolve canonicalizes an include path supplied in markdown. It
-// resolves relative paths against baseDir (the directory of the
-// markdown file), then ensures the result lives inside root (the
-// page-discovery root) so traversal attacks are rejected.
+// Resolve canonicalizes an include path supplied in markdown. The
+// path is interpreted in one of two ways:
 //
-// Symlinks are followed on both candidate and root before the
-// containment check so a symlinked tempdir (e.g. macOS /tmp →
+//   - "/foo/bar" (leading slash) — project-root-relative: resolved
+//     against filepath.Dir(root) and confined to that project root.
+//     This lets pages cite files that live outside the content tree
+//     (e.g. a sibling examples/ folder) without "../../..." chains.
+//   - "./foo" / "foo" / "../foo" — page-relative: resolved against
+//     baseDir (the directory of the markdown file) and confined to
+//     root (the page-discovery root). Same v1 behavior.
+//
+// Either way, the resolved path must lie within its confinement root
+// or the call errors — traversal attacks (`../../etc/passwd`) are
+// rejected.
+//
+// Symlinks are followed on both candidate and confinement root before
+// the containment check so a symlinked tempdir (e.g. macOS /tmp →
 // /private/tmp) doesn't false-positive as an escape.
 func Resolve(baseDir, root, includePath string) (string, error) {
 	if includePath == "" {
 		return "", fmt.Errorf("include path is empty")
 	}
-	candidate := includePath
-	if !filepath.IsAbs(candidate) {
-		candidate = filepath.Join(baseDir, candidate)
-	}
-	absCandidate, err := filepath.Abs(candidate)
-	if err != nil {
-		return "", fmt.Errorf("resolve %q: %w", includePath, err)
-	}
-	resolvedCandidate, err := filepath.EvalSymlinks(absCandidate)
-	if err != nil {
-		return "", fmt.Errorf("read %q: %w", includePath, err)
-	}
 
+	// Determine which confinement applies. A site-rooted include
+	// (leading "/") is resolved against filepath.Dir(root) — the
+	// project root, one level above the page-discovery root — and is
+	// allowed to reach into sibling top-level folders of the project.
+	// Everything else stays in v1 page-root semantics.
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
 		return "", fmt.Errorf("resolve root %q: %w", root, err)
@@ -438,7 +458,29 @@ func Resolve(baseDir, root, includePath string) (string, error) {
 		return "", fmt.Errorf("resolve root %q: %w", root, err)
 	}
 
-	rel, err := filepath.Rel(resolvedRoot, resolvedCandidate)
+	var candidate, confineRoot string
+	if strings.HasPrefix(includePath, "/") {
+		projectRoot := filepath.Dir(resolvedRoot)
+		candidate = filepath.Join(projectRoot, strings.TrimPrefix(includePath, "/"))
+		confineRoot = projectRoot
+	} else {
+		candidate = includePath
+		if !filepath.IsAbs(candidate) {
+			candidate = filepath.Join(baseDir, candidate)
+		}
+		confineRoot = resolvedRoot
+	}
+
+	absCandidate, err := filepath.Abs(candidate)
+	if err != nil {
+		return "", fmt.Errorf("resolve %q: %w", includePath, err)
+	}
+	resolvedCandidate, err := filepath.EvalSymlinks(absCandidate)
+	if err != nil {
+		return "", fmt.Errorf("read %q: %w", includePath, err)
+	}
+
+	rel, err := filepath.Rel(confineRoot, resolvedCandidate)
 	if err != nil || strings.HasPrefix(rel, "..") {
 		return "", fmt.Errorf("include %q escapes the include root", includePath)
 	}
