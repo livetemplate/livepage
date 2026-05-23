@@ -33,12 +33,13 @@ build/
 # Local test data
 testdata/tmp/
 
+# Local SQLite databases created by tests / examples at runtime
+*.sqlite
+*.db
+
 # Git worktrees
 .worktrees/
-*.sqlite
-.worktrees/
 
+# Locally-built tinkerdown binaries
 /tinkerdown
 /tinkerdown-test
-.worktrees/
-.worktrees/
