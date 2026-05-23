@@ -141,12 +141,47 @@ func TestResolve_SiteRootedRejectsProjectEscape(t *testing.T) {
 	if err := os.WriteFile(outsideFile, []byte("body"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	defer os.Remove(outsideFile)
+	// t.Cleanup runs even on panic; defer os.Remove would leak the file
+	// outside the temp tree if this test ever panicked before reaching
+	// the deferred call.
+	t.Cleanup(func() { _ = os.Remove(outsideFile) })
 
 	// The leading slash makes this project-rooted, but "/../outside.go"
 	// resolves above the project root → still rejected.
 	if _, err := Resolve(pageDir, contentRoot, "/../outside.go"); err == nil {
 		t.Errorf("expected site-rooted escape above project to be rejected")
+	}
+}
+
+func TestResolve_SiteRootedCanTargetContentRoot(t *testing.T) {
+	// A site-rooted path that happens to land back inside the content
+	// root is allowed — the project root is a superset of the content
+	// root, so files inside the content tree are inside the confinement
+	// boundary too. This is intentional: an author who writes
+	// `include="/content/recipes/snippet.md"` from a different page
+	// shouldn't be blocked just because the target happens to be a
+	// doc-tree file. The opposite would surprise authors who think of
+	// "/..." as "from the project root, anywhere within."
+	project := t.TempDir()
+	contentRoot := filepath.Join(project, "content")
+	pageDir := filepath.Join(contentRoot, "recipes", "a")
+	target := filepath.Join(contentRoot, "snippets", "shared.go")
+	for _, d := range []string{pageDir, filepath.Dir(target)} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(target, []byte("body"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := Resolve(pageDir, contentRoot, "/content/snippets/shared.go")
+	if err != nil {
+		t.Fatalf("site-rooted include into content root: %v", err)
+	}
+	wantResolved, _ := filepath.EvalSymlinks(target)
+	if got != wantResolved {
+		t.Errorf("got %q, want %q", got, wantResolved)
 	}
 }
 

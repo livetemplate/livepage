@@ -293,11 +293,21 @@ func PreprocessWithLinks(content []byte, baseDir, root string, link LinkOptions)
 //
 // For a site-rooted include (`incPath` begins with "/") the original
 // include string IS the repo-relative path — we use it directly and
-// skip the page-relative dance. For a page-relative include, the path
-// passed back to the link is computed relative to the markdown page's
-// directory and joined onto link.PagePathInRepo — matches what
-// tinkerdown already does for "Edit this page on GitHub" links
-// elsewhere in the codebase.
+// skip the page-relative dance. PagePathInRepo is IGNORED in this
+// branch because it describes where the markdown page lives, not the
+// included file's location, which is exactly what `incPath` already
+// names relative to the project root. For a page-relative include,
+// the path passed back to the link is computed relative to the
+// markdown page's directory and joined onto link.PagePathInRepo —
+// matches what tinkerdown already does for "Edit this page on
+// GitHub" links elsewhere in the codebase.
+//
+// `incPath` must be the RAW include attribute value (with any leading
+// "/" intact). Callers that pre-clean or normalize the path would
+// strip the leading "/" and silently fall through to the page-
+// relative branch, producing a wrong footer URL with no error. The
+// sole caller in PreprocessWithLinks passes incPath unchanged from
+// the regex match — preserve that invariant if you add new callers.
 func renderSourceFooter(link LinkOptions, pageDir, incPath, absPath, lineRange string) string {
 	if link.RepoURL == "" {
 		return ""
@@ -460,7 +470,16 @@ func Resolve(baseDir, root, includePath string) (string, error) {
 
 	var candidate, confineRoot string
 	if strings.HasPrefix(includePath, "/") {
-		projectRoot := filepath.Dir(resolvedRoot)
+		// resolvedRoot has already been EvalSymlinks'd, but its parent
+		// could still contain a symlink — e.g. when the whole project
+		// lives under a symlinked tree like macOS's /tmp → /private/tmp
+		// for an ancestor. EvalSymlinks again so the later
+		// filepath.Rel(confineRoot, resolvedCandidate) comparison can't
+		// false-positive as an escape because of a symlink one level up.
+		projectRoot, err := filepath.EvalSymlinks(filepath.Dir(resolvedRoot))
+		if err != nil {
+			return "", fmt.Errorf("resolve project root for %q: %w", includePath, err)
+		}
 		candidate = filepath.Join(projectRoot, strings.TrimPrefix(includePath, "/"))
 		confineRoot = projectRoot
 	} else {
