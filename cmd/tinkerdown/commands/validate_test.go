@@ -92,4 +92,9 @@ func TestValidateOneMermaidDiagramWithRetry_RespectsExpiredParent(t *testing.T) 
 	if msg := err.Error(); !strings.Contains(msg, "per-file deadline") {
 		t.Errorf("error should mention 'per-file deadline'; got: %v", err)
 	}
+	// And mentions the attempt count (0 here — bailed before any
+	// attempt opened a chromedp context).
+	if msg := err.Error(); !strings.Contains(msg, "after 0 attempt") {
+		t.Errorf("error should report attempt count; got: %v", err)
+	}
 }

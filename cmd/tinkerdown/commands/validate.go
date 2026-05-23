@@ -282,7 +282,7 @@ func validateOneMermaidDiagramWithRetry(parentCtx context.Context, tmpFile strin
 		// a new Chrome context only to immediately error on its first
 		// step.
 		if err := parentCtx.Err(); err != nil {
-			return false, fmt.Errorf("per-file deadline expired after %d attempt(s): %w", attempt-1, err)
+			return false, fmt.Errorf("per-file deadline expired before diagram could complete (after %d attempt(s)): %w", attempt-1, err)
 		}
 
 		// Fresh browser context per attempt — recreating the chromedp
@@ -306,6 +306,16 @@ func validateOneMermaidDiagramWithRetry(parentCtx context.Context, tmpFile strin
 		if lastErr == nil {
 			return hasError, nil
 		}
+		// Check parent BEFORE the transient classifier: if the per-file
+		// deadline fired during this attempt, chromedp.Run returns
+		// context.DeadlineExceeded (which isTransientChromedpError
+		// would classify as retryable). Skip the wasted backoff +
+		// next-iteration top-of-loop dance — surface the per-file
+		// message immediately so CI logs are unambiguous about which
+		// timeout fired.
+		if parentErr := parentCtx.Err(); parentErr != nil {
+			return false, fmt.Errorf("per-file deadline expired before diagram could complete (after %d attempt(s)): %w", attempt, parentErr)
+		}
 		if !isTransientChromedpError(lastErr) {
 			// Permanent failure (e.g. Chrome won't launch) — don't waste
 			// attempts. Surface immediately so the operator gets a fast
@@ -313,7 +323,13 @@ func validateOneMermaidDiagramWithRetry(parentCtx context.Context, tmpFile strin
 			return false, lastErr
 		}
 		if attempt < maxAttempts {
-			time.Sleep(backoff)
+			// Context-aware backoff: if the per-file deadline fires
+			// during the sleep, return early instead of waking up to
+			// the next iteration only to bail at its top-of-loop check.
+			select {
+			case <-time.After(backoff):
+			case <-parentCtx.Done():
+			}
 		}
 	}
 
