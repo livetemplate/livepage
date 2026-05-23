@@ -482,17 +482,29 @@ func Resolve(baseDir, root, includePath string) (string, error) {
 	}
 
 	var candidate, confineRoot string
-	if strings.HasPrefix(includePath, "/") {
-		// Normalise multiple leading slashes ("//foo", "///foo") to a
-		// single one. filepath.Join handles these correctly on Linux,
-		// but the trim arithmetic below is clearer with a single
-		// canonical leading "/".
-		normalised := "/" + strings.TrimLeft(includePath, "/")
-		// "/" alone resolves to the project root directory itself;
-		// downstream Slice would then try to read a directory as a
-		// file. Reject early with a clear message.
-		if normalised == "/" {
+	siteRooted := strings.HasPrefix(includePath, "/")
+	if siteRooted {
+		// Strip all leading slashes — "//foo", "///foo" all canonicalise
+		// to the same relative path under the project root. filepath.Join
+		// would handle the variants on Linux but the path arithmetic is
+		// less surprising with a single canonical form, and
+		// renderSourceFooter applies the same TrimLeft for parity.
+		relative := strings.TrimLeft(includePath, "/")
+		// "/" (or "//"/"///") alone resolves to the project root
+		// directory itself; downstream Slice would then try to read a
+		// directory as a file. Reject early with a clear message.
+		if relative == "" {
 			return "", fmt.Errorf("include %q resolves to the project root, not a file", includePath)
+		}
+		// Layout footgun guard: if the discovery root is the filesystem
+		// root ("/"), filepath.Dir(root) == root and a site-rooted include
+		// resolves against "/" itself — i.e. the entire filesystem becomes
+		// the include surface. The doc comment warns callers about
+		// non-standard layouts; this is the loud-error case for the
+		// genuinely-broken one. Detected by comparing resolvedRoot to its
+		// own parent (true only at the filesystem root).
+		if filepath.Dir(resolvedRoot) == resolvedRoot {
+			return "", fmt.Errorf("include %q: site-rooted includes require a discovery root inside a project (root %q has no parent)", includePath, root)
 		}
 		// resolvedRoot has already been EvalSymlinks'd, but its parent
 		// could still contain a symlink — e.g. when the whole project
@@ -504,7 +516,7 @@ func Resolve(baseDir, root, includePath string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("resolve project root for %q: %w", includePath, err)
 		}
-		candidate = filepath.Join(projectRoot, strings.TrimPrefix(normalised, "/"))
+		candidate = filepath.Join(projectRoot, relative)
 		// Site-rooted: broader confinement (one level up) so includes
 		// can reach into sibling top-level folders like examples/.
 		confineRoot = projectRoot
@@ -530,7 +542,13 @@ func Resolve(baseDir, root, includePath string) (string, error) {
 
 	rel, err := filepath.Rel(confineRoot, resolvedCandidate)
 	if err != nil || strings.HasPrefix(rel, "..") {
-		return "", fmt.Errorf("include %q escapes the include root", includePath)
+		// Distinguish which confinement boundary fired — debugging an
+		// unexpected rejection is much easier with the specific root
+		// named.
+		if siteRooted {
+			return "", fmt.Errorf("include %q escapes the project root", includePath)
+		}
+		return "", fmt.Errorf("include %q escapes the content root", includePath)
 	}
 	return resolvedCandidate, nil
 }

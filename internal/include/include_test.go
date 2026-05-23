@@ -140,6 +140,14 @@ func TestResolve_SiteRootedRejectsProjectEscape(t *testing.T) {
 	// so escaping from project means "/../<outside-basename>/outside.go".
 	project := t.TempDir()
 	outside := t.TempDir()
+	// Go 1.21+ test framework typically puts both t.TempDir() calls
+	// under the same parent (the test's own subdir under TMPDIR), but
+	// it's not contractual. Skip the test rather than silently passing
+	// (or producing a misleading failure) on a runtime that doesn't
+	// follow the convention.
+	if filepath.Dir(project) != filepath.Dir(outside) {
+		t.Skipf("t.TempDir() did not place project and outside under same parent (project=%q outside=%q); cannot construct relative escape path", project, outside)
+	}
 	contentRoot := filepath.Join(project, "content")
 	pageDir := filepath.Join(contentRoot, "page")
 	outsideFile := filepath.Join(outside, "outside.go")
@@ -155,6 +163,19 @@ func TestResolve_SiteRootedRejectsProjectEscape(t *testing.T) {
 	escape := "/../" + filepath.Base(outside) + "/outside.go"
 	if _, err := Resolve(pageDir, contentRoot, escape); err == nil {
 		t.Errorf("expected site-rooted escape above project to be rejected (path %q)", escape)
+	}
+}
+
+func TestResolve_SiteRootedRejectsRootlessLayout(t *testing.T) {
+	// Layout footgun guard: when `root` is the filesystem root itself,
+	// filepath.Dir(root) == root and the project-root concept breaks
+	// down (a /foo include would resolve against the filesystem root).
+	// Resolve detects this and errors loudly rather than silently
+	// expanding the include surface to the whole filesystem.
+	if _, err := Resolve("/tmp", "/", "/etc/passwd"); err == nil {
+		t.Errorf("expected site-rooted include against filesystem root to be rejected")
+	} else if !strings.Contains(err.Error(), "no parent") {
+		t.Errorf("expected 'no parent' error message, got: %v", err)
 	}
 }
 
@@ -210,6 +231,40 @@ func TestResolve_SiteRootedCanTargetContentRoot(t *testing.T) {
 	wantResolved, _ := filepath.EvalSymlinks(target)
 	if got != wantResolved {
 		t.Errorf("got %q, want %q", got, wantResolved)
+	}
+}
+
+func TestPreprocess_GitHubFooter_SiteRooted_NoPagePathInRepo(t *testing.T) {
+	// Site-rooted includes ignore PagePathInRepo entirely. When it's
+	// empty (common for top-level pages like index.md), there must
+	// still be no spurious double-slash after the branch — confirms
+	// the site-rooted branch doesn't accidentally fall through to the
+	// page-relative branch's "PagePathInRepo + relToPage" join.
+	project := t.TempDir()
+	contentRoot := filepath.Join(project, "content")
+	pageDir := contentRoot
+	src := filepath.Join(project, "examples", "x", "x.go")
+	for _, d := range []string{pageDir, filepath.Dir(src)} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(src, []byte("body\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	md := "```go include=\"/examples/x/x.go\"\n```\n"
+	out, _, _ := PreprocessWithLinks([]byte(md), pageDir, contentRoot, LinkOptions{
+		RepoURL: "https://github.com/foo/bar",
+		Branch:  "main",
+		// PagePathInRepo intentionally unset.
+	})
+	got := string(out)
+	wantHref := `href="https://github.com/foo/bar/blob/main/examples/x/x.go"`
+	if !strings.Contains(got, wantHref) {
+		t.Errorf("missing expected footer href; got:\n%s", got)
+	}
+	if strings.Contains(got, "/blob/main//") {
+		t.Errorf("footer URL has spurious double slash; got:\n%s", got)
 	}
 }
 
