@@ -285,6 +285,16 @@ func validateOneMermaidDiagramWithRetry(parentCtx context.Context, tmpFile strin
 			return false, fmt.Errorf("per-file deadline expired before diagram could complete (after %d attempt(s)): %w", attempt-1, err)
 		}
 
+		// Reset hasError between attempts — chromedp's Evaluate writes
+		// to the bound &hasError. If a prior attempt's Evaluate
+		// succeeded (setting true) but a later chromedp action failed,
+		// the loop falls through and the stale true survives to the
+		// next iteration. We only RETURN hasError on lastErr == nil
+		// (so stale state can't escape this function), but resetting
+		// here keeps the invariant local-and-obvious for future
+		// readers.
+		hasError = false
+
 		// Fresh browser context per attempt — recreating the chromedp
 		// context recovers from a dead Chrome target (websocket
 		// closed, renderer crashed) that the previous attempt left in.

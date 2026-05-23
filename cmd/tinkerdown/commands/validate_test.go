@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestIsTransientChromedpError(t *testing.T) {
@@ -71,11 +70,8 @@ func TestValidateOneMermaidDiagramWithRetry_RespectsExpiredParent(t *testing.T) 
 	// Uses a real expired context.Context instead of mocking chromedp:
 	// the parentCtx.Err() check happens BEFORE any chromedp call, so
 	// no real Chrome is required for this test to exercise the path.
-	parent, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
-	cancel() // expire immediately
-	// Give the runtime a moment to actually mark the context as
-	// expired — race-y on very fast machines without this.
-	time.Sleep(time.Millisecond)
+	parent, cancel := context.WithCancel(context.Background())
+	cancel() // synchronous: parent.Err() returns context.Canceled immediately
 
 	hasError, err := validateOneMermaidDiagramWithRetry(parent, "/tmp/nonexistent-mermaid.html")
 	if err == nil {
