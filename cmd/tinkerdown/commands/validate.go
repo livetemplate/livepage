@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -195,18 +196,6 @@ func validateMermaidDiagrams(filePath string) ([]string, error) {
 	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
 	defer cancel()
 
-	ctx, cancel := chromedp.NewContext(allocCtx)
-	defer cancel()
-
-	// Per-FILE deadline. Chrome cold-start can take 5-10s on a slow Ubuntu
-	// CI runner, and each diagram below adds Navigate + Sleep(2s) +
-	// Evaluate (~3s). 60s comfortably fits the worst case observed on CI
-	// (cold Chrome + several diagrams + occasional D-Bus init jitter)
-	// without masking real hangs. The previous 15s budget was tight on
-	// devbox and routinely missed on CI.
-	ctx, cancel = context.WithTimeout(ctx, 60*time.Second)
-	defer cancel()
-
 	// Create a simple HTML page with Mermaid
 	for i, match := range matches {
 		mermaidCode := match[1]
@@ -235,9 +224,50 @@ func validateMermaidDiagrams(filePath string) ([]string, error) {
 		}
 		defer os.Remove(tmpFile)
 
-		// Check for errors
-		var hasError bool
-		err = chromedp.Run(ctx,
+		hasError, runErr := validateOneMermaidDiagramWithRetry(allocCtx, tmpFile)
+
+		if runErr != nil {
+			errors = append(errors, fmt.Sprintf("Diagram %d: Failed to validate (%v)", i+1, runErr))
+		} else if hasError {
+			errors = append(errors, fmt.Sprintf("Diagram %d: Mermaid syntax error detected", i+1))
+		}
+	}
+
+	return errors, nil
+}
+
+// validateOneMermaidDiagramWithRetry runs the chromedp navigation +
+// syntax-error check for a single diagram, retrying up to maxAttempts
+// times on transient chromedp/websocket failures. Each attempt gets a
+// fresh chromedp context with a 30s deadline — the prior attempt's
+// context (or its underlying Chrome target) may be dead, so reusing it
+// would just hit the same error.
+//
+// The transient classifier matches the actual flake observed on CI:
+// "websocket url timeout reached" (chromedp internal target-connection
+// failure) and context.DeadlineExceeded (timeout firing during
+// navigation). Non-transient errors (e.g. Chrome failed to launch)
+// surface on the first attempt without burning retries.
+func validateOneMermaidDiagramWithRetry(allocCtx context.Context, tmpFile string) (bool, error) {
+	const (
+		maxAttempts    = 3
+		attemptTimeout = 30 * time.Second
+		backoff        = time.Second
+	)
+
+	var (
+		hasError bool
+		lastErr  error
+	)
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		// Fresh browser context per attempt — recreating the chromedp
+		// context recovers from a dead Chrome target (websocket
+		// closed, renderer crashed) that the previous attempt left in.
+		ctx, ctxCancel := chromedp.NewContext(allocCtx)
+		ctx, timeoutCancel := context.WithTimeout(ctx, attemptTimeout)
+
+		lastErr = chromedp.Run(ctx,
 			chromedp.Navigate("file://"+tmpFile),
 			chromedp.Sleep(2*time.Second),
 			chromedp.Evaluate(`
@@ -246,12 +276,47 @@ func validateMermaidDiagrams(filePath string) ([]string, error) {
 			`, &hasError),
 		)
 
-		if err != nil {
-			errors = append(errors, fmt.Sprintf("Diagram %d: Failed to validate (%v)", i+1, err))
-		} else if hasError {
-			errors = append(errors, fmt.Sprintf("Diagram %d: Mermaid syntax error detected", i+1))
+		timeoutCancel()
+		ctxCancel()
+
+		if lastErr == nil {
+			return hasError, nil
+		}
+		if !isTransientChromedpError(lastErr) {
+			// Permanent failure (e.g. Chrome won't launch) — don't waste
+			// attempts. Surface immediately so the operator gets a fast
+			// signal.
+			return false, lastErr
+		}
+		if attempt < maxAttempts {
+			time.Sleep(backoff)
 		}
 	}
 
-	return errors, nil
+	return false, fmt.Errorf("after %d attempts: %w", maxAttempts, lastErr)
+}
+
+// isTransientChromedpError returns true when err looks like one of the
+// known intermittent chromedp/headless-Chrome failure modes that a
+// retry with a fresh context can recover from. The two patterns we've
+// actually observed in CI:
+//
+//   - "websocket url timeout reached" — chromedp couldn't (re-)establish
+//     the DevTools websocket to the Chrome target within its internal
+//     deadline.
+//   - context.DeadlineExceeded — our own per-attempt deadline fired
+//     during Navigate or Evaluate. Often correlates with Chrome having
+//     just been initialised and not yet ready to serve the request.
+//
+// Anything else (Chrome failed to launch, file write errors, etc.) is
+// treated as permanent.
+func isTransientChromedpError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "websocket") || strings.Contains(msg, "timeout")
 }
