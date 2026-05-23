@@ -323,7 +323,12 @@ func validateOneMermaidDiagramWithRetry(parentCtx context.Context, tmpFile strin
 		}
 	}
 
-	return false, fmt.Errorf("after %d attempts: %w", maxAttempts, lastErr)
+	// "per-attempt timeout" suffix disambiguates this terminal error
+	// from the per-file deadline path, which prefixes "per-file
+	// deadline expired". On a sustained Chrome outage both messages
+	// can surface in the same CI log; the prefix tells the operator
+	// which budget was the binding constraint.
+	return false, fmt.Errorf("after %d attempts (per-attempt timeout): %w", maxAttempts, lastErr)
 }
 
 // runOneMermaidAttempt runs a single chromedp Navigate + Evaluate
