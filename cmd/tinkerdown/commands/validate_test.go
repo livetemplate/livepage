@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestIsTransientChromedpError(t *testing.T) {
@@ -57,5 +59,37 @@ func TestIsTransientChromedpError(t *testing.T) {
 				t.Errorf("isTransientChromedpError(%v) = %v, want %v", c.err, got, c.want)
 			}
 		})
+	}
+}
+
+func TestValidateOneMermaidDiagramWithRetry_RespectsExpiredParent(t *testing.T) {
+	// Pre-expired parent context — validateOneMermaidDiagramWithRetry
+	// must bail out before opening any chromedp context (the function
+	// would otherwise spend up to maxAttempts × attemptTimeout = 90s
+	// burning through retries that have no chance of succeeding).
+	//
+	// Uses a real expired context.Context instead of mocking chromedp:
+	// the parentCtx.Err() check happens BEFORE any chromedp call, so
+	// no real Chrome is required for this test to exercise the path.
+	parent, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
+	cancel() // expire immediately
+	// Give the runtime a moment to actually mark the context as
+	// expired — race-y on very fast machines without this.
+	time.Sleep(time.Millisecond)
+
+	hasError, err := validateOneMermaidDiagramWithRetry(parent, "/tmp/nonexistent-mermaid.html")
+	if err == nil {
+		t.Fatalf("expected error from expired parent context, got nil (hasError=%v)", hasError)
+	}
+	if hasError {
+		t.Errorf("hasError should be false when parent is expired, got true")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
+		t.Errorf("expected wrapped context.DeadlineExceeded or context.Canceled, got: %v", err)
+	}
+	// Sanity check the error message mentions the per-file budget so
+	// operators reading CI logs know which timeout fired.
+	if msg := err.Error(); !strings.Contains(msg, "per-file deadline") {
+		t.Errorf("error should mention 'per-file deadline'; got: %v", err)
 	}
 }

@@ -170,7 +170,7 @@ func validateMermaidDiagrams(filePath string) ([]string, error) {
 		return nil, nil // No Mermaid diagrams found
 	}
 
-	var errors []string
+	var errs []string
 
 	// Create chrome context.
 	//
@@ -193,8 +193,19 @@ func validateMermaidDiagrams(filePath string) ([]string, error) {
 		chromedp.Flag("no-first-run", true),
 	)
 
-	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
-	defer cancel()
+	allocCtx, allocCancel := chromedp.NewExecAllocator(context.Background(), opts...)
+	defer allocCancel()
+
+	// Per-FILE deadline wrapping the whole diagram loop. Without it,
+	// a file with many diagrams hitting a sustained Chrome outage could
+	// run for N × 92s (3 attempts × 30s + 2 × 1s backoff per diagram)
+	// — for 10 diagrams that's ~15 min before the outer CI timeout
+	// kills it. 120s comfortably fits one diagram's worst case (90s)
+	// plus a second diagram's warm-attempt time, while bounding total
+	// wall time even if every diagram exhausts retries. Most files
+	// have 0-2 diagrams that complete in seconds.
+	fileCtx, fileCancel := context.WithTimeout(allocCtx, 120*time.Second)
+	defer fileCancel()
 
 	// Create a simple HTML page with Mermaid
 	for i, match := range matches {
@@ -224,16 +235,16 @@ func validateMermaidDiagrams(filePath string) ([]string, error) {
 		}
 		defer os.Remove(tmpFile)
 
-		hasError, runErr := validateOneMermaidDiagramWithRetry(allocCtx, tmpFile)
+		hasError, runErr := validateOneMermaidDiagramWithRetry(fileCtx, tmpFile)
 
 		if runErr != nil {
-			errors = append(errors, fmt.Sprintf("Diagram %d: Failed to validate (%v)", i+1, runErr))
+			errs = append(errs, fmt.Sprintf("Diagram %d: Failed to validate (%v)", i+1, runErr))
 		} else if hasError {
-			errors = append(errors, fmt.Sprintf("Diagram %d: Mermaid syntax error detected", i+1))
+			errs = append(errs, fmt.Sprintf("Diagram %d: Mermaid syntax error detected", i+1))
 		}
 	}
 
-	return errors, nil
+	return errs, nil
 }
 
 // validateOneMermaidDiagramWithRetry runs the chromedp navigation +
@@ -243,12 +254,18 @@ func validateMermaidDiagrams(filePath string) ([]string, error) {
 // context (or its underlying Chrome target) may be dead, so reusing it
 // would just hit the same error.
 //
+// `parentCtx` is the per-FILE deadline (see validateMermaidDiagrams).
+// If it expires (context.Canceled or context.DeadlineExceeded on the
+// parent) we stop retrying even if the attempt's own error was
+// transient — the outer file budget has been spent and any further
+// attempts would race the next file's cancellation.
+//
 // The transient classifier matches the actual flake observed on CI:
 // "websocket url timeout reached" (chromedp internal target-connection
 // failure) and context.DeadlineExceeded (timeout firing during
 // navigation). Non-transient errors (e.g. Chrome failed to launch)
 // surface on the first attempt without burning retries.
-func validateOneMermaidDiagramWithRetry(allocCtx context.Context, tmpFile string) (bool, error) {
+func validateOneMermaidDiagramWithRetry(parentCtx context.Context, tmpFile string) (bool, error) {
 	const (
 		maxAttempts    = 3
 		attemptTimeout = 30 * time.Second
@@ -261,10 +278,17 @@ func validateOneMermaidDiagramWithRetry(allocCtx context.Context, tmpFile string
 	)
 
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		// If the per-file budget has already expired, stop. Don't open
+		// a new Chrome context only to immediately error on its first
+		// step.
+		if err := parentCtx.Err(); err != nil {
+			return false, fmt.Errorf("per-file deadline expired after %d attempt(s): %w", attempt-1, err)
+		}
+
 		// Fresh browser context per attempt — recreating the chromedp
 		// context recovers from a dead Chrome target (websocket
 		// closed, renderer crashed) that the previous attempt left in.
-		ctx, ctxCancel := chromedp.NewContext(allocCtx)
+		ctx, ctxCancel := chromedp.NewContext(parentCtx)
 		ctx, timeoutCancel := context.WithTimeout(ctx, attemptTimeout)
 
 		lastErr = chromedp.Run(ctx,
@@ -310,6 +334,17 @@ func validateOneMermaidDiagramWithRetry(allocCtx context.Context, tmpFile string
 //
 // Anything else (Chrome failed to launch, file write errors, etc.) is
 // treated as permanent.
+//
+// Intentional over-matching: any error whose message contains
+// "websocket" or "timeout" (case-insensitive) is classified transient.
+// In theory this could trigger retries for a non-transient config
+// error like "websocket origin not allowed" — wasting up to 90s before
+// surfacing. We accept that trade-off because (a) the real-world
+// production flake comes from the websocket layer, and (b) a retried
+// config error still surfaces eventually with a clear message. If a
+// new error class shows up that's permanently misclassified, narrow
+// the matcher to specific chromedp error types rather than
+// substring-matching.
 func isTransientChromedpError(err error) bool {
 	if err == nil {
 		return false
