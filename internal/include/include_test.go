@@ -131,25 +131,53 @@ func TestResolve_SiteRootedRejectsProjectEscape(t *testing.T) {
 	// Even with the broader project-root confinement, attempts to
 	// escape beyond the project root must fail. Authors who genuinely
 	// want to include arbitrary filesystem paths shouldn't be able to.
+	//
+	// Both temp dirs are t.TempDir-managed so the test never writes
+	// outside an owned tree (concurrent test instances + leak-free
+	// cleanup, both via the test framework). The escape attempt is
+	// expressed relative to where the OS happens to put the temp dirs:
+	// outside lives at filepath.Base(outside) under filepath.Dir(both),
+	// so escaping from project means "/../<outside-basename>/outside.go".
 	project := t.TempDir()
+	outside := t.TempDir()
 	contentRoot := filepath.Join(project, "content")
 	pageDir := filepath.Join(contentRoot, "page")
-	outsideFile := filepath.Join(filepath.Dir(project), "outside.go")
+	outsideFile := filepath.Join(outside, "outside.go")
 	if err := os.MkdirAll(pageDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(outsideFile, []byte("body"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// t.Cleanup runs even on panic; defer os.Remove would leak the file
-	// outside the temp tree if this test ever panicked before reaching
-	// the deferred call.
-	t.Cleanup(func() { _ = os.Remove(outsideFile) })
 
-	// The leading slash makes this project-rooted, but "/../outside.go"
-	// resolves above the project root → still rejected.
-	if _, err := Resolve(pageDir, contentRoot, "/../outside.go"); err == nil {
-		t.Errorf("expected site-rooted escape above project to be rejected")
+	// Site-rooted but reaching across to a sibling of the project root
+	// resolves above the project's confinement → still rejected.
+	escape := "/../" + filepath.Base(outside) + "/outside.go"
+	if _, err := Resolve(pageDir, contentRoot, escape); err == nil {
+		t.Errorf("expected site-rooted escape above project to be rejected (path %q)", escape)
+	}
+}
+
+func TestResolve_SiteRootedRejectsRootOnly(t *testing.T) {
+	// "/" alone resolves to the project root directory. Slice would
+	// then attempt to read a directory as a file and produce a
+	// downstream error; Resolve catches it early with a clearer
+	// message.
+	project := t.TempDir()
+	contentRoot := filepath.Join(project, "content")
+	pageDir := filepath.Join(contentRoot, "page")
+	if err := os.MkdirAll(pageDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"/", "//", "///"} {
+		_, err := Resolve(pageDir, contentRoot, p)
+		if err == nil {
+			t.Errorf("expected Resolve(%q) to reject root-only path", p)
+			continue
+		}
+		if !strings.Contains(err.Error(), "project root") {
+			t.Errorf("Resolve(%q): expected 'project root' error message, got: %v", p, err)
+		}
 	}
 }
 

@@ -470,6 +470,17 @@ func Resolve(baseDir, root, includePath string) (string, error) {
 
 	var candidate, confineRoot string
 	if strings.HasPrefix(includePath, "/") {
+		// Normalise multiple leading slashes ("//foo", "///foo") to a
+		// single one. filepath.Join handles these correctly on Linux,
+		// but the trim arithmetic below is clearer with a single
+		// canonical leading "/".
+		normalised := "/" + strings.TrimLeft(includePath, "/")
+		// "/" alone resolves to the project root directory itself;
+		// downstream Slice would then try to read a directory as a
+		// file. Reject early with a clear message.
+		if normalised == "/" {
+			return "", fmt.Errorf("include %q resolves to the project root, not a file", includePath)
+		}
 		// resolvedRoot has already been EvalSymlinks'd, but its parent
 		// could still contain a symlink — e.g. when the whole project
 		// lives under a symlinked tree like macOS's /tmp → /private/tmp
@@ -480,7 +491,7 @@ func Resolve(baseDir, root, includePath string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("resolve project root for %q: %w", includePath, err)
 		}
-		candidate = filepath.Join(projectRoot, strings.TrimPrefix(includePath, "/"))
+		candidate = filepath.Join(projectRoot, strings.TrimPrefix(normalised, "/"))
 		confineRoot = projectRoot
 	} else {
 		candidate = includePath
