@@ -314,21 +314,28 @@ func validateOneMermaidDiagramWithRetry(parentCtx context.Context, tmpFile strin
 		}
 		if attempt < maxAttempts {
 			// Context-aware backoff: if the per-file deadline fires
-			// during the sleep, return early instead of waking up to
-			// the next iteration only to bail at its top-of-loop check.
+			// during the sleep, return directly rather than waking up
+			// to the next iteration only to bail at its top-of-loop
+			// check. Saves one trip around the loop.
 			select {
 			case <-time.After(backoff):
 			case <-parentCtx.Done():
+				return false, fmt.Errorf("per-file deadline expired during backoff (after %d attempt(s)): %w", attempt, parentCtx.Err())
 			}
 		}
 	}
 
-	// "per-attempt timeout" suffix disambiguates this terminal error
-	// from the per-file deadline path, which prefixes "per-file
-	// deadline expired". On a sustained Chrome outage both messages
-	// can surface in the same CI log; the prefix tells the operator
-	// which budget was the binding constraint.
-	return false, fmt.Errorf("after %d attempts (per-attempt timeout): %w", maxAttempts, lastErr)
+	// Only add the "(per-attempt timeout)" disambiguator when lastErr
+	// actually IS a per-attempt context.DeadlineExceeded. If we got
+	// here after N transient websocket errors (which don't go through
+	// context.DeadlineExceeded), the wrapped error already says
+	// "websocket url timeout reached" — distinct enough from the
+	// per-file path's "per-file deadline expired" prefix that an
+	// extra suffix would be misleading.
+	if errors.Is(lastErr, context.DeadlineExceeded) {
+		return false, fmt.Errorf("after %d attempts (per-attempt timeout): %w", maxAttempts, lastErr)
+	}
+	return false, fmt.Errorf("after %d attempts: %w", maxAttempts, lastErr)
 }
 
 // runOneMermaidAttempt runs a single chromedp Navigate + Evaluate
