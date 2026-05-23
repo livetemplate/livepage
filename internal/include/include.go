@@ -325,7 +325,12 @@ func renderSourceFooter(link LinkOptions, pageDir, incPath, absPath, lineRange s
 		// relative to the project (= repo) root. Use it verbatim and
 		// ignore PagePathInRepo, which only describes where the
 		// markdown page lives — irrelevant here.
-		repoPath = filepath.ToSlash(strings.TrimPrefix(incPath, "/"))
+		//
+		// TrimLeft (not TrimPrefix) so multiple leading slashes
+		// ("//examples/foo.go") match what Resolve normalises
+		// internally. TrimPrefix would only strip one slash and leave
+		// a malformed leading "/" in the rendered GitHub URL.
+		repoPath = filepath.ToSlash(strings.TrimLeft(incPath, "/"))
 	} else {
 		relToPage, err := filepath.Rel(pageDir, absPath)
 		if err != nil || strings.HasPrefix(relToPage, "..") {
@@ -449,6 +454,14 @@ func escapeText(s string) string { return html.EscapeString(s) }
 // Symlinks are followed on both candidate and confinement root before
 // the containment check so a symlinked tempdir (e.g. macOS /tmp →
 // /private/tmp) doesn't false-positive as an escape.
+//
+// Layout assumption: site-rooted paths use filepath.Dir(root) as the
+// project root, hard-coding the convention that the discovery root
+// sits one level inside the project (the typical "project/content/"
+// shape). If a caller passes the actual repo root as `root`, a "/foo"
+// include would resolve one level *above* the repo — surprising and
+// potentially escapes the project tree entirely. Callers with a
+// non-standard layout should prefer page-relative includes only.
 func Resolve(baseDir, root, includePath string) (string, error) {
 	if includePath == "" {
 		return "", fmt.Errorf("include path is empty")
@@ -492,12 +505,17 @@ func Resolve(baseDir, root, includePath string) (string, error) {
 			return "", fmt.Errorf("resolve project root for %q: %w", includePath, err)
 		}
 		candidate = filepath.Join(projectRoot, strings.TrimPrefix(normalised, "/"))
+		// Site-rooted: broader confinement (one level up) so includes
+		// can reach into sibling top-level folders like examples/.
 		confineRoot = projectRoot
 	} else {
 		candidate = includePath
 		if !filepath.IsAbs(candidate) {
 			candidate = filepath.Join(baseDir, candidate)
 		}
+		// Page-relative: tighter confinement to the discovery root —
+		// includes that would escape (e.g. "../../etc/passwd") are
+		// rejected even if they'd be inside the broader project.
 		confineRoot = resolvedRoot
 	}
 

@@ -213,6 +213,41 @@ func TestResolve_SiteRootedCanTargetContentRoot(t *testing.T) {
 	}
 }
 
+func TestPreprocess_GitHubFooter_SiteRooted_StripsExtraSlashes(t *testing.T) {
+	// Resolve normalises "//foo" to "/foo" internally before resolving;
+	// renderSourceFooter must do the same when building the URL,
+	// otherwise multiple leading slashes leak into the rendered href
+	// (e.g. /blob/main//examples/...) — a malformed but silent
+	// failure mode.
+	project := t.TempDir()
+	contentRoot := filepath.Join(project, "content")
+	pageDir := filepath.Join(contentRoot, "recipes", "x")
+	src := filepath.Join(project, "examples", "x", "x.go")
+	for _, d := range []string{pageDir, filepath.Dir(src)} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(src, []byte("body\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	md := "```go include=\"//examples/x/x.go\"\n```\n"
+	out, _, _ := PreprocessWithLinks([]byte(md), pageDir, contentRoot, LinkOptions{
+		RepoURL: "https://github.com/foo/bar",
+		Branch:  "main",
+	})
+	got := string(out)
+	wantHref := `href="https://github.com/foo/bar/blob/main/examples/x/x.go"`
+	if !strings.Contains(got, wantHref) {
+		t.Errorf("multiple leading slashes should be stripped from footer URL; got:\n%s", got)
+	}
+	// Explicit anti-assertion: the malformed "/blob/main//examples" must
+	// NOT appear (would indicate TrimPrefix-only stripping).
+	if strings.Contains(got, "/blob/main//") {
+		t.Errorf("footer URL has a double slash after branch — TrimLeft regressed to TrimPrefix? got:\n%s", got)
+	}
+}
+
 func TestPreprocess_GitHubFooter_SiteRooted(t *testing.T) {
 	// A site-rooted include can reach into a sibling folder that
 	// page-relative semantics would forbid. The footer must use the
