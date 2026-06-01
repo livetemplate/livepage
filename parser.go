@@ -128,6 +128,9 @@ type Frontmatter struct {
 	// binary's release version by cmd/tinkerdown/main.go); otherwise
 	// "main".
 	SourceRef string `yaml:"source_ref,omitempty"`
+	// SourceCommit records the exact upstream commit at sync time. It is
+	// displayed as provenance in site chrome when present.
+	SourceCommit string `yaml:"source_commit,omitempty"`
 
 	// Chart customization (keyed by heading slug)
 	Charts map[string]ChartOptions `yaml:"charts,omitempty"`

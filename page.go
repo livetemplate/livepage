@@ -186,6 +186,8 @@ func parseFile(path, siteRoot string) (*Page, error) {
 	page.SourceFile = absPath // Track source file
 	page.SourceRepo = fm.SourceRepo
 	page.SourcePath = fm.SourcePath
+	page.SourceRef = fm.SourceRef
+	page.SourceCommit = fm.SourceCommit
 	page.Sidebar = fm.Sidebar // Page-level sidebar override
 	page.Config = PageConfig{
 		Persist:   fm.Persist,
