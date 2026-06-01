@@ -14,6 +14,7 @@ export interface PageSection {
   title: string;
   element: HTMLElement;
   index: number;
+  level: number;
 }
 
 export class PageTOC {
@@ -47,11 +48,15 @@ export class PageTOC {
   }
 
   private parseSections() {
-    // Find all H2 elements within .content-wrapper
-    const headings = document.querySelectorAll('.content-wrapper h2');
+    // Include H3 entries only for long reference-like pages. Short pages
+    // stay H2-only so the sidebar doesn't become noisier than the content.
+    const h2s = document.querySelectorAll('.content-wrapper h2');
+    const includeH3 = h2s.length >= 8 || document.querySelectorAll('.content-wrapper h3').length >= 10;
+    const headings = document.querySelectorAll(includeH3 ? '.content-wrapper h2, .content-wrapper h3' : '.content-wrapper h2');
 
     headings.forEach((heading, index) => {
       const id = heading.id || this.generateId(heading.textContent || '');
+      const tagName = heading.tagName.toLowerCase();
 
       // Ensure heading has an ID for navigation
       if (!heading.id) {
@@ -62,7 +67,8 @@ export class PageTOC {
         id,
         title: heading.textContent || '',
         element: heading as HTMLElement,
-        index
+        index,
+        level: tagName === 'h3' ? 3 : 2
       });
     });
   }
@@ -91,7 +97,7 @@ export class PageTOC {
     const subNav = document.createElement('ul');
     subNav.className = 'page-toc-list';
     subNav.innerHTML = this.sections.map((section, i) => `
-      <li class="page-toc-item" data-section="${i}">
+      <li class="page-toc-item page-toc-level-${section.level}" data-section="${i}">
         <a href="#${section.id}" class="page-toc-link">
           ${this.escapeHtml(section.title)}
         </a>

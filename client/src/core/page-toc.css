@@ -50,6 +50,16 @@
   position: relative;
 }
 
+.page-toc-level-3 .page-toc-link {
+  padding-left: 2.75rem;
+  font-size: 0.8rem;
+}
+
+.page-toc-level-3 .page-toc-link::before {
+  left: 1.55rem;
+  content: '·';
+}
+
 /* Small dash/bullet before sub-nav items */
 .page-toc-link::before {
   content: '–';

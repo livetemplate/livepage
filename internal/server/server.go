@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io/fs"
 	"log"
 	"net/http"
@@ -55,7 +56,7 @@ type Server struct {
 	webhookHandler     *WebhookHandler                       // Webhook handler for external triggers
 	scheduleRunner     *schedule.Runner                      // Schedule runner for timed jobs
 	rateLimitCancel    context.CancelFunc                    // Stops the rate limiter cleanup goroutine
-	rateLimitDone      <-chan struct{}                        // Closed when rate limiter goroutine exits
+	rateLimitDone      <-chan struct{}                       // Closed when rate limiter goroutine exits
 	recentSourceWrites map[string]time.Time                  // Files recently written by source actions
 	sourceWriteMu      sync.Mutex                            // Protects recentSourceWrites
 	proxyRoutes        []*proxyRoute                         // Custom routes that bypass markdown resolution and reverse-proxy to upstream
@@ -892,6 +893,7 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
 			editURL,
 		)
 	}
+	sourceMetaHTML := renderSourceMeta(page)
 
 	// Wrap content with breadcrumbs and prev/next
 	contentWithNav := fmt.Sprintf(`
@@ -901,7 +903,8 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
 		</div>
 		%s
 		%s
-	`, breadcrumbsHTML, content, editLinkHTML, prevNextHTML)
+		%s
+	`, breadcrumbsHTML, content, sourceMetaHTML, editLinkHTML, prevNextHTML)
 
 	// Build WebSocket URL from host with page path for multi-page routing.
 	// Scheme MUST match the page's request scheme — see detectWSScheme.
@@ -1090,7 +1093,7 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="tinkerdown-ws-url" content="%s">
-    <meta name="tinkerdown-debug" content="true">
+    <meta name="tinkerdown-debug" content="%t">
     <meta name="tinkerdown-sidebar" content="%t">
     <title>%s</title>%s
     <!-- PicoCSS - Semantic/Classless CSS Framework (embedded) -->
@@ -1284,6 +1287,25 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
         [data-theme="dark"] .content-wrapper a:not(.prev-next-link):visited {
             color: rgb(196, 181, 253);
             border-bottom-color: rgba(196, 181, 253, 0.3);
+        }
+
+        .page-source-meta {
+            max-width: 900px;
+            margin: 0 auto 0.75rem auto;
+            padding: 0 3rem;
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            line-height: 1.5;
+        }
+
+        .page-source-meta code {
+            font-size: 0.85em;
+        }
+
+        .page-source-meta a {
+            color: var(--accent);
+            text-decoration: none;
+            border-bottom: 1px solid rgba(0, 102, 204, 0.3);
         }
 
         /* Code blocks */
@@ -2957,9 +2979,36 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
     %s
 %s
 </body>
-</html>`, wsURL, showSidebar, page.Title, seoTags, stylingOverrideCSS, prismIncludeCSS, sidebar, contentWithNav, defaultTheme, prismIncludeJS, mermaidScript, chartScript)
+</html>`, wsURL, s.config.Server.Debug, showSidebar, page.Title, seoTags, stylingOverrideCSS, prismIncludeCSS, sidebar, contentWithNav, defaultTheme, prismIncludeJS, mermaidScript, chartScript)
 
 	return html
+}
+
+func renderSourceMeta(page *tinkerdown.Page) string {
+	if page.SourceRepo == "" && page.SourcePath == "" && page.SourceRef == "" && page.SourceCommit == "" {
+		return ""
+	}
+	parts := []string{}
+	if page.SourceRepo != "" {
+		parts = append(parts, fmt.Sprintf(`source: <a href="%s" target="_blank" rel="noopener">%s</a>`,
+			html.EscapeString(page.SourceRepo),
+			html.EscapeString(strings.TrimPrefix(page.SourceRepo, "https://github.com/")),
+		))
+	}
+	if page.SourcePath != "" {
+		parts = append(parts, fmt.Sprintf(`path: <code>%s</code>`, html.EscapeString(page.SourcePath)))
+	}
+	if page.SourceRef != "" {
+		parts = append(parts, fmt.Sprintf(`ref: <code>%s</code>`, html.EscapeString(page.SourceRef)))
+	}
+	if page.SourceCommit != "" {
+		commit := page.SourceCommit
+		if len(commit) > 12 {
+			commit = commit[:12]
+		}
+		parts = append(parts, fmt.Sprintf(`commit: <code>%s</code>`, html.EscapeString(commit)))
+	}
+	return fmt.Sprintf(`<div class="page-source-meta">%s</div>`, strings.Join(parts, " · "))
 }
 
 // renderContent renders the page content with code blocks
@@ -3321,6 +3370,7 @@ func (s *Server) renderSidebar(currentPath string) string {
 	// Site title/logo
 	if s.config.Site != nil && s.config.Title != "" {
 		html.WriteString(fmt.Sprintf(`<div class="nav-header"><h2>%s</h2></div>`, s.config.Title))
+		html.WriteString(`<button type="button" class="search-button" data-search-button aria-label="Search docs"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg><span>Search</span><kbd>⌘K</kbd></button>`)
 	}
 
 	// Navigation sections

@@ -31,6 +31,8 @@ type Page struct {
 	SourceFile        string // Absolute path to source .md file (for error messages)
 	SourceRepo        string // Origin GitHub repo URL from frontmatter (for edit link)
 	SourcePath        string // Path within origin repo from frontmatter (for edit link)
+	SourceRef         string // Git ref from frontmatter, when known
+	SourceCommit      string // Immutable source commit from frontmatter, when known
 	Sidebar           *bool  // nil = use default, true/false = explicit override
 	Config            PageConfig
 	StaticHTML        string
