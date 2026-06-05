@@ -1,6 +1,7 @@
 /* PrismJS 1.29.0 — default ("light") theme, https://prismjs.com/download.html
-   Vendored so code blocks render on a light background to match the docs
-   site's light chrome. Paired with GetPrismCSS() in internal/assets. */
+   Hand-authored and kept readable (not minified — hence the .css name) so
+   code blocks render on a light background that matches the docs site's
+   light chrome. Paired with GetPrismCSS() in internal/assets. */
 code[class*="language-"],
 pre[class*="language-"] {
 	color: #1f2328;
