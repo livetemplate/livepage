@@ -1081,7 +1081,7 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
 	prismIncludeJS := ""
 	if len(page.IncludedFiles) > 0 {
 		prismIncludeCSS = `<link href="/assets/prism-line-highlight.css?v=light1" rel="stylesheet" />
-    <link href="/assets/prism-line-numbers.css?v=light1" rel="stylesheet" />`
+    <link href="/assets/prism-line-numbers.css" rel="stylesheet" />`
 		prismIncludeJS = `<script defer src="/assets/prism-line-highlight.js"></script>
     <script defer src="/assets/prism-line-numbers.js"></script>`
 	}
