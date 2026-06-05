@@ -95,22 +95,16 @@ jobs:
       - name: Smoke test
         env:
           EXPECTED_VERSION: ${{ steps.version.outputs.version }}
-          TARGET_ARCH: ${{ matrix.arch }}
         run: |
-          # Run the binary when this runner can execute it — natively, or on
-          # Apple Silicon via Rosetta for the amd64 build. If it genuinely
-          # can't run here, confirm the build produced an executable and skip
-          # the run rather than failing the release.
-          if VERSION_OUT=$(./tinkerdown version 2>/dev/null); then
-            echo "$VERSION_OUT"
-            echo "$VERSION_OUT" | grep -Fq "$EXPECTED_VERSION"
-            ./tinkerdown help
-          elif [ -x ./tinkerdown ]; then
-            echo "Built tinkerdown ($TARGET_ARCH) is not runnable on this runner; skipping execution smoke test."
-          else
-            echo "tinkerdown binary missing or not executable" >&2
-            exit 1
-          fi
+          # Every matrix target is runnable on its runner: arm64 natively,
+          # amd64 under Rosetta (preinstalled on macos-14), linux natively.
+          # So the binary must run and report the right version — a failure
+          # here is a real problem (broken build, crash, wrong version), not
+          # something to skip past.
+          VERSION_OUT=$(./tinkerdown version)
+          echo "$VERSION_OUT"
+          echo "$VERSION_OUT" | grep -Fq "$EXPECTED_VERSION"
+          ./tinkerdown help
 
       - name: Create archive
         run: |
