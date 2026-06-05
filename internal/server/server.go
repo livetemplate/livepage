@@ -1080,8 +1080,12 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
 	prismIncludeCSS := ""
 	prismIncludeJS := ""
 	if len(page.IncludedFiles) > 0 {
-		prismIncludeCSS = `<link href="/assets/prism-line-highlight.css" rel="stylesheet" />
-    <link href="/assets/prism-line-numbers.css" rel="stylesheet" />`
+		// ?v=light1 is applied to the whole Prism asset group (prism.css too,
+		// below) as one versioned unit, so a theme change bumps a single
+		// token and every Prism sheet re-fetches rather than tracking which
+		// individual file changed. Bump to light2, … on the next change.
+		prismIncludeCSS = `<link href="/assets/prism-line-highlight.css?v=light1" rel="stylesheet" />
+    <link href="/assets/prism-line-numbers.css?v=light1" rel="stylesheet" />`
 		prismIncludeJS = `<script defer src="/assets/prism-line-highlight.js"></script>
     <script defer src="/assets/prism-line-numbers.js"></script>`
 	}
@@ -2617,7 +2621,7 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
     %s
 
     <!-- Prism.js for syntax highlighting (embedded) -->
-    <link href="/assets/prism.css" rel="stylesheet" />
+    <link href="/assets/prism.css?v=light1" rel="stylesheet" />
     %s
 </head>
 <body>

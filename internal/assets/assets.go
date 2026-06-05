@@ -46,9 +46,9 @@ func GetPrismJS() ([]byte, error) {
 	return prismFS.ReadFile("vendor/prism/prism.min.js")
 }
 
-// GetPrismCSS returns the Prism.js theme CSS
+// GetPrismCSS returns the vendored light Prism.js theme CSS.
 func GetPrismCSS() ([]byte, error) {
-	return prismFS.ReadFile("vendor/prism/prism-tomorrow.min.css")
+	return prismFS.ReadFile("vendor/prism/prism-light.css")
 }
 
 // GetPrismLineHighlightJS returns the Prism Line Highlight plugin JS,
