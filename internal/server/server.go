@@ -7,8 +7,10 @@ import (
 	"html"
 	"io/fs"
 	"log"
+	"mime"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -765,7 +767,53 @@ func (s *Server) serveAsset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Filesystem fallback: serve user-provided assets from <rootDir>/assets.
+	// Runs only after every embedded vendor handler above, so a user file
+	// can never shadow pico.css/prism/etc. Lets sites ship their own CSS,
+	// fonts, and images (e.g. styling.custom_css → assets/landing.css).
+	if s.serveUserAsset(w, r, path) {
+		return
+	}
+
 	http.NotFound(w, r)
+}
+
+// serveUserAsset serves a file from <rootDir>/assets by its request-relative
+// path (already stripped of the "/assets/" prefix). Returns true if it wrote
+// a response. Guards against path traversal, refuses directories and unknown
+// content types, and sets nosniff so a stray file can't be MIME-confused.
+func (s *Server) serveUserAsset(w http.ResponseWriter, r *http.Request, relPath string) bool {
+	assetsDir := filepath.Join(s.rootDir, "assets")
+	full := filepath.Join(assetsDir, relPath) // Join cleans the path
+	// Containment guard: anything that climbed out of assetsDir surfaces as a
+	// "../"-prefixed relative path. This is the single load-bearing check.
+	rel, err := filepath.Rel(assetsDir, full)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return false
+	}
+	f, err := os.Open(full)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil || info.IsDir() {
+		return false
+	}
+	ct := mime.TypeByExtension(filepath.Ext(full))
+	if ct == "" {
+		return false // refuse to serve unknown/sniffable types
+	}
+	w.Header().Set("Content-Type", ct)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	// Revalidate on every request: user assets (custom CSS, fonts, images) are
+	// edited in place, and an aggressive max-age strands viewers on stale CSS
+	// (no filename hashing here). http.ServeContent honors If-Modified-Since via
+	// ModTime, so revalidation is a cheap 304 when unchanged. Sites wanting
+	// long-lived caching should use hashed filenames behind a CDN.
+	w.Header().Set("Cache-Control", "no-cache")
+	http.ServeContent(w, r, full, info.ModTime(), f)
+	return true
 }
 
 // serveSearchIndex serves the search index JSON for site mode
@@ -845,7 +893,28 @@ func detectWSScheme(r *http.Request) string {
 // http-served pages and "wss" for https-served pages — see
 // detectWSScheme. Passing the wrong scheme silently breaks every
 // interactive block under HTTPS via mixed-content rejection.
+// prismIncludeAssets returns the <link>/<script> tags for the Prism
+// line-highlight + line-numbers plugins, needed only when a page pulls in
+// source via `LANG include="..."` fences. Shared by the docs and landing
+// shells so the asset version token (?v=...) stays in lockstep across both.
+func prismIncludeAssets(page *tinkerdown.Page) (css, js string) {
+	if len(page.IncludedFiles) == 0 {
+		return "", ""
+	}
+	return `<link href="/assets/prism-line-highlight.css?v=light1" rel="stylesheet" />
+    <link href="/assets/prism-line-numbers.css?v=light1" rel="stylesheet" />`,
+		`<script defer src="/assets/prism-line-highlight.js"></script>
+    <script defer src="/assets/prism-line-numbers.js"></script>`
+}
+
 func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host string, wsScheme string) string {
+	// Pages can opt into a minimal, full-bleed shell via `layout: landing`.
+	// Branch before any docs-shell work so the default path is byte-for-byte
+	// unchanged. Unknown layout values fall through to the docs shell.
+	if strings.EqualFold(strings.TrimSpace(page.Layout), "landing") {
+		return s.renderLandingShell(page, currentPath, host, wsScheme)
+	}
+
 	// Render code blocks with metadata for client discovery
 	content := s.renderContent(page)
 
@@ -1077,18 +1146,10 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
 	// Conditionally include Prism Line Numbers and Line Highlight plugins
 	// (~30 KB combined) only on pages that have `include=` blocks.
 	// Pages without source-include snippets pay no cost.
-	prismIncludeCSS := ""
-	prismIncludeJS := ""
-	if len(page.IncludedFiles) > 0 {
-		// ?v=light1 is applied to the whole Prism asset group (prism.css too,
-		// below) as one versioned unit, so a theme change bumps a single
-		// token and every Prism sheet re-fetches rather than tracking which
-		// individual file changed. Bump to light2, … on the next change.
-		prismIncludeCSS = `<link href="/assets/prism-line-highlight.css?v=light1" rel="stylesheet" />
-    <link href="/assets/prism-line-numbers.css?v=light1" rel="stylesheet" />`
-		prismIncludeJS = `<script defer src="/assets/prism-line-highlight.js"></script>
-    <script defer src="/assets/prism-line-numbers.js"></script>`
-	}
+	// ?v=light1 versions the whole Prism asset group as one unit; bump on
+	// theme change so every Prism sheet re-fetches. Shared with the landing
+	// shell via prismIncludeAssets.
+	prismIncludeCSS, prismIncludeJS := prismIncludeAssets(page)
 
 	// Basic HTML wrapper with the static content
 	html := fmt.Sprintf(`<!DOCTYPE html>
@@ -2986,6 +3047,77 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
 </html>`, wsURL, s.config.Server.Debug, showSidebar, page.Title, seoTags, stylingOverrideCSS, prismIncludeCSS, sidebar, contentWithNav, defaultTheme, prismIncludeJS, mermaidScript, chartScript)
 
 	return html
+}
+
+// renderLandingShell renders a page declaring `layout: landing` in a minimal,
+// full-bleed document: no sidebar, breadcrumbs, content-wrapper clamp, or docs
+// typography. It still loads the tinkerdown client JS (so embed-lvt demos and
+// WebSocket reactivity work), Prism for code highlighting, applies silent theme
+// detection (no visible toggle), and injects styling.custom_css when set — so a
+// site can ship bespoke marketing styling without inheriting the docs chrome.
+// Note: mermaid/chart runtimes are intentionally omitted here; landing pages
+// are marketing surfaces, not diagram-heavy docs. Add them if that need arises.
+func (s *Server) renderLandingShell(page *tinkerdown.Page, currentPath, host, wsScheme string) string {
+	content := s.renderContent(page)
+	wsURL := fmt.Sprintf("%s://%s/ws?page=%s", wsScheme, host, url.QueryEscape(currentPath))
+	seoTags := s.buildSEOTags(page, currentPath)
+	defaultTheme := themeDefault(s.config.Styling)
+	customCSS := buildCustomCSSLink(s.config.Styling.CustomCSS)
+
+	prismIncludeCSS, prismIncludeJS := prismIncludeAssets(page)
+
+	return fmt.Sprintf(`<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="tinkerdown-ws-url" content="%s">
+    <meta name="tinkerdown-debug" content="%t">
+    <meta name="tinkerdown-sidebar" content="false">
+    <title>%s</title>%s
+    <!-- PicoCSS: the shared foundation embed-lvt demos assume is loaded
+         site-wide (recipe apps keep their CSS in-body and reference Pico
+         variables). The landing drops the docs CHROME, not this foundation.
+         custom_css loads last (below) so bespoke landing styling still wins. -->
+    <link rel="stylesheet" href="/assets/pico.css">
+    <link rel="stylesheet" href="/assets/tinkerdown-client.css">
+    <link href="/assets/prism.css?v=light1" rel="stylesheet" />
+    %s
+    %s
+</head>
+<body class="lvt-landing">
+    %s
+
+    <script>
+        // Silent theme detection — landing pages have no visible theme toggle.
+        (function() {
+            var html = document.documentElement;
+            function sys() { return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; }
+            function apply(t) { html.setAttribute('data-theme', t === 'auto' ? sys() : t); }
+            apply(localStorage.getItem('tinkerdown-theme') || %q);
+            window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function() {
+                if ((localStorage.getItem('tinkerdown-theme') || %q) === 'auto') apply('auto');
+            });
+        })();
+    </script>
+
+    <script defer src="/assets/tinkerdown-client.js"></script>
+    <script defer src="/assets/prism.js"></script>
+    <script defer src="/assets/prism-go.js"></script>
+    <script defer src="/assets/prism-javascript.js"></script>
+    <script defer src="/assets/prism-jsx.js"></script>
+    <script defer src="/assets/prism-markup.js"></script>
+    <script defer src="/assets/prism-css.js"></script>
+    <script defer src="/assets/prism-yaml.js"></script>
+    <script defer src="/assets/prism-json.js"></script>
+    <script defer src="/assets/prism-bash.js"></script>
+    <script defer src="/assets/prism-markdown.js"></script>
+    %s
+    <script>
+        document.addEventListener('DOMContentLoaded', function() { Prism.highlightAll(); });
+    </script>
+</body>
+</html>`, wsURL, s.config.Server.Debug, page.Title, seoTags, prismIncludeCSS, customCSS, content, defaultTheme, defaultTheme, prismIncludeJS)
 }
 
 func renderSourceMeta(page *tinkerdown.Page) string {

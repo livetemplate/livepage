@@ -189,6 +189,7 @@ func parseFile(path, siteRoot string) (*Page, error) {
 	page.SourceRef = fm.SourceRef
 	page.SourceCommit = fm.SourceCommit
 	page.Sidebar = fm.Sidebar // Page-level sidebar override
+	page.Layout = fm.Layout   // Page shell selection ("" = docs, "landing" = minimal)
 	page.Config = PageConfig{
 		Persist:   fm.Persist,
 		MultiStep: fm.Steps > 0,
@@ -316,6 +317,7 @@ func ParseString(content string) (*Page, error) {
 	page.StaticHTML = staticHTML
 	page.SourceFile = "playground"
 	page.Sidebar = fm.Sidebar // Page-level sidebar override
+	page.Layout = fm.Layout   // Page shell selection ("" = docs, "landing" = minimal)
 	page.Config = PageConfig{
 		Persist:   fm.Persist,
 		MultiStep: fm.Steps > 0,
@@ -358,6 +360,7 @@ func BuildPage(id, sourceFile string, content []byte) (*Page, error) {
 	page.StaticHTML = staticHTML
 	page.SourceFile = sourceFile
 	page.Sidebar = fm.Sidebar
+	page.Layout = fm.Layout
 	page.Config = PageConfig{
 		Persist:   fm.Persist,
 		MultiStep: fm.Steps > 0,
