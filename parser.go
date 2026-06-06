@@ -107,6 +107,14 @@ type Frontmatter struct {
 	// Top-level convenience options
 	Sidebar *bool `yaml:"sidebar,omitempty"` // Show navigation sidebar (overrides features.sidebar)
 
+	// Layout selects the page shell. "" or "docs" (default) renders the full
+	// docs chrome (sidebar, breadcrumbs, opinionated typography). "landing"
+	// renders a minimal full-bleed shell for bespoke marketing pages — no
+	// sidebar, no content-wrapper clamp, no docs typography — while still
+	// loading the client JS (so embed-lvt demos work) and any styling.custom_css.
+	// Unknown values fall back to the docs layout.
+	Layout string `yaml:"layout,omitempty"`
+
 	// LvtShowSource toggles the page-level default for ` ```lvt ` block source
 	// display. When true, every ` ```lvt ` block on the page renders both its
 	// template source as a syntax-highlighted code listing AND the live

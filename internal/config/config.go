@@ -513,6 +513,11 @@ type StylingConfig struct {
 	Theme        string `yaml:"theme"`
 	PrimaryColor string `yaml:"primary_color"`
 	Font         string `yaml:"font"`
+	// CustomCSS is a site-relative path (e.g. "assets/landing.css") served
+	// from <rootDir>/assets and injected as a <link> in the <head> of pages
+	// using `layout: landing`. Lets a site carry bespoke styling for its
+	// marketing/landing pages without touching the default docs shell.
+	CustomCSS string `yaml:"custom_css,omitempty"`
 }
 
 // BlocksConfig holds block-related configuration

@@ -34,6 +34,7 @@ type Page struct {
 	SourceRef         string // Git ref from frontmatter, when known
 	SourceCommit      string // Immutable source commit from frontmatter, when known
 	Sidebar           *bool  // nil = use default, true/false = explicit override
+	Layout            string // From frontmatter; "" / "docs" = default shell, "landing" = minimal full-bleed shell
 	Config            PageConfig
 	StaticHTML        string
 	ServerBlocks      map[string]*ServerBlock

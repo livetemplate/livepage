@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"html"
 	"strings"
 
 	"github.com/livetemplate/tinkerdown/internal/config"
@@ -45,6 +46,31 @@ func buildStylingOverrideCSS(s config.StylingConfig) string {
 	}
 	out.WriteString("    </style>")
 	return out.String()
+}
+
+// buildCustomCSSLink returns a <link rel="stylesheet"> tag for a configured
+// custom stylesheet path, or "" if unset/unsafe. The path is site-relative
+// (e.g. "assets/landing.css") and served from <rootDir>/assets by serveAsset.
+// Paths containing characters that could break out of the href attribute are
+// rejected (return "") rather than emitted unsafely.
+func buildCustomCSSLink(cssPath string) string {
+	p := strings.TrimSpace(cssPath)
+	if p == "" {
+		return ""
+	}
+	// Reject anything that could escape the attribute or smell like a remote /
+	// protocol-relative URL. Check BEFORE trimming the leading slash so that a
+	// "//host/x" input is caught (trimming one slash first would hide the "//"
+	// and yield a protocol-relative href). This is a same-origin, server-
+	// relative asset path only — no scheme, no "//", no escapes.
+	if strings.ContainsAny(p, "\"'<>\n\r :") || strings.Contains(p, "//") {
+		return ""
+	}
+	p = strings.TrimPrefix(p, "/") // normalize "/assets/x" and "assets/x" alike
+	if p == "" {
+		return ""
+	}
+	return fmt.Sprintf(`<link rel="stylesheet" href="/%s">`, html.EscapeString(p))
 }
 
 // sanitizeCSSValue strips characters that could escape a CSS value/string
