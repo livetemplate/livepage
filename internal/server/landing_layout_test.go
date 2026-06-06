@@ -200,3 +200,40 @@ func TestServeUserAsset(t *testing.T) {
 		}
 	})
 }
+
+// TestAssetContentType guards the host-independent MIME resolution. The
+// fallback table is asserted directly so the test cannot false-pass on a host
+// whose mime database already knows web fonts (e.g. a dev machine with
+// /etc/mime.types) — that very host-dependence is what 404s fonts on a minimal
+// alpine deploy.
+func TestAssetContentType(t *testing.T) {
+	t.Run("fallback table covers web fonts", func(t *testing.T) {
+		want := map[string]string{
+			".woff2": "font/woff2",
+			".woff":  "font/woff",
+			".ttf":   "font/ttf",
+			".otf":   "font/otf",
+			".eot":   "application/vnd.ms-fontobject",
+		}
+		for ext, ct := range want {
+			if got := fallbackAssetTypes[ext]; got != ct {
+				t.Errorf("fallbackAssetTypes[%q] = %q, want %q", ext, got, ct)
+			}
+		}
+	})
+
+	t.Run("resolves fonts and rejects unknown", func(t *testing.T) {
+		if got := assetContentType(".woff2"); got != "font/woff2" {
+			t.Errorf("assetContentType(.woff2) = %q, want font/woff2", got)
+		}
+		// Case-insensitive, mirroring mime.TypeByExtension.
+		if got := assetContentType(".WOFF2"); got != "font/woff2" {
+			t.Errorf("assetContentType(.WOFF2) = %q, want font/woff2", got)
+		}
+		// Genuinely unknown extensions stay empty so serveUserAsset still refuses
+		// them (nosniff defense against MIME confusion).
+		if got := assetContentType(".totallybogus"); got != "" {
+			t.Errorf("assetContentType(.totallybogus) = %q, want \"\"", got)
+		}
+	})
+}
