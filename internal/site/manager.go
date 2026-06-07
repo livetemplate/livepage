@@ -12,12 +12,28 @@ import (
 
 // PageNode represents a page in the site structure
 type PageNode struct {
-	Title    string      // Page title from frontmatter or config
-	Path     string      // URL path (e.g., "/getting-started/installation")
-	FilePath string      // Relative file path (e.g., "getting-started/installation.md")
-	Page     *tinkerdown.Page // Parsed page content
-	IsHome   bool        // Whether this is the home page
-	Children []*PageNode // Child pages (for sections)
+	Title     string           // Page title from frontmatter or config
+	Path      string           // URL path (e.g., "/getting-started/installation")
+	FilePath  string           // Relative file path (e.g., "getting-started/installation.md")
+	Page      *tinkerdown.Page // Parsed page content
+	IsHome    bool             // Whether this is the home page
+	Collapsed bool             // For sections/groups: whether collapsed by default
+	Children  []*PageNode      // Child pages (for sections and groups)
+}
+
+// ContainsPath reports whether this node or any descendant has the given URL
+// path. Used to keep a collapsed section/group open when it holds the active
+// page, and to resolve a nested page's section in the search index.
+func (n *PageNode) ContainsPath(urlPath string) bool {
+	if n.Path == urlPath {
+		return true
+	}
+	for _, child := range n.Children {
+		if child.ContainsPath(urlPath) {
+			return true
+		}
+	}
+	return false
 }
 
 // Manager handles multi-page site discovery and navigation
@@ -54,45 +70,19 @@ func (m *Manager) Discover() error {
 func (m *Manager) discoverFromConfig() error {
 	for _, section := range m.config.Navigation {
 		sectionNode := &PageNode{
-			Title:    section.Title,
-			Path:     "/" + section.Path,
-			Children: make([]*PageNode, 0),
+			Title:     section.Title,
+			Path:      "/" + section.Path,
+			Collapsed: section.Collapsed,
+			Children:  make([]*PageNode, 0),
 		}
 
-		// Process pages in this section
+		// Process pages in this section (each may itself be a group of pages)
 		for _, page := range section.Pages {
-			// Resolve file path
-			filePath := page.Path
-			if !strings.HasSuffix(filePath, ".md") {
-				filePath += ".md"
-			}
-
-			absPath := filepath.Join(m.rootDir, filePath)
-
-			// Parse the page
-			parsed, err := tinkerdown.ParseFileInSite(absPath, m.rootDir)
+			child, err := m.buildNavPageNode(page)
 			if err != nil {
-				return fmt.Errorf("failed to parse %s: %w", filePath, err)
+				return err
 			}
-
-			// Generate URL path
-			urlPath := mdToURLPath(filePath)
-
-			pageNode := &PageNode{
-				Title:    page.Title,
-				Path:     urlPath,
-				FilePath: filePath,
-				Page:     parsed,
-			}
-
-			// Check if this is the home page
-			if m.config.Site != nil && filePath == m.config.Site.Home {
-				pageNode.IsHome = true
-				m.home = pageNode
-			}
-
-			sectionNode.Children = append(sectionNode.Children, pageNode)
-			m.pages[urlPath] = pageNode
+			sectionNode.Children = append(sectionNode.Children, child)
 		}
 
 		m.nav = append(m.nav, sectionNode)
@@ -120,6 +110,59 @@ func (m *Manager) discoverFromConfig() error {
 	}
 
 	return nil
+}
+
+// buildNavPageNode builds a PageNode for one nav entry, recursing into any
+// sub-pages. An entry with a Path is parsed and registered in m.pages so the
+// site server will serve it — this registration must reach every leaf at any
+// depth, or a nested page silently 404s. An entry with Pages becomes a group
+// whose Children are built recursively (a group may also carry its own Path,
+// acting as a landing page for the group).
+func (m *Manager) buildNavPageNode(page config.NavPage) (*PageNode, error) {
+	// A nav entry with neither a path nor sub-pages is meaningless and would
+	// otherwise vanish silently from the sidebar — fail fast on the typo.
+	if page.Path == "" && len(page.Pages) == 0 {
+		return nil, fmt.Errorf("nav entry %q has neither a path nor pages", page.Title)
+	}
+
+	node := &PageNode{
+		Title:     page.Title,
+		Collapsed: page.Collapsed,
+	}
+
+	if page.Path != "" {
+		filePath := page.Path
+		if !strings.HasSuffix(filePath, ".md") {
+			filePath += ".md"
+		}
+
+		absPath := filepath.Join(m.rootDir, filePath)
+		parsed, err := tinkerdown.ParseFileInSite(absPath, m.rootDir)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse %s: %w", filePath, err)
+		}
+
+		node.Path = mdToURLPath(filePath)
+		node.FilePath = filePath
+		node.Page = parsed
+
+		if m.config.Site != nil && filePath == m.config.Site.Home {
+			node.IsHome = true
+			m.home = node
+		}
+
+		m.pages[node.Path] = node
+	}
+
+	for _, sub := range page.Pages {
+		child, err := m.buildNavPageNode(sub)
+		if err != nil {
+			return nil, err
+		}
+		node.Children = append(node.Children, child)
+	}
+
+	return node, nil
 }
 
 // discoverFromFiles auto-discovers pages from directory structure
@@ -423,16 +466,12 @@ func (m *Manager) GenerateSearchIndex() []SearchEntry {
 		// Extract text content from the page
 		content := extractTextContent(page.Page)
 
-		// Find the section this page belongs to
+		// Find the top-level section this page belongs to, searching the
+		// whole subtree so nested (grouped) pages still resolve their section.
 		section := ""
 		for _, navNode := range m.nav {
-			for _, child := range navNode.Children {
-				if child.Path == page.Path {
-					section = navNode.Title
-					break
-				}
-			}
-			if section != "" {
+			if navNode.ContainsPath(page.Path) {
+				section = navNode.Title
 				break
 			}
 		}

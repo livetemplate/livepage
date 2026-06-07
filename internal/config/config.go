@@ -459,10 +459,15 @@ type NavSection struct {
 	Pages     []NavPage `yaml:"pages,omitempty"`    // Pages in this section
 }
 
-// NavPage represents a single page in navigation
+// NavPage represents a single entry in navigation. It is either a leaf
+// (Path set, no Pages) or a collapsible group (Pages set) — or both, a
+// landing page that also owns sub-pages. Groups let a long section nest its
+// pages by category instead of rendering as one flat list.
 type NavPage struct {
-	Title string `yaml:"title"` // Page title (e.g., "Installation")
-	Path  string `yaml:"path"`  // Page path (e.g., "getting-started/installation.md")
+	Title     string    `yaml:"title"`               // Page or group title (e.g., "Installation", "Forms & Editing")
+	Path      string    `yaml:"path,omitempty"`      // Page path (e.g., "getting-started/installation.md"); empty for a pure group
+	Collapsed bool      `yaml:"collapsed,omitempty"` // For groups: whether collapsed by default
+	Pages     []NavPage `yaml:"pages,omitempty"`     // Sub-pages; presence makes this a group
 }
 
 // SecurityConfig exposes site-level security knobs that change emitted

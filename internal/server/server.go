@@ -2075,6 +2075,44 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
             background: var(--code-bg);
         }
 
+        /* Sections + groups are native <details>/<summary> (zero-JS collapse;
+         * chevron comes free from Pico's summary::after). Pico also adds
+         * details margins and an accordion summary color — these id-scoped
+         * rules clear that spacing and re-assert the sidebar's own look (the
+         * #id beats Pico's summary:not([role]) specificity). */
+        #tinkerdown-sidebar details.nav-section,
+        #tinkerdown-sidebar details.nav-group {
+            margin: 0;
+        }
+        /* Pico already styles <summary> with cursor:pointer, suppresses the
+         * native disclosure triangle, and draws its own chevron via
+         * summary::after — which we keep. Nothing extra needed here. */
+        #tinkerdown-sidebar details[open] > .nav-section-title,
+        #tinkerdown-sidebar details[open] > .nav-group-title {
+            margin-bottom: 0;
+        }
+        #tinkerdown-sidebar .nav-section-title {
+            color: var(--text-secondary);
+        }
+        /* Category group header: an indented sub-label under a section. */
+        #tinkerdown-sidebar .nav-group-item {
+            display: list-item;
+            margin: 0;
+            padding: 0;
+        }
+        #tinkerdown-sidebar .nav-group-title {
+            padding: 0.65rem 2.5rem 0.65rem 3rem;
+            font-size: 0.78rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+        }
+        /* Indent leaf links inside a group so the hierarchy reads at a glance. */
+        #tinkerdown-sidebar .nav-group .nav-pages li a {
+            padding-left: 3.75rem;
+        }
+
         .nav-pages {
             /* Override PicoCSS nav ul { display: flex } which would otherwise
              * lay out nav items horizontally and crush them in the sidebar. */
@@ -3541,24 +3579,23 @@ func (s *Server) renderSidebar(currentPath string) string {
 		html.WriteString(`<button type="button" class="search-button" data-search-button aria-label="Search docs"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg><span>Search</span><kbd>⌘K</kbd></button>`)
 	}
 
-	// Navigation sections
+	// Navigation sections. Each section is a native <details> so it can
+	// collapse — honoring `collapsed` in the config, and forced open when it
+	// holds the active page so deep links never land inside a closed section.
+	// Nested groups (categories) recurse through the same mechanism.
 	for _, section := range nav {
-		html.WriteString(`<div class="nav-section">`)
-		html.WriteString(fmt.Sprintf(`<div class="nav-section-title">%s</div>`, section.Title))
+		openAttr := ""
+		if !section.Collapsed || section.ContainsPath(currentPath) {
+			openAttr = " open"
+		}
+		html.WriteString(fmt.Sprintf(`<details class="nav-section"%s>`, openAttr))
+		html.WriteString(fmt.Sprintf(`<summary class="nav-section-title">%s</summary>`, escapeHTML(section.Title)))
 
 		if len(section.Children) > 0 {
-			html.WriteString(`<ul class="nav-pages">`)
-			for _, page := range section.Children {
-				activeClass := ""
-				if page.Path == currentPath {
-					activeClass = " active"
-				}
-				html.WriteString(fmt.Sprintf(`<li><a href="%s" class="nav-page-link%s">%s</a></li>`, page.Path, activeClass, page.Title))
-			}
-			html.WriteString(`</ul>`)
+			writeNavChildren(&html, section.Children, currentPath)
 		}
 
-		html.WriteString(`</div>`)
+		html.WriteString(`</details>`)
 	}
 
 	html.WriteString(`</nav>`)
@@ -3592,6 +3629,63 @@ func (s *Server) renderSidebar(currentPath string) string {
 	})();</script>`)
 
 	return html.String()
+}
+
+// escapeHTML HTML-escapes a string for safe interpolation into nav markup.
+// Defined at package scope (not inside renderSidebar, where the local `html`
+// strings.Builder shadows the stdlib html package).
+func escapeHTML(s string) string { return html.EscapeString(s) }
+
+// writeNavLink writes one <li> link for a node, marking it active when it is
+// the current page.
+func writeNavLink(b *strings.Builder, node *site.PageNode, currentPath string) {
+	activeClass := ""
+	if node.Path == currentPath {
+		activeClass = " active"
+	}
+	b.WriteString(fmt.Sprintf(`<li><a href="%s" class="nav-page-link%s">%s</a></li>`, escapeHTML(node.Path), activeClass, escapeHTML(node.Title)))
+}
+
+// writeNavNode renders a single nav node as an <li>. A node with children is a
+// collapsible <details> group (open when not collapsed or when it holds the
+// active page); a node with a path is a link. A group that also has a path
+// contributes a link to its own landing page as the first item in the group.
+func writeNavNode(b *strings.Builder, node *site.PageNode, currentPath string) {
+	if len(node.Children) > 0 {
+		openAttr := ""
+		if !node.Collapsed || node.ContainsPath(currentPath) {
+			openAttr = " open"
+		}
+		b.WriteString(`<li class="nav-group-item">`)
+		b.WriteString(fmt.Sprintf(`<details class="nav-group"%s>`, openAttr))
+		b.WriteString(fmt.Sprintf(`<summary class="nav-group-title">%s</summary>`, escapeHTML(node.Title)))
+		b.WriteString(`<ul class="nav-pages">`)
+		if node.Path != "" {
+			writeNavLink(b, node, currentPath)
+		}
+		for _, child := range node.Children {
+			writeNavNode(b, child, currentPath)
+		}
+		b.WriteString(`</ul></details></li>`)
+		return
+	}
+
+	// Defense-in-depth: a path-less leaf would emit <a href=""> (a dead link
+	// to root). Discover already rejects such entries, so this only guards
+	// against a future code path that builds one directly.
+	if node.Path == "" {
+		return
+	}
+	writeNavLink(b, node, currentPath)
+}
+
+// writeNavChildren renders a list of nav nodes into b as a <ul>.
+func writeNavChildren(b *strings.Builder, nodes []*site.PageNode, currentPath string) {
+	b.WriteString(`<ul class="nav-pages">`)
+	for _, node := range nodes {
+		writeNavNode(b, node, currentPath)
+	}
+	b.WriteString(`</ul>`)
 }
 
 // renderBreadcrumbs renders breadcrumb navigation
