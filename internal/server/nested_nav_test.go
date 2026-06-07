@@ -122,8 +122,8 @@ func TestNestedSidebarStructure(t *testing.T) {
 	}
 	for _, want := range []string{
 		`<summary class="nav-section-title">UI Patterns</summary>`,
-		`<summary class="nav-group-title">Forms & Editing</summary>`,
-		`<summary class="nav-group-title">Lists & Data</summary>`,
+		`<summary class="nav-group-title">Forms &amp; Editing</summary>`,
+		`<summary class="nav-group-title">Lists &amp; Data</summary>`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("sidebar missing %q", want)
@@ -145,10 +145,10 @@ func TestNestedCollapseState(t *testing.T) {
 	if !strings.Contains(body, `<details class="nav-section" open><summary class="nav-section-title">UI Patterns</summary>`) {
 		t.Error("UI Patterns section should be open (holds active page)")
 	}
-	if !strings.Contains(body, `<details class="nav-group" open><summary class="nav-group-title">Forms & Editing</summary>`) {
+	if !strings.Contains(body, `<details class="nav-group" open><summary class="nav-group-title">Forms &amp; Editing</summary>`) {
 		t.Error("Forms group should be open (holds active page)")
 	}
-	if !strings.Contains(body, `<details class="nav-group"><summary class="nav-group-title">Lists & Data</summary>`) {
+	if !strings.Contains(body, `<details class="nav-group"><summary class="nav-group-title">Lists &amp; Data</summary>`) {
 		t.Error("Lists group should be closed (collapsed, does not hold active page)")
 	}
 

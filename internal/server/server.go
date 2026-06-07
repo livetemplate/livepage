@@ -2075,12 +2075,11 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
             background: var(--code-bg);
         }
 
-        /* Sidebar sections and nested category groups are native
-         * <details>/<summary> elements, so they collapse with zero JS and the
-         * disclosure chevron comes free from PicoCSS's summary::after. Pico
-         * also adds bottom margins and an accordion summary color, though;
-         * these id-scoped rules clear that spacing and re-assert the sidebar's
-         * own look (the #id beats Pico's summary:not([role]) specificity). */
+        /* Sections + groups are native <details>/<summary> (zero-JS collapse;
+         * chevron comes free from Pico's summary::after). Pico also adds
+         * details margins and an accordion summary color — these id-scoped
+         * rules clear that spacing and re-assert the sidebar's own look (the
+         * #id beats Pico's summary:not([role]) specificity). */
         #tinkerdown-sidebar details.nav-section,
         #tinkerdown-sidebar details.nav-group {
             margin: 0;
@@ -3592,7 +3591,7 @@ func (s *Server) renderSidebar(currentPath string) string {
 			openAttr = " open"
 		}
 		html.WriteString(fmt.Sprintf(`<details class="nav-section"%s>`, openAttr))
-		html.WriteString(fmt.Sprintf(`<summary class="nav-section-title">%s</summary>`, section.Title))
+		html.WriteString(fmt.Sprintf(`<summary class="nav-section-title">%s</summary>`, escapeHTML(section.Title)))
 
 		if len(section.Children) > 0 {
 			writeNavChildren(&html, section.Children, currentPath)
@@ -3634,6 +3633,11 @@ func (s *Server) renderSidebar(currentPath string) string {
 	return html.String()
 }
 
+// escapeHTML HTML-escapes a string for safe interpolation into nav markup.
+// Defined at package scope (not inside renderSidebar, where the local `html`
+// strings.Builder shadows the stdlib html package).
+func escapeHTML(s string) string { return html.EscapeString(s) }
+
 // writeNavChildren renders a list of nav nodes into b, recursing into groups.
 // A node with children becomes a collapsible <details> group; a leaf becomes a
 // link. Groups open when not collapsed, or when they hold the active page.
@@ -3647,9 +3651,15 @@ func writeNavChildren(b *strings.Builder, nodes []*site.PageNode, currentPath st
 			}
 			b.WriteString(`<li class="nav-group-item">`)
 			b.WriteString(fmt.Sprintf(`<details class="nav-group"%s>`, openAttr))
-			b.WriteString(fmt.Sprintf(`<summary class="nav-group-title">%s</summary>`, node.Title))
+			b.WriteString(fmt.Sprintf(`<summary class="nav-group-title">%s</summary>`, escapeHTML(node.Title)))
 			writeNavChildren(b, node.Children, currentPath)
 			b.WriteString(`</details></li>`)
+			continue
+		}
+
+		// A node with neither a path nor children is a malformed config entry;
+		// rendering it would emit <a href=""> — a dead link to the site root.
+		if node.Path == "" {
 			continue
 		}
 
@@ -3657,7 +3667,7 @@ func writeNavChildren(b *strings.Builder, nodes []*site.PageNode, currentPath st
 		if node.Path == currentPath {
 			activeClass = " active"
 		}
-		b.WriteString(fmt.Sprintf(`<li><a href="%s" class="nav-page-link%s">%s</a></li>`, node.Path, activeClass, node.Title))
+		b.WriteString(fmt.Sprintf(`<li><a href="%s" class="nav-page-link%s">%s</a></li>`, node.Path, activeClass, escapeHTML(node.Title)))
 	}
 	b.WriteString(`</ul>`)
 }
