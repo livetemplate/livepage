@@ -778,6 +778,32 @@ func (s *Server) serveAsset(w http.ResponseWriter, r *http.Request) {
 	http.NotFound(w, r)
 }
 
+// fallbackAssetTypes maps well-known web-asset extensions to their MIME types
+// so serveUserAsset can resolve them without depending on the host OS mime
+// database. mime.TypeByExtension augments Go's small built-in table from OS
+// files (/etc/mime.types et al.), and minimal runtime images — notably the
+// alpine base this ships in — carry none of them. Go's built-in table knows
+// .css/.js/.svg but not web fonts, so without this table a deployed site 404s
+// every .woff2 while serving .css fine. Extensions are matched lowercased.
+var fallbackAssetTypes = map[string]string{
+	".woff2": "font/woff2",
+	".woff":  "font/woff",
+	".ttf":   "font/ttf",
+	".otf":   "font/otf",
+	".eot":   "application/vnd.ms-fontobject",
+}
+
+// assetContentType resolves the Content-Type for a user asset by extension. It
+// prefers the host mime database (via mime.TypeByExtension) and falls back to
+// fallbackAssetTypes for web fonts the host may not know. It returns "" only
+// for genuinely unknown extensions, preserving serveUserAsset's nosniff refusal.
+func assetContentType(ext string) string {
+	if ct := mime.TypeByExtension(ext); ct != "" {
+		return ct
+	}
+	return fallbackAssetTypes[strings.ToLower(ext)]
+}
+
 // serveUserAsset serves a file from <rootDir>/assets by its request-relative
 // path (already stripped of the "/assets/" prefix). Returns true if it wrote
 // a response. Guards against path traversal, refuses directories and unknown
@@ -800,7 +826,7 @@ func (s *Server) serveUserAsset(w http.ResponseWriter, r *http.Request, relPath 
 	if err != nil || info.IsDir() {
 		return false
 	}
-	ct := mime.TypeByExtension(filepath.Ext(full))
+	ct := assetContentType(filepath.Ext(full))
 	if ct == "" {
 		return false // refuse to serve unknown/sniffable types
 	}
