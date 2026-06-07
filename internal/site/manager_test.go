@@ -77,6 +77,26 @@ func TestNestedRegistrationAndSearchSection(t *testing.T) {
 	}
 }
 
+// TestEmptyNavEntryErrors verifies a malformed nav entry — neither path nor
+// pages — fails Discover loudly rather than vanishing from the sidebar.
+func TestEmptyNavEntryErrors(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Type = "site"
+	cfg.Title = "T"
+	cfg.Site = &config.SiteConfig{Home: "home.md"}
+	cfg.Navigation = []config.NavSection{
+		{Title: "Sec", Pages: []config.NavPage{{Title: "Broken"}}},
+	}
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "home.md"), []byte("# Home\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := New(dir, cfg).Discover(); err == nil {
+		t.Fatal("Discover should error on a nav entry with neither path nor pages")
+	}
+}
+
 // TestGroupWithLandingPage covers a group entry that carries both a Path (its
 // own landing page) and Pages (children): both the landing page and the
 // children must be served.

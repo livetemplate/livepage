@@ -119,6 +119,12 @@ func (m *Manager) discoverFromConfig() error {
 // whose Children are built recursively (a group may also carry its own Path,
 // acting as a landing page for the group).
 func (m *Manager) buildNavPageNode(page config.NavPage) (*PageNode, error) {
+	// A nav entry with neither a path nor sub-pages is meaningless and would
+	// otherwise vanish silently from the sidebar — fail fast on the typo.
+	if page.Path == "" && len(page.Pages) == 0 {
+		return nil, fmt.Errorf("nav entry %q has neither a path nor pages", page.Title)
+	}
+
 	node := &PageNode{
 		Title:     page.Title,
 		Collapsed: page.Collapsed,

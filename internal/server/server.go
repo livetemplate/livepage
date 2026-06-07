@@ -2087,6 +2087,9 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
         #tinkerdown-sidebar .nav-section-title,
         #tinkerdown-sidebar .nav-group-title {
             cursor: pointer;
+            /* Pico already suppresses the native disclosure triangle and draws
+             * its own chevron via summary::after — which we keep. list-style
+             * only clears the list-item bullet. */
             list-style: none;
         }
         #tinkerdown-sidebar details[open] > .nav-section-title,
@@ -3657,8 +3660,9 @@ func writeNavChildren(b *strings.Builder, nodes []*site.PageNode, currentPath st
 			continue
 		}
 
-		// A node with neither a path nor children is a malformed config entry;
-		// rendering it would emit <a href=""> — a dead link to the site root.
+		// Defense-in-depth: a path-less leaf would emit <a href=""> (a dead
+		// link to root). Discover already rejects such entries, so this only
+		// guards against a future code path that builds one directly.
 		if node.Path == "" {
 			continue
 		}
@@ -3667,7 +3671,7 @@ func writeNavChildren(b *strings.Builder, nodes []*site.PageNode, currentPath st
 		if node.Path == currentPath {
 			activeClass = " active"
 		}
-		b.WriteString(fmt.Sprintf(`<li><a href="%s" class="nav-page-link%s">%s</a></li>`, node.Path, activeClass, escapeHTML(node.Title)))
+		b.WriteString(fmt.Sprintf(`<li><a href="%s" class="nav-page-link%s">%s</a></li>`, escapeHTML(node.Path), activeClass, escapeHTML(node.Title)))
 	}
 	b.WriteString(`</ul>`)
 }

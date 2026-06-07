@@ -14,22 +14,22 @@ import (
 
 // Config represents the tinkerdown configuration
 type Config struct {
-	Title       string                   `yaml:"title"`
-	Description string                   `yaml:"description"`
-	Type        string                   `yaml:"type"` // "tutorial" or "site"
-	Site        *SiteConfig              `yaml:"site,omitempty"`
-	Navigation  []NavSection             `yaml:"navigation,omitempty"`
-	Server      ServerConfig             `yaml:"server"`
-	Styling     StylingConfig            `yaml:"styling"`
-	Blocks      BlocksConfig             `yaml:"blocks"`
-	Features    FeaturesConfig           `yaml:"features"`
-	Ignore      []string                 `yaml:"ignore"`
-	Sources     map[string]SourceConfig  `yaml:"sources,omitempty"`
-	Actions     map[string]*Action       `yaml:"actions,omitempty"`
-	API         *APIConfig               `yaml:"api,omitempty"`
-	Webhooks    map[string]*Webhook      `yaml:"webhooks,omitempty"`
+	Title       string                  `yaml:"title"`
+	Description string                  `yaml:"description"`
+	Type        string                  `yaml:"type"` // "tutorial" or "site"
+	Site        *SiteConfig             `yaml:"site,omitempty"`
+	Navigation  []NavSection            `yaml:"navigation,omitempty"`
+	Server      ServerConfig            `yaml:"server"`
+	Styling     StylingConfig           `yaml:"styling"`
+	Blocks      BlocksConfig            `yaml:"blocks"`
+	Features    FeaturesConfig          `yaml:"features"`
+	Ignore      []string                `yaml:"ignore"`
+	Sources     map[string]SourceConfig `yaml:"sources,omitempty"`
+	Actions     map[string]*Action      `yaml:"actions,omitempty"`
+	API         *APIConfig              `yaml:"api,omitempty"`
+	Webhooks    map[string]*Webhook     `yaml:"webhooks,omitempty"`
 	Outputs     map[string]*OutputConfig `yaml:"outputs,omitempty"`
-	Security    SecurityConfig           `yaml:"security,omitempty"`
+	Security    SecurityConfig          `yaml:"security,omitempty"`
 
 	// VersionPrefix, when non-empty, becomes a URL path segment that is
 	// stripped from incoming requests before route resolution. Routes serve
@@ -168,9 +168,9 @@ type SourceConfig struct {
 	AutoBind    *bool                  `yaml:"auto_bind,omitempty"`    // Set to false to exclude from auto-table matching
 
 	// For computed sources: derive data from another source
-	GroupBy   string            `yaml:"group_by,omitempty"`  // Field to group by (e.g., "category")
-	Aggregate map[string]string `yaml:"aggregate,omitempty"` // Field → aggregation expression (e.g., "total": "sum(amount)")
-	Filter    string            `yaml:"filter,omitempty"`    // Optional filter expression (e.g., "status = active")
+	GroupBy   string            `yaml:"group_by,omitempty"`   // Field to group by (e.g., "category")
+	Aggregate map[string]string `yaml:"aggregate,omitempty"`  // Field → aggregation expression (e.g., "total": "sum(amount)")
+	Filter    string            `yaml:"filter,omitempty"`     // Optional filter expression (e.g., "status = active")
 }
 
 // RetryConfig configures retry behavior for a source
@@ -453,10 +453,10 @@ type SiteConfig struct {
 
 // NavSection represents a navigation section with pages
 type NavSection struct {
-	Title     string    `yaml:"title"`           // Section title (e.g., "Getting Started")
-	Path      string    `yaml:"path"`            // Section path (e.g., "getting-started")
-	Collapsed bool      `yaml:"collapsed"`       // Whether section is collapsed by default
-	Pages     []NavPage `yaml:"pages,omitempty"` // Pages in this section
+	Title     string    `yaml:"title"`              // Section title (e.g., "Getting Started")
+	Path      string    `yaml:"path"`               // Section path (e.g., "getting-started")
+	Collapsed bool      `yaml:"collapsed"`          // Whether section is collapsed by default
+	Pages     []NavPage `yaml:"pages,omitempty"`    // Pages in this section
 }
 
 // NavPage represents a single entry in navigation. It is either a leaf
