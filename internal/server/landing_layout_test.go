@@ -223,6 +223,11 @@ func TestAssetContentType(t *testing.T) {
 	})
 
 	t.Run("resolves fonts and rejects unknown", func(t *testing.T) {
+		// Host DB wins over the fallback: .css is in Go's built-in table on
+		// every platform, so it resolves even where /etc/mime.types is absent.
+		if got := assetContentType(".css"); got == "" {
+			t.Errorf("assetContentType(.css) = empty, want a content type")
+		}
 		if got := assetContentType(".woff2"); got != "font/woff2" {
 			t.Errorf("assetContentType(.woff2) = %q, want font/woff2", got)
 		}
