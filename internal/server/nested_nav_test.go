@@ -162,3 +162,55 @@ func TestNestedCollapseState(t *testing.T) {
 		t.Error("no group should be open when active page is outside UI Patterns")
 	}
 }
+
+// TestGroupLandingPageLinkRenders verifies a group that carries its own path
+// (a landing page) renders a clickable link to it as the first item inside the
+// group, with the active class applied when that landing page is current.
+func TestGroupLandingPageLinkRenders(t *testing.T) {
+	tmpDir := t.TempDir()
+	for rel, h1 := range map[string]string{
+		"home.md": "# Home", "grp/landing.md": "# Landing", "grp/child.md": "# Child",
+	} {
+		abs := filepath.Join(tmpDir, rel)
+		if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(abs, []byte("---\ntitle: T\n---\n"+h1+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.Type = "site"
+	cfg.Title = "T"
+	cfg.Site = &config.SiteConfig{Home: "home.md"}
+	cfg.Features.Sidebar = true
+	cfg.Navigation = []config.NavSection{{
+		Title: "Sec",
+		Pages: []config.NavPage{
+			{Title: "Home", Path: "home.md"},
+			{Title: "Grp", Path: "grp/landing.md", Pages: []config.NavPage{
+				{Title: "Child", Path: "grp/child.md"},
+			}},
+		},
+	}}
+
+	srv := NewWithConfig(tmpDir, cfg)
+	if err := srv.Discover(); err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	req := httptest.NewRequest("GET", "/grp/landing", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /grp/landing = %d, want 200", w.Code)
+	}
+	body := w.Body.String()
+
+	if !strings.Contains(body, `<a href="/grp/landing" class="nav-page-link active">Grp</a>`) {
+		t.Error("group landing page should render an active link inside its group")
+	}
+	if !strings.Contains(body, `<a href="/grp/child" class="nav-page-link">Child</a>`) {
+		t.Error("group child link missing")
+	}
+}

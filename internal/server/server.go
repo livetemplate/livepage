@@ -2084,14 +2084,9 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
         #tinkerdown-sidebar details.nav-group {
             margin: 0;
         }
-        #tinkerdown-sidebar .nav-section-title,
-        #tinkerdown-sidebar .nav-group-title {
-            cursor: pointer;
-            /* Pico already suppresses the native disclosure triangle and draws
-             * its own chevron via summary::after — which we keep. list-style
-             * only clears the list-item bullet. */
-            list-style: none;
-        }
+        /* Pico already styles <summary> with cursor:pointer, suppresses the
+         * native disclosure triangle, and draws its own chevron via
+         * summary::after — which we keep. Nothing extra needed here. */
         #tinkerdown-sidebar details[open] > .nav-section-title,
         #tinkerdown-sidebar details[open] > .nav-group-title {
             margin-bottom: 0;
@@ -3641,37 +3636,54 @@ func (s *Server) renderSidebar(currentPath string) string {
 // strings.Builder shadows the stdlib html package).
 func escapeHTML(s string) string { return html.EscapeString(s) }
 
-// writeNavChildren renders a list of nav nodes into b, recursing into groups.
-// A node with children becomes a collapsible <details> group; a leaf becomes a
-// link. Groups open when not collapsed, or when they hold the active page.
+// writeNavLink writes one <li> link for a node, marking it active when it is
+// the current page.
+func writeNavLink(b *strings.Builder, node *site.PageNode, currentPath string) {
+	activeClass := ""
+	if node.Path == currentPath {
+		activeClass = " active"
+	}
+	b.WriteString(fmt.Sprintf(`<li><a href="%s" class="nav-page-link%s">%s</a></li>`, escapeHTML(node.Path), activeClass, escapeHTML(node.Title)))
+}
+
+// writeNavNode renders a single nav node as an <li>. A node with children is a
+// collapsible <details> group (open when not collapsed or when it holds the
+// active page); a node with a path is a link. A group that also has a path
+// contributes a link to its own landing page as the first item in the group.
+func writeNavNode(b *strings.Builder, node *site.PageNode, currentPath string) {
+	if len(node.Children) > 0 {
+		openAttr := ""
+		if !node.Collapsed || node.ContainsPath(currentPath) {
+			openAttr = " open"
+		}
+		b.WriteString(`<li class="nav-group-item">`)
+		b.WriteString(fmt.Sprintf(`<details class="nav-group"%s>`, openAttr))
+		b.WriteString(fmt.Sprintf(`<summary class="nav-group-title">%s</summary>`, escapeHTML(node.Title)))
+		b.WriteString(`<ul class="nav-pages">`)
+		if node.Path != "" {
+			writeNavLink(b, node, currentPath)
+		}
+		for _, child := range node.Children {
+			writeNavNode(b, child, currentPath)
+		}
+		b.WriteString(`</ul></details></li>`)
+		return
+	}
+
+	// Defense-in-depth: a path-less leaf would emit <a href=""> (a dead link
+	// to root). Discover already rejects such entries, so this only guards
+	// against a future code path that builds one directly.
+	if node.Path == "" {
+		return
+	}
+	writeNavLink(b, node, currentPath)
+}
+
+// writeNavChildren renders a list of nav nodes into b as a <ul>.
 func writeNavChildren(b *strings.Builder, nodes []*site.PageNode, currentPath string) {
 	b.WriteString(`<ul class="nav-pages">`)
 	for _, node := range nodes {
-		if len(node.Children) > 0 {
-			openAttr := ""
-			if !node.Collapsed || node.ContainsPath(currentPath) {
-				openAttr = " open"
-			}
-			b.WriteString(`<li class="nav-group-item">`)
-			b.WriteString(fmt.Sprintf(`<details class="nav-group"%s>`, openAttr))
-			b.WriteString(fmt.Sprintf(`<summary class="nav-group-title">%s</summary>`, escapeHTML(node.Title)))
-			writeNavChildren(b, node.Children, currentPath)
-			b.WriteString(`</details></li>`)
-			continue
-		}
-
-		// Defense-in-depth: a path-less leaf would emit <a href=""> (a dead
-		// link to root). Discover already rejects such entries, so this only
-		// guards against a future code path that builds one directly.
-		if node.Path == "" {
-			continue
-		}
-
-		activeClass := ""
-		if node.Path == currentPath {
-			activeClass = " active"
-		}
-		b.WriteString(fmt.Sprintf(`<li><a href="%s" class="nav-page-link%s">%s</a></li>`, escapeHTML(node.Path), activeClass, escapeHTML(node.Title)))
+		writeNavNode(b, node, currentPath)
 	}
 	b.WriteString(`</ul>`)
 }
