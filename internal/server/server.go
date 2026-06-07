@@ -947,6 +947,7 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
 	// User-config styling overrides (primary color, font) and the initial
 	// theme selection for visitors with no localStorage value.
 	stylingOverrideCSS := buildStylingOverrideCSS(s.config.Styling)
+	siteCSS := buildCustomCSSLink(s.config.Styling.SiteCSS)
 	defaultTheme := themeDefault(s.config.Styling)
 
 	// Determine effective sidebar setting (page-level overrides site-level)
@@ -2710,6 +2711,8 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
     <!-- Prism.js for syntax highlighting (embedded) -->
     <link href="/assets/prism.css?v=light1" rel="stylesheet" />
     %s
+    <!-- Shared brand styling (site_css): self-hosted fonts, base tokens -->
+    %s
 </head>
 <body>
     <!-- Unified Toolbar -->
@@ -3070,7 +3073,7 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
     %s
 %s
 </body>
-</html>`, wsURL, s.config.Server.Debug, showSidebar, page.Title, seoTags, stylingOverrideCSS, prismIncludeCSS, sidebar, contentWithNav, defaultTheme, prismIncludeJS, mermaidScript, chartScript)
+</html>`, wsURL, s.config.Server.Debug, showSidebar, page.Title, seoTags, stylingOverrideCSS, prismIncludeCSS, siteCSS, sidebar, contentWithNav, defaultTheme, prismIncludeJS, mermaidScript, chartScript)
 
 	return html
 }
@@ -3089,6 +3092,7 @@ func (s *Server) renderLandingShell(page *tinkerdown.Page, currentPath, host, ws
 	seoTags := s.buildSEOTags(page, currentPath)
 	defaultTheme := themeDefault(s.config.Styling)
 	customCSS := buildCustomCSSLink(s.config.Styling.CustomCSS)
+	siteCSS := buildCustomCSSLink(s.config.Styling.SiteCSS)
 
 	prismIncludeCSS, prismIncludeJS := prismIncludeAssets(page)
 
@@ -3108,6 +3112,8 @@ func (s *Server) renderLandingShell(page *tinkerdown.Page, currentPath, host, ws
     <link rel="stylesheet" href="/assets/pico.css">
     <link rel="stylesheet" href="/assets/tinkerdown-client.css">
     <link href="/assets/prism.css?v=light1" rel="stylesheet" />
+    %s
+    <!-- Shared brand styling (site_css), then landing-only custom_css last -->
     %s
     %s
 </head>
@@ -3143,7 +3149,7 @@ func (s *Server) renderLandingShell(page *tinkerdown.Page, currentPath, host, ws
         document.addEventListener('DOMContentLoaded', function() { Prism.highlightAll(); });
     </script>
 </body>
-</html>`, wsURL, s.config.Server.Debug, page.Title, seoTags, prismIncludeCSS, customCSS, content, defaultTheme, defaultTheme, prismIncludeJS)
+</html>`, wsURL, s.config.Server.Debug, page.Title, seoTags, prismIncludeCSS, siteCSS, customCSS, content, defaultTheme, defaultTheme, prismIncludeJS)
 }
 
 func renderSourceMeta(page *tinkerdown.Page) string {

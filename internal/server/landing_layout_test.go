@@ -121,6 +121,48 @@ func TestDefaultLayout_KeepsDocsChrome(t *testing.T) {
 	}
 }
 
+// site_css is the shared-brand stylesheet: unlike custom_css (landing-only), it
+// must be injected into BOTH the docs shell and the landing shell — and on the
+// landing it must load BEFORE custom_css so landing styling can still override.
+func TestSiteCSS_InjectedInBothShells(t *testing.T) {
+	const siteLink = `<link rel="stylesheet" href="/assets/brand.css">`
+	const customLink = `<link rel="stylesheet" href="/assets/landing.css">`
+
+	newSite := func(t *testing.T, frontmatter string) *Server {
+		t.Helper()
+		srv := newLandingSite(t, frontmatter)
+		srv.config.Styling.SiteCSS = "assets/brand.css"
+		return srv
+	}
+
+	t.Run("docs shell includes site_css but not custom_css", func(t *testing.T) {
+		srv := newSite(t, "---\ntitle: Docs Home\n---") // no layout: landing
+		_, body := get(t, srv, "/")
+		if !strings.Contains(body, siteLink) {
+			t.Errorf("docs shell missing site_css link %q", siteLink)
+		}
+		if strings.Contains(body, customLink) {
+			t.Errorf("custom_css must stay landing-only, leaked into docs shell")
+		}
+	})
+
+	t.Run("landing shell includes site_css before custom_css", func(t *testing.T) {
+		srv := newSite(t, "---\ntitle: Landing\nlayout: landing\n---")
+		_, body := get(t, srv, "/")
+		si := strings.Index(body, siteLink)
+		ci := strings.Index(body, customLink)
+		if si < 0 {
+			t.Fatalf("landing shell missing site_css link %q", siteLink)
+		}
+		if ci < 0 {
+			t.Fatalf("landing shell missing custom_css link %q", customLink)
+		}
+		if si > ci {
+			t.Errorf("site_css (at %d) must load before custom_css (at %d) so landing can override", si, ci)
+		}
+	})
+}
+
 // Filesystem asset fallback: a real file under <rootDir>/assets is served with
 // the right content type + nosniff; vendor assets still win; traversal/missing
 // are refused.

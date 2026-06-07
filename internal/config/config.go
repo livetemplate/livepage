@@ -518,6 +518,13 @@ type StylingConfig struct {
 	// using `layout: landing`. Lets a site carry bespoke styling for its
 	// marketing/landing pages without touching the default docs shell.
 	CustomCSS string `yaml:"custom_css,omitempty"`
+	// SiteCSS is a site-relative path served from <rootDir>/assets and injected
+	// as a <link> in the <head> of EVERY page (both the default docs shell and
+	// `layout: landing`). Use it for shared brand primitives — self-hosted
+	// @font-face declarations, base tokens — that should reach the calm docs
+	// shell too, while CustomCSS stays quarantined to landing pages. On landing
+	// pages SiteCSS loads before CustomCSS so the landing layer can override it.
+	SiteCSS string `yaml:"site_css,omitempty"`
 }
 
 // BlocksConfig holds block-related configuration
