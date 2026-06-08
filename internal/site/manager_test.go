@@ -129,3 +129,58 @@ func TestGroupWithLandingPage(t *testing.T) {
 		}
 	}
 }
+
+// TestResolveBreadcrumbHref covers the three crumb shapes the breadcrumb
+// renderer must distinguish so a section pill never 303-redirects to home:
+// (1) a section whose only page is an index, served at a trailing slash
+// ("recipes/index.md" → "/recipes/") — the bare "/recipes" crumb must resolve
+// to "/recipes/"; (2) a section with no index page at all — must report
+// not-found so the renderer emits a plain label; (3) a path that is already a
+// real page — returned unchanged.
+func TestResolveBreadcrumbHref(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Type = "site"
+	cfg.Title = "T"
+	cfg.Site = &config.SiteConfig{Home: "index.md"} // home served at "/"
+	cfg.Navigation = []config.NavSection{
+		{
+			Title: "Recipes",
+			Path:  "recipes", // section dir, not itself a route
+			Pages: []config.NavPage{
+				{Title: "Overview", Path: "recipes/index.md"},
+				{Title: "Foo", Path: "recipes/foo.md"},
+			},
+		},
+		{
+			Title: "Learn",
+			Path:  "getting-started", // no index page under it
+			Pages: []config.NavPage{
+				{Title: "Intro", Path: "getting-started/intro.md"},
+			},
+		},
+	}
+
+	m := writeNavSite(t, cfg,
+		"index.md", "recipes/index.md", "recipes/foo.md", "getting-started/intro.md")
+
+	cases := []struct {
+		name     string
+		path     string
+		wantHref string
+		wantOK   bool
+	}{
+		{"index served at trailing slash", "/recipes", "/recipes/", true},
+		{"section without index page", "/getting-started", "", false},
+		{"path is already a page", "/recipes/foo", "/recipes/foo", true},
+		{"home root", "/", "/", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			href, ok := m.ResolveBreadcrumbHref(tc.path)
+			if ok != tc.wantOK || href != tc.wantHref {
+				t.Errorf("ResolveBreadcrumbHref(%q) = (%q, %v), want (%q, %v)",
+					tc.path, href, ok, tc.wantHref, tc.wantOK)
+			}
+		})
+	}
+}

@@ -413,6 +413,25 @@ func (m *Manager) GetBreadcrumbs(urlPath string) []*PageNode {
 	return breadcrumbs
 }
 
+// ResolveBreadcrumbHref maps a breadcrumb crumb's stored path to a servable
+// URL. Section/group crumbs carry a directory-style path (e.g. "/recipes") that
+// is not itself a route: index pages register with a trailing slash
+// ("/recipes/"), and some sections have no index page at all. It returns the
+// path unchanged when a page is registered there, falls back to the index route
+// (path + "/") when only that exists, and reports ok=false when nothing is
+// servable — so the caller can render a plain label instead of a link that
+// would 303-redirect back to the home page.
+func (m *Manager) ResolveBreadcrumbHref(path string) (string, bool) {
+	if _, ok := m.GetPage(path); ok {
+		return path, true
+	}
+	withSlash := strings.TrimSuffix(path, "/") + "/"
+	if _, ok := m.GetPage(withSlash); ok {
+		return withSlash, true
+	}
+	return "", false
+}
+
 // Reload reloads a specific file (for hot reload)
 func (m *Manager) Reload(filePath string) error {
 	// Get relative path
