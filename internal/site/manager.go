@@ -425,6 +425,9 @@ func (m *Manager) ResolveBreadcrumbHref(path string) (string, bool) {
 	if _, ok := m.GetPage(path); ok {
 		return path, true
 	}
+	// Section crumbs store a slash-less directory path; its index page is served
+	// at that path + "/". TrimSuffix first so a caller that already passes a
+	// trailing slash doesn't produce a doubled "//".
 	withSlash := strings.TrimSuffix(path, "/") + "/"
 	if _, ok := m.GetPage(withSlash); ok {
 		return withSlash, true

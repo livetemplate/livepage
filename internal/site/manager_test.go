@@ -170,6 +170,7 @@ func TestResolveBreadcrumbHref(t *testing.T) {
 		wantOK   bool
 	}{
 		{"index served at trailing slash", "/recipes", "/recipes/", true},
+		{"path already has trailing slash", "/recipes/", "/recipes/", true},
 		{"section without index page", "/getting-started", "", false},
 		{"path is already a page", "/recipes/foo", "/recipes/foo", true},
 		{"home root", "/", "/", true},

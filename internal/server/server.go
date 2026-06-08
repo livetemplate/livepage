@@ -3717,13 +3717,13 @@ func (s *Server) renderBreadcrumbs(currentPath string) string {
 			// Link only when the path resolves to a real page; otherwise render
 			// a plain label so the crumb never 303-redirects to the home page.
 			if href, ok := s.siteManager.ResolveBreadcrumbHref(crumb.Path); ok {
-				html.WriteString(fmt.Sprintf(`<li><a href="%s">%s</a></li>`, href, crumb.Title))
+				html.WriteString(fmt.Sprintf(`<li><a href="%s">%s</a></li>`, escapeHTML(href), escapeHTML(crumb.Title)))
 			} else {
-				html.WriteString(fmt.Sprintf(`<li class="crumb-label">%s</li>`, crumb.Title))
+				html.WriteString(fmt.Sprintf(`<li class="crumb-label">%s</li>`, escapeHTML(crumb.Title)))
 			}
 			html.WriteString(`<li class="separator">›</li>`)
 		} else {
-			html.WriteString(fmt.Sprintf(`<li class="current">%s</li>`, crumb.Title))
+			html.WriteString(fmt.Sprintf(`<li class="current">%s</li>`, escapeHTML(crumb.Title)))
 		}
 	}
 
