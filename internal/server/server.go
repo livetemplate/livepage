@@ -2249,10 +2249,17 @@ func (s *Server) renderPage(page *tinkerdown.Page, currentPath string, host stri
 
         .breadcrumbs a,
         .breadcrumbs .current,
+        .breadcrumbs .crumb-label,
         .breadcrumbs .separator {
             font-size: 0.9rem;
             line-height: 1.5;
             vertical-align: baseline;
+        }
+
+        /* A section crumb with no servable page renders as muted, non-clickable
+           text rather than a link that would 303 to the home page. */
+        .breadcrumbs .crumb-label {
+            color: var(--text-secondary);
         }
 
         .breadcrumbs a {
@@ -3704,10 +3711,19 @@ func (s *Server) renderBreadcrumbs(currentPath string) string {
 
 	for i, crumb := range breadcrumbs {
 		if i < len(breadcrumbs)-1 {
-			html.WriteString(fmt.Sprintf(`<li><a href="%s">%s</a></li>`, crumb.Path, crumb.Title))
+			// Intermediate crumbs are section/group nodes whose stored path may
+			// be a non-routable directory (e.g. "/recipes" when the index page
+			// is served at "/recipes/", or a section with no index page at all).
+			// Link only when the path resolves to a real page; otherwise render
+			// a plain label so the crumb never 303-redirects to the home page.
+			if href, ok := s.siteManager.ResolveBreadcrumbHref(crumb.Path); ok {
+				html.WriteString(fmt.Sprintf(`<li><a href="%s">%s</a></li>`, escapeHTML(href), escapeHTML(crumb.Title)))
+			} else {
+				html.WriteString(fmt.Sprintf(`<li class="crumb-label">%s</li>`, escapeHTML(crumb.Title)))
+			}
 			html.WriteString(`<li class="separator">›</li>`)
 		} else {
-			html.WriteString(fmt.Sprintf(`<li class="current">%s</li>`, crumb.Title))
+			html.WriteString(fmt.Sprintf(`<li class="current">%s</li>`, escapeHTML(crumb.Title)))
 		}
 	}
 
