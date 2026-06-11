@@ -195,11 +195,9 @@ func TestProxyRoute_WebSocketUpgradeE2E(t *testing.T) {
 func authorProxyFixture(t *testing.T, upstreamURL string) string {
 	t.Helper()
 	dir := t.TempDir()
-	cfg := "title: \"Proxy WS E2E\"\n" +
-		"routes:\n" +
-		"  - pattern: \"/proxy/\"\n" +
-		"    type: proxy\n" +
-		"    upstream: \"" + upstreamURL + "\"\n"
+	// %q quotes the upstream URL so the helper stays safe if a future test
+	// reuses it with a URL containing YAML-significant characters.
+	cfg := fmt.Sprintf("title: \"Proxy WS E2E\"\nroutes:\n  - pattern: \"/proxy/\"\n    type: proxy\n    upstream: %q\n", upstreamURL)
 	if err := os.WriteFile(filepath.Join(dir, "tinkerdown.yaml"), []byte(cfg), 0o644); err != nil {
 		t.Fatal(err)
 	}

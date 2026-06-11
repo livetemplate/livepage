@@ -84,6 +84,12 @@ func newProxyRoute(re config.RouteEntry) (*proxyRoute, error) {
 // all lines rather than compare whole. (strings.SplitSeq is a Go 1.24+
 // iterator; this module requires 1.26 — see go.mod.)
 func isWebSocketUpgrade(req *http.Request) bool {
+	// RFC 6455 §4.1: the opening handshake is a GET. Guarding on the method
+	// keeps the helper's intent precise (a non-GET with Upgrade headers is
+	// not a real handshake and shouldn't have its Origin rewritten).
+	if req.Method != http.MethodGet {
+		return false
+	}
 	if !strings.EqualFold(req.Header.Get("Upgrade"), "websocket") {
 		return false
 	}
