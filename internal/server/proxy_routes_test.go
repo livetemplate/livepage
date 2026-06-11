@@ -49,12 +49,12 @@ func TestProxyRouteMatches(t *testing.T) {
 		path string
 		want bool
 	}{
-		{"/patterns", true},      // bare match (no trailing slash)
-		{"/patterns/", true},     // exact pattern
-		{"/patterns/foo", true},  // sub-path
-		{"/patternsfoo", false},  // not a prefix-segment
-		{"/other", false},        // unrelated
-		{"/", false},             // root
+		{"/patterns", true},     // bare match (no trailing slash)
+		{"/patterns/", true},    // exact pattern
+		{"/patterns/foo", true}, // sub-path
+		{"/patternsfoo", false}, // not a prefix-segment
+		{"/other", false},       // unrelated
+		{"/", false},            // root
 	}
 	for _, c := range prefixCases {
 		if got := prefix.matches(c.path); got != c.want {
@@ -169,5 +169,110 @@ func TestProxyRoute_WebSocketIntegration(t *testing.T) {
 	}
 	if string(msg) != "echo:hi" {
 		t.Errorf("ws echo: got %q", msg)
+	}
+}
+
+// Regression for #257: a browser dials the proxy with Origin = the proxy's
+// own host. The proxy rewrites Host to the upstream, so an upstream using a
+// strict same-origin check (gorilla's default, mirrored here) would 403 the
+// handshake unless the proxy also rewrites Origin to the upstream origin.
+// Without the Origin rewrite in newProxyRoute's Director this dial fails;
+// with it the handshake echoes.
+func TestProxyRoute_WebSocketCrossOrigin(t *testing.T) {
+	// Strict same-origin upstream: Origin must equal scheme://Host. This is
+	// equivalent to gorilla's default checkOrigin and to livetemplate's
+	// createSecureOriginChecker (AllowedOrigins empty, prod mode).
+	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool {
+		return r.Header.Get("Origin") == "http://"+r.Host
+	}}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return // upgrader already wrote 403
+		}
+		defer conn.Close()
+		mt, msg, err := conn.ReadMessage()
+		if err != nil {
+			return
+		}
+		_ = conn.WriteMessage(mt, append([]byte("echo:"), msg...))
+	}))
+	defer upstream.Close()
+
+	pr, err := newProxyRoute(config.RouteEntry{Pattern: "/proxy/", Type: "proxy", Upstream: upstream.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	mux.Handle("/proxy/", pr.handler)
+	front := httptest.NewServer(mux)
+	defer front.Close()
+
+	// Dial with an explicit cross-origin Origin (the proxy's own host) —
+	// this is what a real browser sends.
+	wsURL := "ws" + strings.TrimPrefix(front.URL, "http") + "/proxy/ws"
+	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, http.Header{"Origin": {front.URL}})
+	if err != nil {
+		status := "n/a"
+		if resp != nil {
+			status = resp.Status
+		}
+		t.Fatalf("ws dial via proxy with cross-origin Origin failed (upstream status %s): %v", status, err)
+	}
+	defer conn.Close()
+	if err := conn.WriteMessage(websocket.TextMessage, []byte("hi")); err != nil {
+		t.Fatal(err)
+	}
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, msg, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(msg) != "echo:hi" {
+		t.Errorf("ws echo: got %q", msg)
+	}
+}
+
+// Unit-level proof that the proxy rewrites Origin to the upstream origin only
+// for WebSocket upgrades — guards the gating logic. Drives the handler via
+// ServeHTTP against a recording upstream (which echoes the Origin it saw back
+// in a response header) so the assertion is race-free and doesn't couple to
+// the proxy's internal Director field.
+func TestProxyRoute_RewritesOriginOnlyForWS(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Saw-Origin", r.Header.Get("Origin"))
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+	// httptest URLs carry no path, so upstream.URL is exactly the origin
+	// (scheme://host) the Director should rewrite Origin to.
+	wantUpstreamOrigin := upstream.URL
+
+	pr, err := newProxyRoute(config.RouteEntry{Pattern: "/proxy/", Type: "proxy", Upstream: upstream.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// WS upgrade: Origin rewritten to the upstream origin. (The upstream
+	// returns 200 rather than 101, so the proxy relays normally and we read
+	// the echoed header — we're asserting on the forwarded Origin, not on a
+	// completed upgrade, which the cross-origin test already covers.)
+	wsReq := httptest.NewRequest(http.MethodGet, "http://docs.example.com/proxy/ws", nil)
+	wsReq.Header.Set("Upgrade", "websocket")
+	wsReq.Header.Set("Connection", "keep-alive, Upgrade")
+	wsReq.Header.Set("Origin", "http://docs.example.com")
+	wsRec := httptest.NewRecorder()
+	pr.handler.ServeHTTP(wsRec, wsReq)
+	if got := wsRec.Header().Get("X-Saw-Origin"); got != wantUpstreamOrigin {
+		t.Errorf("WS upgrade: upstream saw Origin %q, want rewritten to %q", got, wantUpstreamOrigin)
+	}
+
+	// Plain HTTP with an Origin: left untouched (non-WS CORS unaffected).
+	httpReq := httptest.NewRequest(http.MethodPost, "http://docs.example.com/proxy/api", nil)
+	httpReq.Header.Set("Origin", "http://docs.example.com")
+	httpRec := httptest.NewRecorder()
+	pr.handler.ServeHTTP(httpRec, httpReq)
+	if got := httpRec.Header().Get("X-Saw-Origin"); got != "http://docs.example.com" {
+		t.Errorf("non-WS: upstream saw Origin %q, want left unchanged", got)
 	}
 }
