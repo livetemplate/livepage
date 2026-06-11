@@ -212,8 +212,11 @@ func authorProxyFixture(t *testing.T, upstreamURL string) string {
 // prefix or the timeout elapses. Avoids a fixed Sleep race on the WS frame.
 func waitForStatus(sel, wantPrefix string, timeout time.Duration) chromedp.Action {
 	return chromedp.ActionFunc(func(ctx context.Context) error {
-		deadline := time.Now().Add(timeout)
-		for time.Now().Before(deadline) {
+		ctx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
+		ticker := time.NewTicker(100 * time.Millisecond)
+		defer ticker.Stop()
+		for {
 			var txt string
 			if err := chromedp.Text(sel, &txt, chromedp.ByID).Do(ctx); err == nil {
 				// WS_ERROR is a settled state — stop polling and let the
@@ -222,12 +225,16 @@ func waitForStatus(sel, wantPrefix string, timeout time.Duration) chromedp.Actio
 					return nil
 				}
 			}
-			time.Sleep(100 * time.Millisecond)
+			select {
+			case <-ctx.Done():
+				// Surface the timeout/cancellation in the chromedp error (the
+				// caller t.Fatalf's with it after dumping diagnostics);
+				// otherwise the only signal would be a confusing
+				// "#status = connecting" assertion failure.
+				return fmt.Errorf("gave up after %v waiting for %q prefix on %s: %w", timeout, wantPrefix, sel, ctx.Err())
+			case <-ticker.C:
+			}
 		}
-		// Surface the timeout in the chromedp error (the caller t.Fatalf's
-		// with it after dumping diagnostics); otherwise the only signal
-		// would be a confusing "#status = connecting" assertion failure.
-		return fmt.Errorf("timed out after %v waiting for %q prefix on %s", timeout, wantPrefix, sel)
 	})
 }
 
