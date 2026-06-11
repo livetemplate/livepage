@@ -79,15 +79,18 @@ func newProxyRoute(re config.RouteEntry) (*proxyRoute, error) {
 }
 
 // isWebSocketUpgrade reports whether req is a WebSocket upgrade handshake.
-// The Connection header may be a comma-separated token list (e.g.
-// "keep-alive, Upgrade"), so we scan its tokens rather than compare whole.
+// Connection may arrive as multiple header lines, each a comma-separated
+// token list (e.g. "keep-alive, Upgrade"), so we scan every token across
+// all lines rather than compare whole.
 func isWebSocketUpgrade(req *http.Request) bool {
 	if !strings.EqualFold(req.Header.Get("Upgrade"), "websocket") {
 		return false
 	}
-	for tok := range strings.SplitSeq(req.Header.Get("Connection"), ",") {
-		if strings.EqualFold(strings.TrimSpace(tok), "upgrade") {
-			return true
+	for _, line := range req.Header.Values("Connection") {
+		for tok := range strings.SplitSeq(line, ",") {
+			if strings.EqualFold(strings.TrimSpace(tok), "upgrade") {
+				return true
+			}
 		}
 	}
 	return false
