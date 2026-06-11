@@ -44,8 +44,9 @@ func TestProxyRoute_WebSocketUpgradeE2E(t *testing.T) {
 	var tdLog syncBuffer
 	prevOut := log.Writer()
 	prevFlags := log.Flags()
+	prevPrefix := log.Prefix()
 	log.SetOutput(&tdLog)
-	t.Cleanup(func() { log.SetOutput(prevOut); log.SetFlags(prevFlags) })
+	t.Cleanup(func() { log.SetOutput(prevOut); log.SetFlags(prevFlags); log.SetPrefix(prevPrefix) })
 
 	// --- Upstream: strict same-origin WS check (gorilla default / livetemplate
 	// prod default). Serves an HTML page that opens a WS back to the same host,
@@ -215,13 +216,18 @@ func waitForStatus(sel, wantPrefix string, timeout time.Duration) chromedp.Actio
 		for time.Now().Before(deadline) {
 			var txt string
 			if err := chromedp.Text(sel, &txt, chromedp.ByID).Do(ctx); err == nil {
+				// WS_ERROR is a settled state — stop polling and let the
+				// assertions report it. Only a real timeout is an error.
 				if strings.HasPrefix(txt, wantPrefix) || strings.HasPrefix(txt, "WS_ERROR") {
 					return nil
 				}
 			}
 			time.Sleep(100 * time.Millisecond)
 		}
-		return nil // let the assertions report the actual state
+		// Surface the timeout in the chromedp error (the caller t.Fatalf's
+		// with it after dumping diagnostics); otherwise the only signal
+		// would be a confusing "#status = connecting" assertion failure.
+		return fmt.Errorf("timed out after %v waiting for %q prefix on %s", timeout, wantPrefix, sel)
 	})
 }
 

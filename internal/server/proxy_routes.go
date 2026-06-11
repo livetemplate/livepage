@@ -60,8 +60,11 @@ func newProxyRoute(re config.RouteEntry) (*proxyRoute, error) {
 		// same-origin WebSocket check would 403 a handshake whose Origin
 		// still names the proxy. Present the upstream origin instead — but
 		// only for WS upgrades, since non-WS CORS must keep the real Origin.
-		// (An upstream that allow-lists the proxy's own origin rather than
-		// its host would still reject; that config is uncommon.)
+		//
+		// Security contract: this hides the real browser origin from the
+		// upstream. An upstream that uses Origin for authorization (not just
+		// same-origin checking) should not be fronted by this proxy without
+		// additional authentication.
 		if isWebSocketUpgrade(req) && req.Header.Get("Origin") != "" {
 			req.Header.Set("Origin", upstreamOrigin)
 		}
