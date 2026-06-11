@@ -39,8 +39,10 @@ func TestProxyRoute_WebSocketUpgradeE2E(t *testing.T) {
 	const wsMarker = "WS_PUSH_MARKER_257"
 
 	// --- Capture tinkerdown's package-level log output (server logs, hop 1).
-	// These E2E tests run serially (single Docker Chrome container, no
-	// t.Parallel), so a scoped global redirect is safe; restored on cleanup.
+	// This mutates the process-global logger, so it is only safe while this
+	// test runs serially. SERIAL — never add t.Parallel() to this test (or
+	// run it with a parallel sibling that also redirects log output); the
+	// global redirect would race. Restored on cleanup.
 	var tdLog syncBuffer
 	prevOut := log.Writer()
 	prevFlags := log.Flags()

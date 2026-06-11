@@ -81,7 +81,8 @@ func newProxyRoute(re config.RouteEntry) (*proxyRoute, error) {
 // isWebSocketUpgrade reports whether req is a WebSocket upgrade handshake.
 // Connection may arrive as multiple header lines, each a comma-separated
 // token list (e.g. "keep-alive, Upgrade"), so we scan every token across
-// all lines rather than compare whole.
+// all lines rather than compare whole. (strings.SplitSeq is a Go 1.24+
+// iterator; this module requires 1.26 — see go.mod.)
 func isWebSocketUpgrade(req *http.Request) bool {
 	if !strings.EqualFold(req.Header.Get("Upgrade"), "websocket") {
 		return false

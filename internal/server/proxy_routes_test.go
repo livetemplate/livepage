@@ -275,4 +275,15 @@ func TestProxyRoute_RewritesOriginOnlyForWS(t *testing.T) {
 	if got := httpRec.Header().Get("X-Saw-Origin"); got != "http://docs.example.com" {
 		t.Errorf("non-WS: upstream saw Origin %q, want left unchanged", got)
 	}
+
+	// WS upgrade with no Origin header (some dialers omit it on same-host
+	// connections): must not inject one — the != "" guard handles this.
+	noOriginReq := httptest.NewRequest(http.MethodGet, "http://docs.example.com/proxy/ws", nil)
+	noOriginReq.Header.Set("Upgrade", "websocket")
+	noOriginReq.Header.Set("Connection", "Upgrade")
+	noOriginRec := httptest.NewRecorder()
+	pr.handler.ServeHTTP(noOriginRec, noOriginReq)
+	if got := noOriginRec.Header().Get("X-Saw-Origin"); got != "" {
+		t.Errorf("no-Origin WS: upstream saw Origin %q, want empty", got)
+	}
 }
