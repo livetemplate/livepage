@@ -88,6 +88,15 @@ routes:
 Then any `embed-lvt path="/apps/counter/"` block on any docs page
 reaches the counter app on port 9090 with zero CORS configuration.
 
+> **Security note — Origin rewriting.** For the upstream's same-origin
+> WebSocket check to accept proxied handshakes, tinkerdown rewrites the
+> `Origin` header on WebSocket upgrade requests to the upstream's own
+> origin (non-WebSocket requests are untouched). This means the upstream
+> sees its own origin, not the real browser origin. An upstream that uses
+> the `Origin` header for *authorization* (rather than just same-origin
+> CSRF protection) should not be fronted by a proxy route without
+> additional authentication.
+
 ## Cross-origin (sibling subdomain)
 
 If your upstream app is on a different host, two things are needed:

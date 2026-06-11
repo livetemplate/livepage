@@ -15,7 +15,9 @@ import (
 // proxyRoute is the runtime representation of a config.RouteEntry with
 // type=proxy. It pairs a path matcher with a configured reverse-proxy
 // handler. WebSocket upgrades are forwarded automatically by the stdlib
-// reverse proxy (Go 1.12+).
+// reverse proxy (Go 1.12+); the Director additionally rewrites the Origin
+// header to the upstream origin on WS handshakes so the upstream's
+// same-origin check accepts the proxied connection (see Director below).
 type proxyRoute struct {
 	pattern  string
 	isPrefix bool
@@ -42,6 +44,7 @@ func newProxyRoute(re config.RouteEntry) (*proxyRoute, error) {
 
 	rp := httputil.NewSingleHostReverseProxy(u)
 	origDirector := rp.Director
+	upstreamOrigin := u.Scheme + "://" + u.Host
 	rp.Director = func(req *http.Request) {
 		// Save Path AND RawPath before the default Director runs.
 		// NewSingleHostReverseProxy's default Director joins
@@ -53,6 +56,18 @@ func newProxyRoute(re config.RouteEntry) (*proxyRoute, error) {
 		origDirector(req)
 		req.URL.Path, req.URL.RawPath = savedPath, savedRaw
 		req.Host = u.Host
+		// We rewrite Host to the upstream above, so the upstream's
+		// same-origin WebSocket check would 403 a handshake whose Origin
+		// still names the proxy. Present the upstream origin instead — but
+		// only for WS upgrades, since non-WS CORS must keep the real Origin.
+		//
+		// Security contract: this hides the real browser origin from the
+		// upstream. An upstream that uses Origin for authorization (not just
+		// same-origin checking) should not be fronted by this proxy without
+		// additional authentication.
+		if isWebSocketUpgrade(req) && req.Header.Get("Origin") != "" {
+			req.Header.Set("Origin", upstreamOrigin)
+		}
 	}
 
 	return &proxyRoute{
@@ -61,6 +76,31 @@ func newProxyRoute(re config.RouteEntry) (*proxyRoute, error) {
 		upstream: re.Upstream,
 		handler:  rp,
 	}, nil
+}
+
+// isWebSocketUpgrade reports whether req is a WebSocket upgrade handshake.
+// Connection may arrive as multiple header lines, each a comma-separated
+// token list (e.g. "keep-alive, Upgrade"), so we scan every token across
+// all lines rather than compare whole. (strings.SplitSeq is a Go 1.24+
+// iterator; this module requires 1.26 — see go.mod.)
+func isWebSocketUpgrade(req *http.Request) bool {
+	// RFC 6455 §4.1: the opening handshake is a GET. Guarding on the method
+	// keeps the helper's intent precise (a non-GET with Upgrade headers is
+	// not a real handshake and shouldn't have its Origin rewritten).
+	if req.Method != http.MethodGet {
+		return false
+	}
+	if !strings.EqualFold(req.Header.Get("Upgrade"), "websocket") {
+		return false
+	}
+	for _, line := range req.Header.Values("Connection") {
+		for tok := range strings.SplitSeq(line, ",") {
+			if strings.EqualFold(strings.TrimSpace(tok), "upgrade") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // matches reports whether the given request path falls under this route.
