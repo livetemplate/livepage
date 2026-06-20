@@ -119,3 +119,26 @@ func TestSQLiteSource_AutoCreateHasCreatedAt(t *testing.T) {
 		t.Fatalf("expected 1 row, got %d", len(data))
 	}
 }
+
+// TestSQLiteSource_BusyTimeoutApplied verifies that NewSQLiteSource opens its
+// connection with a non-zero busy_timeout. A malformed DSN pragma is silently
+// ignored by modernc.org/sqlite, so this guards against the lock-contention
+// flake (issue #292) silently regressing.
+func TestSQLiteSource_BusyTimeoutApplied(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "busy.db")
+
+	src, err := NewSQLiteSource("items", dbPath, "items", dir, false)
+	if err != nil {
+		t.Fatalf("NewSQLiteSource failed: %v", err)
+	}
+	defer src.Close()
+
+	var timeout int
+	if err := src.db.QueryRow("PRAGMA busy_timeout").Scan(&timeout); err != nil {
+		t.Fatalf("failed to read busy_timeout: %v", err)
+	}
+	if timeout != sqliteBusyTimeoutMs {
+		t.Fatalf("expected busy_timeout %d, got %d (DSN pragma not applied?)", sqliteBusyTimeoutMs, timeout)
+	}
+}

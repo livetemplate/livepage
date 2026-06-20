@@ -36,6 +36,22 @@ func (l *autoTasksConsoleLogs) get() []string {
 	return append([]string{}, l.logs...)
 }
 
+// toggleFirstCheckbox clicks the first checkbox in the given lvt-source section
+// and waits until its checked state matches wantChecked.
+//
+// It uses a JS .click() rather than chromedp.Click: CDP's synthetic mouse click
+// does not reliably trigger livetemplate's delegated event handlers in headless
+// Docker Chrome (the same reason action_buttons_e2e_test.go uses .click()). It
+// then polls for the resulting checked state instead of sleeping a fixed
+// duration, so a slow WebSocket round-trip + file write no longer flakes.
+func toggleFirstCheckbox(source string, wantChecked bool, timeout time.Duration) chromedp.Action {
+	sel := fmt.Sprintf(`document.querySelectorAll('[lvt-source="%s"] input[type="checkbox"]')`, source)
+	return chromedp.Tasks{
+		chromedp.Evaluate(sel+`[0].click()`, nil),
+		waitForDOM(fmt.Sprintf(`%s[0].checked === %t`, sel, wantChecked), timeout),
+	}
+}
+
 // createAutoTasksExample creates a temp directory with a zero-config markdown file
 // containing task list sections (no frontmatter, no separate data file).
 func createAutoTasksExample(t *testing.T) (string, func()) {
@@ -197,32 +213,15 @@ func TestAutoTasks_BasicToggle(t *testing.T) {
 	}
 	t.Log("'Make coffee' starts unchecked")
 
-	// Click the first checkbox to toggle it
+	// Click the first checkbox to toggle it and wait for the checked state to
+	// appear (WebSocket round-trip + file write). A failure here dumps console
+	// logs for diagnosis.
 	err = chromedp.Run(ctx,
-		chromedp.Click(`[lvt-source="_auto_morning-tasks"] input[type="checkbox"]`, chromedp.ByQuery),
-		chromedp.Sleep(3*time.Second), // Wait for WebSocket response + file write
+		toggleFirstCheckbox("_auto_morning-tasks", true, 15*time.Second),
 	)
 	if err != nil {
-		t.Fatalf("Failed to click checkbox: %v", err)
-	}
-	t.Log("Clicked first checkbox")
-
-	// Verify the checkbox is now checked in the UI
-	var afterChecked bool
-	err = chromedp.Run(ctx,
-		chromedp.Evaluate(`
-			(() => {
-				const checkboxes = document.querySelectorAll('[lvt-source="_auto_morning-tasks"] input[type="checkbox"]');
-				return checkboxes.length > 0 ? checkboxes[0].checked : false;
-			})()
-		`, &afterChecked),
-	)
-	if err != nil {
-		t.Fatalf("Failed to get state after toggle: %v", err)
-	}
-	if !afterChecked {
 		t.Logf("Console logs: %v", testCtx.ConsoleLogs.get())
-		t.Fatal("Checkbox should be checked after toggle")
+		t.Fatalf("Checkbox should be checked after toggle: %v", err)
 	}
 	t.Log("Checkbox is now checked in UI")
 
@@ -270,29 +269,17 @@ func TestAutoTasks_AddTask(t *testing.T) {
 	}
 	t.Log("Page loaded with auto-tasks")
 
-	// Type new task text and submit
+	// Type new task text and submit. Use a JS .click() on the submit button
+	// (CDP click is unreliable for delegated handlers in headless Docker Chrome)
+	// and poll for the new row instead of a fixed sleep.
 	err = chromedp.Run(ctx,
 		chromedp.SendKeys(`[lvt-source="_auto_morning-tasks"] input[name="text"]`, "Walk the dog", chromedp.ByQuery),
-		chromedp.Click(`[lvt-source="_auto_morning-tasks"] button[type="submit"]`, chromedp.ByQuery),
-		chromedp.Sleep(3*time.Second), // Wait for WebSocket + file write
+		chromedp.Evaluate(`document.querySelector('[lvt-source="_auto_morning-tasks"] button[type="submit"]').click()`, nil),
+		waitForDOM(`document.querySelectorAll('[lvt-source="_auto_morning-tasks"] input[type="checkbox"]').length === 4`, 15*time.Second),
 	)
 	if err != nil {
-		t.Fatalf("Failed to add task: %v", err)
-	}
-	t.Log("Submitted new task 'Walk the dog'")
-
-	// Verify new task appears in UI
-	var newTaskCount int
-	err = chromedp.Run(ctx,
-		chromedp.Evaluate(`document.querySelectorAll('[lvt-source="_auto_morning-tasks"] input[type="checkbox"]').length`, &newTaskCount),
-	)
-	if err != nil {
-		t.Fatalf("Failed to count tasks after add: %v", err)
-	}
-
-	if newTaskCount != 4 {
 		t.Logf("Console logs: %v", testCtx.ConsoleLogs.get())
-		t.Fatalf("Expected 4 tasks after adding, got %d", newTaskCount)
+		t.Fatalf("Failed to add task: %v", err)
 	}
 	t.Log("New task appears in UI (4 total)")
 
@@ -393,12 +380,12 @@ func TestAutoTasks_PersistAcrossReload(t *testing.T) {
 		t.Fatalf("Failed to navigate: %v", err)
 	}
 
-	// Toggle first checkbox
+	// Toggle first checkbox and wait for the checked state before reloading
 	err = chromedp.Run(ctx,
-		chromedp.Click(`[lvt-source="_auto_morning-tasks"] input[type="checkbox"]`, chromedp.ByQuery),
-		chromedp.Sleep(3*time.Second),
+		toggleFirstCheckbox("_auto_morning-tasks", true, 15*time.Second),
 	)
 	if err != nil {
+		t.Logf("Console logs: %v", testCtx.ConsoleLogs.get())
 		t.Fatalf("Failed to toggle: %v", err)
 	}
 	t.Log("Toggled first checkbox")
@@ -473,12 +460,12 @@ func TestAutoTasks_NoFullReload(t *testing.T) {
 	}
 	t.Log("Reload marker set")
 
-	// Toggle checkbox
+	// Toggle checkbox and wait for the checked state (watcher + refresh cycle)
 	err = chromedp.Run(ctx,
-		chromedp.Click(`[lvt-source="_auto_morning-tasks"] input[type="checkbox"]`, chromedp.ByQuery),
-		chromedp.Sleep(5*time.Second), // Wait for watcher + refresh cycle
+		toggleFirstCheckbox("_auto_morning-tasks", true, 15*time.Second),
 	)
 	if err != nil {
+		t.Logf("Console logs: %v", testCtx.ConsoleLogs.get())
 		t.Fatalf("Failed to toggle: %v", err)
 	}
 	t.Log("Toggled checkbox with file watcher active")

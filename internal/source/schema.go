@@ -29,7 +29,7 @@ func QuerySQLiteSchema(dbPath, table, siteDir string) []ColumnInfo {
 		dbPath = filepath.Join(siteDir, dbPath)
 	}
 
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := sql.Open("sqlite", sqliteDSN(dbPath))
 	if err != nil {
 		return nil
 	}

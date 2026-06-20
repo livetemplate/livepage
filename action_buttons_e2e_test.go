@@ -141,8 +141,11 @@ func TestActionButtons(t *testing.T) {
 	}
 	t.Log("clear-done action passed: deleted 2 completed tasks")
 
-	// Verify in database
-	db, err := sql.Open("sqlite", dbPath)
+	// Verify in database. Use a busy_timeout so the read waits for the server's
+	// concurrent action writes to commit instead of failing immediately with
+	// SQLITE_BUSY (matches the busy_timeout the server applies to its own
+	// connection in internal/source).
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=busy_timeout(5000)")
 	if err != nil {
 		t.Fatalf("Failed to open database for verification: %v", err)
 	}
