@@ -49,7 +49,7 @@ func NewSQLiteSource(name, dbPath, table, siteDir string, readonly bool) (*SQLit
 		dbPath = siteDir + "/" + dbPath
 	}
 
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := sql.Open("sqlite", sqliteDSN(dbPath))
 	if err != nil {
 		return nil, fmt.Errorf("sqlite source %q: failed to open database: %w", name, err)
 	}
@@ -452,6 +452,21 @@ func normalizeSQLiteType(sqlType string) string {
 }
 
 // Helper functions
+
+// sqliteBusyTimeoutMs is how long a connection waits for a lock held by another
+// writer before returning SQLITE_BUSY. SQLite's default is 0 (fail immediately),
+// which makes any concurrent access — e.g. a reader querying while an action's
+// write is committing — flake with "database is locked". A non-zero timeout lets
+// the brief write window drain and the query succeed.
+const sqliteBusyTimeoutMs = 5000
+
+// sqliteDSN builds the modernc.org/sqlite connection string for a database file
+// path, attaching a busy_timeout pragma so concurrent access waits for locks
+// instead of failing immediately. Applies to every SQLite connection the library
+// opens, regardless of source or example.
+func sqliteDSN(dbPath string) string {
+	return fmt.Sprintf("%s?_pragma=busy_timeout(%d)", dbPath, sqliteBusyTimeoutMs)
+}
 
 func isValidIdentifier(name string) bool {
 	if name == "" || len(name) > 64 {
