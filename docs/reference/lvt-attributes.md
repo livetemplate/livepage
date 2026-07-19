@@ -2,18 +2,12 @@
 
 Complete reference for all `lvt-*` attributes.
 
-> **⚠️ Parts of this page are out of date and are being audited.** A sample of 11
-> documented attributes found 8 that no longer match `@livetemplate/client`: several
-> moved namespace (`lvt-scroll`/`lvt-highlight`/`lvt-animate` → `lvt-fx:*`,
-> `lvt-throttle` → `lvt-mod:*`, `lvt-disable-with` → `lvt-form:*`) and a few
-> (`lvt-click-away`, `lvt-focus-trap`, `lvt-modal-open`) are not in the client at all.
-> The Lifecycle Hooks section below still shows the superseded
-> `lvt-{action}-on:{event}` form; the current form is `lvt-el:{method}:on:{state}` with
-> states `pending`/`success`/`error`/`done`.
->
-> Until the audit lands, **verify an attribute against `@livetemplate/client` before
-> relying on it.** Tracked as Phase 2 (M0) in
-> [the ephemeral-UI plan](../plans/2026-07-09-ephemeral-ui-reframe.md).
+> **`tinkerdown validate` does not check attribute names.** It verifies that a document
+> *parses*; unknown `lvt-*` attributes pass through as ordinary HTML and are silently
+> ignored at runtime. A file using a misspelled or superseded attribute validates
+> clean and then does nothing. Until vocabulary validation exists, this page — checked
+> against `@livetemplate/client` — is the authority. See § Namespace migration if you
+> are updating older markup.
 
 ## Overview
 
@@ -132,24 +126,9 @@ Filter keyboard events by key.
 <input lvt-key="Enter" lvt-on:click="Search">
 ```
 
-### lvt-click-away
-
-Trigger action when clicking outside element.
-
-```html
-<div lvt-click-away="CloseModal">
-  Modal content
-</div>
-```
-
-### lvt-window-{event}
-
-Handle window-level events.
-
-```html
-<div lvt-window-scroll="HandleScroll">
-</div>
-```
+> **Removed.** `lvt-click-away` and `lvt-window-{event}` were documented here but are
+> not implemented by `@livetemplate/client`. "Click away" survives only as a *lifecycle
+> state* — `lvt-el:removeclass:on:click-away` — not as a standalone action attribute.
 
 ---
 
@@ -163,48 +142,50 @@ Pass data with actions.
 <button name="Delete" data-id="123">Delete</button>
 ```
 
-### lvt-value-*
-
-Extract values from elements.
-
-```html
-<button name="Update" lvt-value-name="#nameInput">
-  Update
-</button>
-```
+> **Removed.** `lvt-value-*` ("extract values from elements", e.g.
+> `lvt-value-name="#nameInput"`) was documented here but is implemented nowhere — not in
+> the client, not in Tinkerdown. To send extra values with an action, put them on the
+> element as `data-*` attributes, or submit a `<form>` whose named inputs carry them.
+>
+> Not to be confused with `lvt-value` (no suffix), which is real: it names the value
+> field when binding a `<select>` to a source — see § Data Binding.
 
 ---
 
 ## UI Directives
 
-### lvt-scroll
+Visual effects live under the **`lvt-fx:`** namespace.
+
+### lvt-fx:scroll
 
 Control scroll behavior.
 
 ```html
-<div lvt-scroll="bottom">
+<div lvt-fx:scroll="bottom">
   <!-- Auto-scroll to bottom -->
 </div>
 ```
 
 **Values:** `bottom`, `top`, `sticky`
 
-### lvt-highlight
+### lvt-fx:highlight
 
 Flash highlight on updates.
 
 ```html
-<div lvt-highlight>
+<div lvt-fx:highlight>
   Content that highlights when updated
 </div>
 ```
 
-### lvt-animate
+Effects can also be bound to a lifecycle state, e.g. `lvt-fx:highlight:on:success`.
+
+### lvt-fx:animate
 
 Entry animations.
 
 ```html
-<div lvt-animate="fade">
+<div lvt-fx:animate="fade">
   Fades in
 </div>
 ```
@@ -219,27 +200,9 @@ Auto-focus on visibility.
 <input lvt-autofocus>
 ```
 
-### lvt-focus-trap
-
-Trap focus within element (for modals).
-
-```html
-<div class="modal" lvt-focus-trap>
-  Modal content
-</div>
-```
-
-### lvt-modal-open / lvt-modal-close
-
-Control modals.
-
-```html
-<button lvt-modal-open="myModal">Open</button>
-
-<div id="myModal" class="modal">
-  <button lvt-modal-close="myModal">Close</button>
-</div>
-```
+> **Removed.** `lvt-focus-trap` and `lvt-modal-open` / `lvt-modal-close` were documented
+> here but are not implemented by `@livetemplate/client`. Use a native `<dialog>` element
+> for modals — it provides focus trapping and open/close semantics in the platform.
 
 ---
 
@@ -256,14 +219,26 @@ the element bypasses the guard and resumes diffing.
 <input name="search" lvt-ignore>
 ```
 
-### lvt-disable-with
+### lvt-form:disable-with
 
 Button text during form submission.
 
 ```html
-<button type="submit" lvt-disable-with="Saving...">
+<button type="submit" lvt-form:disable-with="Saving...">
   Save
 </button>
+```
+
+### lvt-form:preserve
+
+Keep a form's field values after its action completes, instead of resetting them.
+Set on the `<form>`. Distinct from `lvt-ignore`, which is a general DOM-diffing guard
+on any element.
+
+```html
+<form name="Search" lvt-form:preserve>
+  <input name="q">
+</form>
 ```
 
 ### data-confirm
@@ -280,29 +255,31 @@ Confirmation dialog before action.
 
 ## Rate Limiting
 
-### lvt-throttle
+Event-handling modifiers live under the **`lvt-mod:`** namespace.
+
+### lvt-mod:throttle
 
 Throttle event handling.
 
 ```html
-<input lvt-on:change="Search" lvt-throttle="300">
+<input lvt-on:change="Search" lvt-mod:throttle="300">
 ```
 
-### lvt-debounce
+### lvt-mod:debounce
 
 Debounce event handling.
 
 ```html
-<input lvt-on:change="Search" lvt-debounce="300">
+<input lvt-on:change="Search" lvt-mod:debounce="300">
 ```
 
 ---
 
 ## Lifecycle Hooks
 
-### lvt-{action}-on:{event}
+### lvt-el:{method}:on:{state}
 
-Trigger actions on lifecycle events.
+Trigger DOM mutations on lifecycle state changes.
 
 ```html
 <!-- Reset form on success -->
@@ -310,29 +287,43 @@ Trigger actions on lifecycle events.
 </form>
 
 <!-- Add class on error -->
-<div lvt-addClass-on:error="error-state">
+<div lvt-el:addClass:on:error="error-state">
 </div>
 ```
 
-**Available actions:**
+Scope to a named action by inserting it before the state — useful when one page has
+several actions in flight:
 
-| Action | Description |
+```html
+<form lvt-el:reset:on:create-todo:success>
+</form>
+```
+
+**Available methods:**
+
+| Method | Description |
 |--------|-------------|
 | `reset` | Reset form |
 | `addClass` | Add CSS class |
 | `removeClass` | Remove CSS class |
-| `disable` | Disable element |
-| `enable` | Enable element |
-| `focus` | Focus element |
-| `blur` | Blur element |
+| `toggleClass` | Toggle CSS class |
+| `setAttr` | Set an attribute |
+| `toggleAttr` | Toggle an attribute |
 
-**Available events:**
+There is no `disable`/`enable`/`focus`/`blur` method — express those through
+`setAttr` / `toggleAttr` (e.g. `lvt-el:setAttr:disabled:on:pending`).
 
-| Event | Description |
+**Available states:**
+
+| State | Description |
 |-------|-------------|
+| `pending` | Action in progress |
 | `success` | Action completed successfully |
 | `error` | Action failed |
-| `loading` | Action in progress |
+| `done` | Action settled (either outcome) |
+
+`lvt-el:` methods can target a different element via `data-lvt-target` (`#id` or
+`closest:selector`).
 
 ---
 
@@ -342,12 +333,32 @@ Trigger actions on lifecycle events.
 
 These are processed by the `@livetemplate/client` library:
 
-- Event handling: `name` (button/form), `lvt-on:change`, `lvt-key`, `lvt-click-away`
-- Rate limiting: `lvt-throttle`, `lvt-debounce`
-- UI directives: `lvt-scroll`, `lvt-highlight`, `lvt-animate`, `lvt-autofocus`, `lvt-focus-trap`
-- Modals: `lvt-modal-open`, `lvt-modal-close`
-- Forms: `lvt-ignore`, `lvt-disable-with`, `data-confirm`
-- Lifecycle: `lvt-{action}-on:{event}`
+- Event handling: `name` (button/form), `lvt-on:{event}`, `lvt-key`
+- Rate limiting: `lvt-mod:throttle`, `lvt-mod:debounce`
+- Visual effects: `lvt-fx:scroll`, `lvt-fx:highlight`, `lvt-fx:animate`
+- Focus: `lvt-autofocus`
+- Forms: `lvt-form:preserve`, `lvt-form:disable-with`, `data-confirm`
+- DOM guards: `lvt-ignore`, `lvt-ignore-attrs` (bypass with `data-lvt-force-update`)
+- Lifecycle: `lvt-el:{method}:on:{state}` (retarget with `data-lvt-target`)
+
+### Namespace migration
+
+The client groups Tier-2 attributes into namespaces. If you have older markup, these
+are the renames:
+
+| Old | Current |
+|---|---|
+| `lvt-scroll` / `lvt-highlight` / `lvt-animate` | `lvt-fx:scroll` / `lvt-fx:highlight` / `lvt-fx:animate` |
+| `lvt-throttle` / `lvt-debounce` | `lvt-mod:throttle` / `lvt-mod:debounce` |
+| `lvt-disable-with` | `lvt-form:disable-with` |
+| `lvt-preserve` | `lvt-ignore` (general DOM guard) or `lvt-form:preserve` (form values) |
+| `lvt-{action}-on:{event}` | `lvt-el:{method}:on:{state}` |
+| `lvt-click-away`, `lvt-window-{event}`, `lvt-focus-trap`, `lvt-modal-open`, `lvt-modal-close` | **removed** — not implemented by the client |
+
+**The old names are not shimmed.** Apart from a warn-once shim for `lvt-no-intercept`,
+the client does not accept superseded names, so old markup fails silently rather than
+warning — and `tinkerdown validate` does not catch it either (see the note at the top
+of this page).
 
 ### Tinkerdown-Specific Attributes
 
