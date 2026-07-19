@@ -54,7 +54,10 @@ func TestDocumentedAttributesExist(t *testing.T) {
 			t.Fatalf("read %s: %v", surface, err)
 		}
 		for _, m := range attrPattern.FindAllStringSubmatch(string(content), -1) {
-			attr := normalizeAttribute(strings.TrimRight(m[1], "-:"))
+			// Pass the raw token: normalizeAttribute trims internally, *after* its
+			// allowlist lookups. Trimming here first would strip the trailing dash
+			// from "lvt-value-" before the neverImplemented check could match it.
+			attr := normalizeAttribute(m[1])
 			if attr == "" {
 				continue
 			}
@@ -150,8 +153,19 @@ var neverImplemented = map[string]bool{
 //     lvt-el:{method}:on:{state} form; the client implements the namespace and
 //     dispatches members at runtime, so only the namespace is checkable
 //   - wildcard families — lvt-value-name is an instance of lvt-value-*
-func normalizeAttribute(attr string) string {
-	if strings.ContainsAny(attr, "{}") || documentedAsRemoved[attr] || neverImplemented[attr] {
+func normalizeAttribute(raw string) string {
+	if strings.ContainsAny(raw, "{}") {
+		return ""
+	}
+	// Look up the raw token *before* trimming, so family entries that end in a dash
+	// ("lvt-value-") can match. Trimming first silently defeated this: "lvt-value-"
+	// became "lvt-value", which resolves against the real, unrelated select-binding
+	// attribute of that name — so the fabricated family passed by coincidence.
+	if documentedAsRemoved[raw] || neverImplemented[raw] {
+		return ""
+	}
+	attr := strings.TrimRight(raw, "-:")
+	if documentedAsRemoved[attr] || neverImplemented[attr] {
 		return ""
 	}
 	if ns, _, ok := strings.Cut(attr, ":"); ok {
@@ -171,12 +185,13 @@ func normalizeAttribute(attr string) string {
 	return attr
 }
 
+// readGoSources concatenates every production .go file in the repo. Walking "." is
+// enough — collectGo recurses, so naming internal/cmd/pkg as well would just scan them
+// twice.
 func readGoSources(t *testing.T) []byte {
 	t.Helper()
 	var all []byte
-	for _, dir := range []string{".", "internal", "cmd", "pkg"} {
-		collectGo(t, dir, &all)
-	}
+	collectGo(t, ".", &all)
 	return all
 }
 
@@ -215,4 +230,70 @@ func contains(haystack []string, needle string) bool {
 		}
 	}
 	return false
+}
+
+// TestNormalizeAttribute pins the classification rules directly, rather than trusting
+// the doc surfaces to keep exercising them by accident. That indirection already hid
+// one bug: the "lvt-value-" family entry was dead because the caller trimmed the
+// trailing dash before the lookup, and the check passed only because the unrelated
+// real attribute "lvt-value" exists. Nothing failed, so nothing surfaced it.
+func TestNormalizeAttribute(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"concrete attribute passes through", "lvt-source", "lvt-source"},
+		{"placeholder skipped", "lvt-{action}-on:{event}", ""},
+		{"namespaced instance reduces to its namespace", "lvt-el:addClass:on:error", "lvt-el:"},
+		{"effect instance reduces to its namespace", "lvt-fx:highlight:on:success", "lvt-fx:"},
+		{"bare namespace skipped", "lvt-el", ""},
+		{"superseded name skipped", "lvt-scroll", ""},
+		{"removed name skipped", "lvt-modal-open", ""},
+		{"fabricated attribute skipped", "lvt-filter", ""},
+
+		// The regression the bot caught. "lvt-value-" must be skipped as a fabricated
+		// family and must NOT collapse onto the real "lvt-value", which is a distinct,
+		// implemented select-binding attribute.
+		{"fabricated family skipped even with trailing dash", "lvt-value-", ""},
+		{"instance of the fabricated family skipped", "lvt-value-name", ""},
+		{"the real lvt-value is unaffected", "lvt-value", "lvt-value"},
+
+		// An unknown family must still be checked, not waved through. It normalizes to
+		// its trimmed name, which resolves only if something implements it — so a
+		// newly-invented family still fails the guard.
+		{"unknown family is checked, not skipped", "lvt-widget-", "lvt-widget"},
+		// An un-enumerated instance of the fabricated family folds onto the family
+		// name, so listing every instance in the map is not required.
+		{"un-enumerated instance folds onto its family", "lvt-value-foo", "lvt-value-"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := normalizeAttribute(tc.in); got != tc.want {
+				t.Errorf("normalizeAttribute(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestImplementedMatchesWholeNames pins the boundary rule. Substring matching would
+// report the long-dead lvt-scroll as live, because "data-lvt-scroll-sticky" contains it.
+func TestImplementedMatchesWholeNames(t *testing.T) {
+	src := []byte(`"data-lvt-scroll-sticky","lvt-fx:scroll","lvt-ignore"`)
+	cases := []struct {
+		attr string
+		want bool
+	}{
+		{"lvt-ignore", true},
+		{"lvt-fx:scroll", true},
+		{"lvt-scroll", false}, // only present inside data-lvt-scroll-sticky
+		{"lvt-ign", false},    // prefix of a real name is not a match
+		{"lvt-fx:", true},     // namespace prefix: only the leading boundary applies
+		{"lvt-missing", false},
+	}
+	for _, tc := range cases {
+		if got := implemented(tc.attr, src); got != tc.want {
+			t.Errorf("implemented(%q) = %v, want %v", tc.attr, got, tc.want)
+		}
+	}
 }
