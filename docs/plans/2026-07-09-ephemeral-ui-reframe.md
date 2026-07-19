@@ -538,8 +538,8 @@ The *what* + *why* of each is in § Roadmap; here is only each milestone's **kic
 | Milestone | Upstream it bumps | Regenerates the client bundle? |
 |---|---|---|
 | **M1** (the demo) | none — builds on existing primitives | **No.** This is the breathing room that makes deferring [#297](https://github.com/livetemplate/tinkerdown/issues/297) reasonable rather than negligent. |
-| **M2** `Validate()` API | Go `livetemplate` | **Yes, transitively** — `ClientVersion` is a wire contract with no runtime handshake, so a server bump obliges matching the client (exactly what M0 Phase 0 did: server v0.19.1 → client 0.18.2). |
-| **M3** `WithActionPolicy` | Go `livetemplate` | **Yes, transitively** — same wire-contract reasoning. |
+| **M2** `Validate()` API | Go `livetemplate` | **Check `ClientVersion`** — it is a wire contract with no runtime handshake, so a server bump that moves it obliges matching the client (what M0 Phase 0 did: server v0.19.1 → client 0.18.2). A release touching only server-side APIs may leave `ClientVersion` unchanged — `Validate()` is arguably one — in which case this is legitimately a **No**. Read the constant, don't assume. |
+| **M3** `WithActionPolicy` | Go `livetemplate` | **Check `ClientVersion`** — same wire-contract reasoning. |
 | **M4** component vocabulary | Go `lvt/components` | **No.** `github.com/livetemplate/lvt/components` is a server-side Go module consumed by `internal/server/websocket.go` and `internal/runtime/state.go`; it appears nowhere in `client/src` or `client/package.json`. Skip this checklist unless M4 also bumps `@livetemplate/client` for some client-side affordance a new component needs. |
 | **M5** embed handshake | `client` | **Certainly** — it ships a client-side feature. |
 
