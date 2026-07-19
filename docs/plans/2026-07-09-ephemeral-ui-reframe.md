@@ -1,8 +1,8 @@
 # Plan: Tinkerdown — ephemeral, LLM-generated internal UIs from your approved data, policies, and style
 
 > **How to read this plan — pick your path.**
-> - **Human reviewer (~5 min):** read **§ Deliverables at a glance → § Context → § The reference demo → § Roadmap**, then stop at the **"⬇ Execution contract"** divider. That's the whole story: what's being built, why, and in what order. (§ Upstream gap analysis + § four inputs are optional depth.)
-> - **Executing LLM:** everything below the divider — **LLM session guide, Implementation phases, Verification, Risks, Appendix** — is your contract; the top matter is context.
+> - **Human reviewer (~5 min):** read **§ Deliverables at a glance → § Context → § The reference demo → § Roadmap**, then stop at the **"⬇ Execution contract"** divider. That's the whole story: what's being built, why, and in what order. (§ four inputs, § Upstream gap analysis, § Architecture, § Package layout, § Skills delivered are optional depth.)
+> - **Executing LLM:** everything below the divider — **LLM session guide, delivery protocol, Implementation phases, Tech stack, skeleton deltas, Verification, Risks, Appendices** — is your contract; the top matter is context.
 >
 > **Target acceptance test (the whole plan exists to make this true):** an operator runs the Claude Code skill `/tinkerdown "a console to approve PII / data-export access requests"`, reviews and OKs the operations the generated app will run, and a working, live UI is serving in **~30 seconds**.
 
@@ -67,7 +67,7 @@ This is the concrete M1 target. Chosen from a research pass over real request→
 **The friction (real, high-stakes).** An analyst or support agent needs access to sensitive data — a PII export, a prod-DB read — to resolve a chargeback dispute, service a GDPR data-subject request, or debug a customer issue. Today the loop is: **Slack-ping someone with prod access → they hand-run a query → weak/absent audit trail → compliance exposure** (who accessed which PII, when, why, for how long — hard to prove to an auditor). This is over-broad, slow, and unauditable. Real HITL-approval tooling frames PII/data-export as the case that *must* route to a review tier with a durable audit record.
 
 **The generated console (what the skill produces).** *(The concrete `app.md` + the workspace manifest it references are in [§ Appendix B — Expected output](#appendix-b--expected-output-worked-example-skip-on-phase-execution).)*
-- **Pending-requests queue** (a data source). Each row shows what an approver needs to decide safely: requester + team, the dataset/resource requested (e.g. `orders.pii`, `users.email`), the scope (row estimate / filter / a preview of the exact scoped query), business justification, linked ticket/incident, requested duration/TTL, requested-at, and sensitivity/compliance tags (PII/PCI/GDPR).
+- **Pending-requests queue** (a data source). Each row shows what an approver needs to decide safely: requester + team, the dataset/resource requested (e.g. `orders_pii`, `users_email`), the scope (row estimate / filter / a preview of the exact scoped query), business justification, linked ticket/incident, requested duration/TTL, requested-at, and sensitivity/compliance tags (PII/PCI/GDPR).
 - **Approve** (`confirm:` action) → produces a **concrete, auditable output**: (1) a durable **audit record** (approver, timestamp, exact scope, reason, TTL) appended to a writable source, and (2) the concrete action — a **scoped, parameterized export job** (a bounded query, delivered as a time-boxed artifact) *and/or* an optional **PR to an access-grants-as-code file** (`access-grants/<date>-<user>-<dataset>.yaml`) for GitOps-minded teams. Primary output is the grant + audit record; the PR is an optional git-native variant that reuses the same `gh pr create` primitive.
 - **Deny** (`confirm:` action) → transitions the request to `denied`, records approver + reason, notifies the requester. No data access granted.
 - **Request intake** → the app's own "Request access" form (a writable source), or a Slack slash-command / webhook POST for realism.
@@ -80,7 +80,7 @@ This is the concrete M1 target. Chosen from a research pass over real request→
 - **House style** → `styling.site_css` + theme.
 - **Ephemeral** → served via the disk-free `ParseString` + playground-session path.
 
-**The two safety layers (generic machinery, not a separate demo).** Every generated UI passes through the same gate; here it's shown applied to the PII console. (1) The **policy lint** (automated, always on) rejects a generated app that references any source/action the manifest didn't approve — the non-redundant safeguard, not a re-approval of the operator's intent. (2) **Operation transparency** (proportional): because an *LLM* authored the implementation, generation surfaces the *concrete* privileged operations the generated app will run before it serves — for this PII console: read the requests store, run the **scoped** export `SELECT … FROM orders_pii LIMIT N`, append audit records, and (optionally) `gh pr create`. The operator reviews the actual behavior their one-line intent didn't specify; a read-only UI would get no such prompt. Both layers are **generic skill machinery** (manifest + generate skill, built once), not demo-specific code — per the "generic core library code" rule.
+**The two safety layers (generic machinery, not a separate demo).** Every generated UI passes through the same gate; here it's shown applied to the PII console. (1) The **policy lint** (automated, always on) rejects a generated app that references any source/action the manifest didn't approve — the non-redundant safeguard, not a re-approval of the operator's intent. (2) **Operation transparency** (proportional): because an *LLM* authored the implementation, generation surfaces the *concrete* privileged operations the generated app will run before it serves — for this PII console: read the requests store, run the **scoped** export `SELECT … FROM orders_pii LIMIT 500`, append audit records, and (optionally) `gh pr create`. The operator reviews the actual behavior their one-line intent didn't specify; a read-only UI would get no such prompt. Both layers are **generic skill machinery** (manifest + generate skill, built once), not demo-specific code — per the "generic core library code" rule.
 
 **Locally runnable E2E (no real prod DB, no real PII).** A fixture SQLite of *synthetic* "PII" rows makes the export job real but harmless; the requests queue + audit log are seeded/writable SQLite (or markdown); the optional access-grant PR uses a fixture git repo + the `gh` CLI. Approve runs a genuinely scoped export against the fixture DB, writes a real audit entry, and (optionally) opens a real PR — all demoable without touching production.
 
@@ -120,10 +120,10 @@ The brief names four things a team defines once so LLMs can safely generate agai
 
 ```
    Operator (in Claude Code)
-        │  /tinkerdown "approve PII / data-export access requests"
+        │  /tinkerdown "a console to approve PII / data-export access requests"
         ▼
-  ┌───────────────────────────────────────────────┐
-  │  Claude Code skill (skills/tinkerdown) │  [M1 — tinkerdown]
+  ┌─────────────────────────────────────────────────┐
+  │  Claude Code skill (skills/tinkerdown)          │  [M1 — tinkerdown]
   │  1. read workspace manifest (approved sources,  │
   │     actions, style guide) + attribute reference │
   │     + few-shot corpus                           │
@@ -132,7 +132,7 @@ The brief names four things a team defines once so LLMs can safely generate agai
   │  4. if privileged: show operation summary,      ││    [M1: real parser;
   │     operator OKs the concrete ops (else skip)   ││     M2: + Validate() API]
   │  5. `tinkerdown serve` (ephemeral session)      ││
-  └───────────────────────────────────────────────┘│
+  └─────────────────────────────────────────────────┘│
         │                                            │
         ▼                                            │
   ┌───────────────────────────┐                      │
@@ -187,19 +187,19 @@ All follow the Anthropic skill shape already used by `skills/tinkerdown/` (conci
 
 ## Roadmap
 
-Ordered milestones. M1 is fully detailed; M2–M5 are outline-only and get expanded at their kickoff (see LLM session guide convention 9).
+Ordered milestones. **M0 and M1 are fully detailed** (full phase blocks); M2–M5 are outline-only and get expanded at their kickoff (see LLM session guide convention 9).
 
 - **M0 — Reframe + upstream bump.** Reposition the narrative (README/SKILL/llms.txt/ai-generation) around ephemeral generated UIs; **bump `livetemplate` + client + components to their latest tags** and absorb behavior changes. *Lights up:* the fast, correct runtime substrate + the honest story. *(no demo yet)*
 - **M1 — THE DEMO (thin vertical slice).** The five M1 deliverables (see § Deliverables at a glance) on existing primitives. *Lights up:* the target acceptance test — generate a real, friction-removing UI in ~30s — *and* re-run it from a skill in seconds.
 - **M2 — Deterministic validation (upstream).** `livetemplate.Validate(templateText)` (diff-cleanliness + attribute diagnostics) + tinkerdown **policy lint** in `validate`. *Lights up:* first-pass generation reliability; reject unknown `lvt-*` / non-approved refs before serving.
 - **M3 — Runtime policy + introspection (upstream).** `WithActionPolicy` per-action/field authz + state/source introspection metadata. *Lights up:* defense-in-depth (the running app can't exceed granted access) + LLM binds to real fields.
 - **M4 — Component vocabulary + enforceable house style (upstream `lvt/components` + tinkerdown).** Charts, badges, cards, stat tiles, alerts, empty-states; **plus** promoting the UX style guide from coarse (`site_css` + `style-guide.md`) to **design tokens + an enforced component set** (the "style guide object" the exploration found missing). *Lights up:* richer generated dashboards with no free-form HTML, guaranteed on-brand.
-- **M5 — Persist to the malleable substrate (save & share).** This is where **malleability lives**: persist a generated UI to the repo + a gallery + share link by storing the captured **skill** (per convention 13 / M1 Phase 6), not just the `app.md` — so "save" means a re-runnable workflow you evolve, while individual UIs stay ephemeral; plus the external-app embed handshake. *Lights up:* "throw away the UI, keep + reshape the substrate" (folds issues #223 host read-only apps, #282 review mode, #249 external embed).
+- **M5 — Persist to the malleable substrate (save & share).** This is where **malleability lives**: persist a generated UI to the repo + a gallery + share link by storing the captured **skill** (per convention 13 / M1 Phase 6), not just the `app.md` — so "save" means a re-runnable workflow you evolve, while individual UIs stay ephemeral; plus **substrate extensibility** (teams can add their own approved source types) and the external-app embed handshake. *Lights up:* "throw away the UI, keep + reshape the substrate" (folds issues #223 host read-only apps, #282 review mode, #249 external embed, #216 writable WASM sources, #222 custom Go+WASM sources).
 
-**Open-issue walkthrough (48 open).** Triaged into three buckets against this reframe:
+**Open-issue walkthrough.** Triaged into three buckets against this reframe. *(Counts drift: **48 open** at plan authoring, **82** by 2026-07-19 — the repo files `from-review` issues continuously. The named issue→milestone mappings below stay valid; **re-run the triage at M0 kickoff** rather than trusting the totals, same as the version pins.)*
 - **Folded into milestones (reframe-aligned):** #223 host read-only apps → **M5** gallery; #282 review mode → **M5**; #249 `lvt-external` embed any framework → **M5** embed handshake; #216 writable WASM sources → **M5** sources; #222 custom sources in Go+WASM → **M5**; #226 ROADMAP lifecycle-attr pattern + #230 `lvt-preserve`→`lvt-ignore` doc fixes → **M0** reframe pass.
 - **Reliability/tech-debt, pulled in only if a phase's Audit finds it blocking:** #269 hot-reload serves stale `/`, #275 Kroki timeout blocks discovery, #259 multi-range highlight overlay misalign (all P2) — none sit on the M1 critical path, but #269 touches serve/hot-reload which M0's bump also touches, so M0 Audit checks it.
-- **Orthogonal `from-review` follow-ups (~35, #258–#273 etc., mostly P3/P4):** refactors/test-coverage/perf nits with no bearing on the reframe. Not scheduled here; left to normal backlog grooming. Explicitly *out of scope* so the reframe stays a thin vertical, not a debt-paydown.
+- **Orthogonal `from-review` follow-ups (~35 at authoring and growing — #258–#273 etc., mostly P3/P4):** refactors/test-coverage/perf nits with no bearing on the reframe. Not scheduled here; left to normal backlog grooming. Explicitly *out of scope* so the reframe stays a thin vertical, not a debt-paydown.
 
 ---
 
@@ -284,7 +284,7 @@ Sections marked `[skip on phase execution]` (Appendix A) are historical context 
 - [ ] **Integration:** source integration tests (sqlite/rest/exec) green.
 - [ ] **E2E:** `go test -tags=browser ./...` — a representative sample (auto-table, exec-toolbar, checkbox-toggle) green with four-channel capture; verify the WebSocket still connects and diffs apply (the class of bug the exemplar caught: degraded live page that text tests miss).
 
-**Learn:** what surprised us / plan drift fixed / feed-forward to Phase 1's Audit / new-or-changed risks.
+**Learn:** what surprised us / plan drift fixed / feed-forward to **Phase 1 (M0)**'s Audit / new-or-changed risks.
 
 #### Phase 1 (M0) — Reframe the narrative (README, SKILL, llms.txt, ai-generation) (~1 session)
 
@@ -496,7 +496,7 @@ The *what* + *why* of each is in § Roadmap; here is only each milestone's **kic
 - **M2** (upstream `livetemplate` + tinkerdown): the `Validate(templateText)` API surface; the attribute-allowlist source-of-truth; how the skill's loop consumes richer diagnostics.
 - **M3** (upstream `livetemplate`): the `WithActionPolicy` hook signature; the introspection surface; how the manifest maps to runtime policy.
 - **M4** (upstream `lvt/components` + tinkerdown): the component list + options; how the skill's reference advertises them; the design-token/enforced-component style-guide schema.
-- **M5** (tinkerdown + `client`): the persistence model (stores captured *skills*, not just `app.md`); gallery UX; the external-embed handshake protocol.
+- **M5** (tinkerdown + `client`): the persistence model (stores captured *skills*, not just `app.md`); gallery UX; the external-embed handshake protocol; **substrate extensibility** — writable WASM sources (#216) + custom Go+WASM source types (#222), and how a team-authored source enters the *approved* set.
 
 ---
 
@@ -521,9 +521,9 @@ The plan hinges on pins (M0 is a version bump); this is the canonical table. **T
 
 This plan follows the skeleton's load-bearing parts (LLM session guide, per-phase Audit/Implementation/Acceptance/Learn, progress tracker, delivery protocol, risks, decisions log) and **consciously deviates** where the skeleton's shape (designed for a 10-milestone SaaS) would be cargo-culting for a thin generation-tool reframe:
 
-- **No multi-screen "Product flow & UI requirements" section.** The deliverable is *one generated console*, not a product with many screens. Its visual spec is a single hand-authored golden `app.md` (Phase 4) + a one-screen mockup + visual-regression check (Phase 5) — the applicable slice of convention 11.
+- **No multi-screen "Product flow & UI requirements" section.** The deliverable is *one generated console*, not a product with many screens. Its visual spec is a single hand-authored golden `app.md` (Phase 4) + a one-screen mockup + visual-regression check (Phase 5) — the applicable slice of **skeleton** convention 11 (end-state UI mockups).
 - **`## Mn design` sections folded into the phases.** For milestones this small, a separate design section per milestone duplicates the phase blocks. M2–M5 keep the skeleton's outline-only convention (expanded at kickoff, convention 9); M1's design lives in § The reference demo + the phase blocks.
-- **No Deployment section.** Tinkerdown is a CLI/library, not a deployed service; there is no `fly.toml` analog. Release mechanics (tagged upstream releases per convention 11) are the only "deploy" and live in the session guide.
+- **No Deployment section.** Tinkerdown is a CLI/library, not a deployed service; there is no `fly.toml` analog. Release mechanics (tagged upstream releases per **session-guide** convention 11) are the only "deploy" and live in the session guide.
 
 ---
 
@@ -545,10 +545,10 @@ This plan follows the skeleton's load-bearing parts (LLM session guide, per-phas
 
 - **[M1] Reference app locked = PII / data-export access-approval console** (§ The reference demo). Rejected alternatives (K8s access-grant-via-PR, feature-flag approval) + why in Appendix A.
 - **[M1] Scoped-export must be genuinely bounded.** The demo's whole point is *scoped* access (row cap + filter), not blanket — a scoped-export action that quietly returns everything defeats the friction-removal story. Phase 4 Audit gates this.
-- **[M0] Six-minor upstream bump may ripple.** Kebab action routing, comment stripping, and verbatim dynamic content can break parser/golden tests; treat Phase 0 as a gated phase, not a preamble.
+- **[M0] Multi-minor upstream bump may ripple.** Six+ minors at plan-authoring time and still growing — Phase 0 targets the *latest* tag at execution, so the change surface is wider than the plan-time numbers. Kebab action routing, comment stripping, and verbatim dynamic content can break parser/golden tests; treat Phase 0 as a gated phase, not a preamble.
 - **[M1] "30 seconds" is a generation-reliability target, not a framework-latency target.** The framework leg is tens of ms; the budget is spent on the LLM. M1 must treat the generation-context assets (manifest + style guide + attribute reference + few-shot corpus) as first-class — that's what makes generation one-shot.
 - **[M1] Generated-app safety in M1 rests on the manifest + policy lint + proportional operation review + `confirm:` + `--allow-exec`, not yet on runtime `WithActionPolicy` (M3).** Acceptable for the demo with a human approver in the loop; M3 hardens it. State this explicitly so M1 isn't mistaken for production-grade authz.
-- **[cross-repo] Upstream-first milestones (M2–M4) require tagged releases before tinkerdown can pin them** — adds release overhead per convention 11.
+- **[cross-repo] Upstream-first milestones (M2–M4) require tagged releases before tinkerdown can pin them** — adds release overhead per **session-guide** convention 11.
 
 ---
 
