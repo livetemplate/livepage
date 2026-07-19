@@ -21,7 +21,7 @@ help: ## Show this help message
 .PHONY: build-client
 build-client: ## Build the TypeScript client
 	@echo "Building client..."
-	@cd client && npm run build
+	@cd client && npm ci && npm run build
 	@echo "Copying client assets..."
 	@mkdir -p internal/assets/client
 	@cp client/dist/tinkerdown-client.browser.* internal/assets/client/

@@ -9,6 +9,49 @@ Earlier releases (v0.1.x) are documented in the
 [GitHub releases page](https://github.com/livetemplate/tinkerdown/releases).
 
 
+## [Unreleased]
+
+### Changed — Upstream bump: livetemplate v0.10.0 → v0.19.1
+
+Tinkerdown had been pinned to `livetemplate v0.10.0` while upstream shipped
+nine minor releases. This adopts the current latest across the stack:
+
+| Dependency | Was | Now |
+|---|---|---|
+| `github.com/livetemplate/livetemplate` | v0.10.0 | **v0.19.1** |
+| `github.com/livetemplate/lvt/components` | pseudo-version `2026-02-28` | **v0.2.0** |
+| `@livetemplate/client` | 0.14.3 | **0.18.2** |
+
+The client version is not merely "latest" — livetemplate v0.18.0 added a
+`ClientVersion` constant precisely because there is **no runtime server↔client
+version handshake**, and v0.19.0 declares `0.18.2` as the wire-compatible pair
+for this server release.
+
+No source changes were required: tinkerdown's livetemplate API surface (10
+symbols) is untouched by the range, and the one API removed upstream
+(`WithStore`, v0.19.0) was never used here.
+
+Behavior inherited from the bump, most consequentially two silent-update-loss
+fixes in v0.18.1 (a range whose item statics changed had its update dropped,
+leaving stale items on the page until a full reload; and a nil `lvt:"persist"`
+field discarded the entire restored state on reconnect), plus v0.19.0's
+per-item recursive range diffs, v0.18.0's client pinning, v0.17.0's
+`WithParseFS` and scoped method precompute, and v0.16.0's `__ping__` liveness
+heartbeat.
+
+### Fixed — `make build` no longer rebuilds the client from stale `node_modules`
+
+`build-client` ran `npm run build` with no install step, so it bundled whatever
+happened to be in `client/node_modules` rather than what the lockfile pins. On a
+checkout whose `node_modules` had drifted, this silently regenerated the
+committed bundle from a stale dependency and reverted shipped fixes — including
+the `data-lvt-force-update` handling that the checkbox e2e tests depend on. CI
+never caught it because CI always installs fresh. Now runs `npm ci` first, which
+installs exactly the lockfile and fails loudly on drift. ([#295])
+
+[#295]: https://github.com/livetemplate/tinkerdown/issues/295
+
+
 ## [v0.2.1] - 2026-05-09
 
 ### Added — Site-wide include resolution
