@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Simple script that outputs JSON data for exec toolbar test
 
 cat << 'EOF'
