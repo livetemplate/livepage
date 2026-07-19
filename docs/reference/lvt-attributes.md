@@ -2,6 +2,19 @@
 
 Complete reference for all `lvt-*` attributes.
 
+> **⚠️ Parts of this page are out of date and are being audited.** A sample of 11
+> documented attributes found 8 that no longer match `@livetemplate/client`: several
+> moved namespace (`lvt-scroll`/`lvt-highlight`/`lvt-animate` → `lvt-fx:*`,
+> `lvt-throttle` → `lvt-mod:*`, `lvt-disable-with` → `lvt-form:*`) and a few
+> (`lvt-click-away`, `lvt-focus-trap`, `lvt-modal-open`) are not in the client at all.
+> The Lifecycle Hooks section below still shows the superseded
+> `lvt-{action}-on:{event}` form; the current form is `lvt-el:{method}:on:{state}` with
+> states `pending`/`success`/`error`/`done`.
+>
+> Until the audit lands, **verify an attribute against `@livetemplate/client` before
+> relying on it.** Tracked as Phase 2 (M0) in
+> [the ephemeral-UI plan](../plans/2026-07-09-ephemeral-ui-reframe.md).
+
 ## Overview
 
 `lvt-*` attributes add interactivity to HTML elements. They're processed by the LiveTemplate client library.
