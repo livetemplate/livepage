@@ -245,7 +245,11 @@ Sections marked `[skip on phase execution]` (Appendix A) are historical context 
 
 ## Implementation phases — progress tracker
 
-> Tick boxes as work completes. Each phase ends with `go test ./...` (+ `go test -tags=browser ./...` where applicable) green, and — for E2E — the CLAUDE.md four-channel capture: browser console, server stderr, WebSocket frames, rendered HTML + screenshot.
+> Tick boxes as work completes. Each phase ends with `go test ./...` green, and — for E2E — the CLAUDE.md four-channel capture: browser console, server stderr, WebSocket frames, rendered HTML + screenshot.
+>
+> **How the e2e tests are actually gated** (corrected in Phase 0 — there is no `browser` build tag in this repo): the 32 e2e files are `//go:build !ci`, so they run **by default** locally and are excluded in CI, which runs `go test -tags=ci -skip='E2E|e2e' ./...` — a belt-and-braces exclusion via both the build tag and a name skip. Two consequences worth internalizing: a plain local `go test ./...` **is** the browser suite (no opt-in flag), and **CI structurally cannot catch an e2e regression**, so the local run is the only gate.
+>
+> Verification that consumes an upstream dependency must run under **`GOWORK=off`** — a `go.work` one directory up redirects `livetemplate`/`lvt` to local checkouts that are typically *ahead* of the published tag, so without it you are not testing what you pinned (session-guide convention 11).
 
 **Phase block shape (every phase):** `Goal at end` · `Design refs` (specific sub-sections) · `Audit` (first task; starts with a Design-ref completeness check) · `Implementation` (`[ ]` checkboxes) · `Acceptance criteria` (Simplify → Unit → Integration → E2E) · `Learn` (4 prompts: what surprised us / plan drift fixed / feed-forward to next Audit / new-or-changed risks).
 
@@ -265,26 +269,53 @@ Sections marked `[skip on phase execution]` (Appendix A) are historical context 
 - Upstream `../livetemplate/CHANGELOG.md` v0.11→latest entries (kebab action routing, comment stripping, verbatim dynamic content, heartbeat, ephemeral sweep-TTL, force-update — plus anything shipped after v0.16)
 
 **Audit:**
-- [ ] **Design-ref completeness check** — each Implementation item maps to a cited sub-section.
-- [ ] **Re-check the current latest upstream versions first** (`git -C ../livetemplate tag | sort -V | tail`, `../client` `package.json`/tags, `lvt/components` tags) — upstream will have advanced past v0.16 since plan authoring. Target the **latest** stable tags, not the plan-time numbers.
-- [ ] Read the upstream CHANGELOG from tinkerdown's current pin **through the latest tag** in full; list every behavior change that could touch tinkerdown's parser/render/ws (comment stripping vs tinkerdown's own comment handling; kebab-case action routing vs `name=` dispatch; verbatim dynamic content vs any whitespace assumptions).
-- [ ] Confirm the embedded/pinned client version and how it's shipped (embedded asset vs CDN) — bump the right place.
-- [ ] Check `lvt/components` pseudo-version → is a tagged release available to pin instead?
-- [ ] Inventory tinkerdown tests that assert on exact rendered HTML/whitespace — these are the likely breakers.
+- [x] **Design-ref completeness check** — each Implementation item maps to a cited sub-section.
+- [x] **Re-check the current latest upstream versions first** — upstream advanced well past the plan-time floor: `livetemplate` **v0.19.1** (not v0.16), `lvt/components` now has a real **v0.2.0** tag (no more pseudo-version), `@livetemplate/client` **0.18.2**.
+- [x] Read the upstream CHANGELOG from tinkerdown's current pin **through the latest tag** in full. The feared breakers (comment stripping, kebab action routing, verbatim dynamic content) predate v0.16 and were already absorbed. The live range v0.16→v0.19.1 is additive: `__ping__` heartbeat, `WithParseFS`, `ClientVersion` pinning, scoped method precompute, per-item recursive range diffs, and two silent-update-loss fixes.
+- [x] Confirm the embedded/pinned client version and how it's shipped — **embedded asset**, not CDN: `client/` bundles `@livetemplate/client` via esbuild into `internal/assets/client/tinkerdown-client.browser.js`, which is tracked in git. So the bump is `client/package.json` + reinstall + rebuild + commit the regenerated bundle.
+- [x] Check `lvt/components` pseudo-version → **yes**, `v0.2.0` is tagged and pinnable.
+- [x] Inventory tinkerdown tests that assert on exact rendered HTML/whitespace — **none assert on WS frames or tree-diff bytes**, so v0.19.0's range-diff format change has no test surface. The exact-HTML assertions that exist are all in unit tests over tinkerdown's own parser output, below the livetemplate boundary.
+- [x] **(added)** Verify the removed-API risk: upstream removed exactly one symbol in range (`WithStore`, v0.19.0). tinkerdown's livetemplate API surface is 10 symbols and does not include it.
 
 **Implementation:**
-- [ ] Bump `go.mod` server pin to the **latest tagged release** (≥ v0.16); update client asset/pin + `lvt/components` pin to their latest tags. `go mod tidy`.
-- [ ] Fix compile/API breaks; absorb behavior changes (adjust golden files / whitespace assertions as needed, verifying each change is correct not just green).
-- [ ] Wire up newly-available primitives that the reframe wants: `WithEphemeralSweepTTL` on the playground/ephemeral session path; confirm `data-lvt-force-update` is available for server-authoritative controls (see memory: checkbox toggle case).
-- [ ] Update `CHANGELOG.md`.
+- [x] Bump `go.mod` server pin to the **latest tagged release**: `livetemplate v0.10.0 → v0.19.1`, `lvt/components → v0.2.0`. `go mod tidy`.
+- [x] Bump the client: `client/package.json` `^0.14.3 → ^0.18.2`, `npm install`, rebuild, copy the regenerated bundle into `internal/assets/client/`.
+- [x] Fix compile/API breaks; absorb behavior changes — **none required**. Build and full test suite are green with zero source changes.
+- [x] ~~Wire up `WithEphemeralSweepTTL` on the playground/ephemeral session path~~ — **dropped, see Learn.** It is a `HandleOption` and tinkerdown never calls `tmpl.Handle()`; there is no call site. Confirmed `data-lvt-force-update` survives the rebuild (the #295 canary).
+- [x] **(added)** Fix `make build` to run `npm ci` before `npm run build` (issue #295) — without it the next `make build` silently reverts this phase's bundle.
+- [x] Update `CHANGELOG.md`.
 
 **Acceptance criteria:**
-- [ ] **Simplify:** `/simplify` against the diff.
-- [ ] **Unit:** `go test ./...` green (parser, page, source, config golden tests).
-- [ ] **Integration:** source integration tests (sqlite/rest/exec) green.
-- [ ] **E2E:** `go test -tags=browser ./...` — a representative sample (auto-table, exec-toolbar, checkbox-toggle) green with four-channel capture; verify the WebSocket still connects and diffs apply (the class of bug the exemplar caught: degraded live page that text tests miss).
+- [x] **Simplify:** N/A in substance — the diff is a dependency bump plus a one-word Makefile fix and CHANGELOG prose; there is no hand-written logic to simplify. Recorded rather than ticked hollow.
+- [x] **Unit:** `go test ./internal/... ./cmd/...` green (20 packages).
+- [x] **Integration:** source integration tests (sqlite/rest/exec) green.
+- [x] **E2E:** the discriminating set — `TestAutoTables_*`, `TestAutoTasks_*` (checkbox toggle), `TestExecToolbar*`, `TestLvtSourceMarkdownToggle*` — **14/14 green**, WebSocket connecting and diffs applying. Full `GOWORK=off go test ./...` green (root package, holding all 32 `!ci` e2e files, 827s).
+- [x] **Bundle provenance (directional, not just "it changed"):** `ctrlKey` occurrences **1 → 5**, matching v0.18.2's client fix for bare-key `lvt-on:keydown` firing while Ctrl/Meta/Alt is held; `data-lvt-force-update` canary intact at 2 (the #295 signature would have been a drop to 0). A size delta alone would not have distinguished an upgrade from a downgrade — both differ from HEAD.
+- [x] **CSS half of the bundle verified** (a JS-only check would have missed it): `tinkerdown-client.browser.css` is tracked, was copied, and is byte-identical to the fresh build — correctly so, because the bump does not touch tinkerdown's own CSS sources. The client package's separate `livetemplate.css` is deliberately *not* bundled; it contains only CSS custom-property defaults for `lvt-fx:*`, a directive family tinkerdown uses nowhere.
+- [x] **Manual visual verification** (delivery-protocol step 1, browser not `curl`): served `examples/action-buttons` and captured a full-page screenshot + console. Theme toggle, card/table styling, styled form controls, three button colour variants, and syntax highlighting with copy buttons all render correctly; console shows block discovery → WS connect with **no JS exceptions**. This is the visual layer the chromedp assertions do not cover.
 
-**Learn:** what surprised us / plan drift fixed / feed-forward to **Phase 1 (M0)**'s Audit / new-or-changed risks.
+**Learn:**
+
+*What surprised us.*
+1. **The bump was a non-event in code and the entire risk lived in the JS bundle.** Nine minor versions of upstream drift produced *zero* required source changes — tinkerdown's livetemplate API surface is 10 stable symbols, and the sole removed API (`WithStore`) was unused. The real hazard was issue #295's trap: `client/node_modules` was stale at **0.11.9** while the lockfile pinned 0.14.3, so any rebuild-without-install silently downgrades the committed bundle. Working in a fresh worktree defused this structurally — `node_modules` is gitignored, so the worktree had none and `npm install` produced the correct version by construction.
+2. **The client version is a wire contract, not a preference.** livetemplate v0.18.0 added `ClientVersion` *because there is no runtime server↔client version handshake*; v0.19.0 declares `0.18.2` as the compatible pair. "Latest client" and "correct client" happened to coincide here, but the reasoning must stay pinned to the declared pair.
+3. **Verifying a regenerated bundle needs a *directional* check, and it must cover CSS too.** "The bundle differs from HEAD" is worthless when the failure mode is a silent *downgrade* — #295's bad bundle also differed. What discriminates is a marker tied to a known changelog entry (here `ctrlKey` 1→5 for a v0.18.2 fix). Separately, the first provenance pass covered only `.js`/`.js.map` and would have missed a stale stylesheet entirely; the CSS turned out identical *for a good reason*, but that had to be established, not assumed.
+4. **A `go.work` at `/home/adnaan/code/livetemplate/` silently redirects builds to the local upstream checkouts** (currently `v0.19.1-5-g…`, i.e. *ahead* of the tag). Local builds were never testing the published dependency. All verification here ran under `GOWORK=off` — which is what session-guide convention 11 ("verify against the **published** dep") actually requires in practice. **This should be the default for any upstream-consuming verification in M2–M5.**
+
+*PLAN.md drift fixed in this commit.*
+- The `WithEphemeralSweepTTL` Implementation item assumed tinkerdown serves through `tmpl.Handle()`. It does not — it calls `livetemplate.New()` directly from its own WebSocket handler, and the playground runs an independent session-cleanup loop. The item is struck through with the reason rather than deleted, so M1 does not re-propose it.
+- § Tech stack version-pin table updated from the plan-time floor to the versions actually adopted.
+- Added the `make build` / #295 fix as an audit-derived Implementation item.
+- **`go test -tags=browser ./...` was fiction** — no `browser` build tag exists anywhere in this repo. It appeared in the tracker preamble and § Verification, implying the browser suite is opt-in behind a flag. It is the reverse: the 32 e2e files are `//go:build !ci` and run **by default** locally, while CI excludes them twice over (`-tags=ci` *and* `-skip='E2E|e2e'`). Corrected in both places, with the gating mechanism spelled out — a future session that believed the tag was load-bearing could have concluded it had run the browser suite when it had not, or that skipping the flag was a legitimate option.
+- § Verification now records the `GOWORK=off` requirement and the "build the binary before e2e" precondition.
+
+*Feed-forward to **Phase 1 (M0)**'s Audit.*
+- **A latent contradiction with the reframe's "disk-free ephemeral path" claim:** `internal/server/websocket.go:467` writes every inline block to `/tmp/lvt-<blockID>.tmpl`, with the comment *"livetemplate.New() requires template files"*. That constraint is now obsolete — v0.17.0 shipped `WithParseFS(fsys, patterns...)`, so an in-memory `fs.FS` removes the per-block disk round-trip entirely. This bears directly on the plan's **speed** non-negotiable and on M1's ephemeral serve path. Deliberately *not* done here: refactoring a WS hot path inside a version-bump phase would destroy the phase's isolability. **Size it in M1 Phase 3's Audit**, where "which ephemeral serve mechanism, measured" is already an open question.
+- Phase 1 (M0) rewrites the narrative around ephemerality; the `WithParseFS` finding is the concrete engineering fact behind that claim — don't write "disk-free" into the README until it is.
+
+*New / changed risks.*
+- **Retire the "Multi-minor upstream bump may ripple" risk** — it did not ripple; the bump is green with no source changes. What *did* bite is bundle provenance, now mitigated by the `npm ci` fix.
+- **New (low, M2–M5):** the `go.work` shim means local upstream work can pass against unreleased code and fail against the published tag. Convention 11 already mandates verifying against the published dep; the operational form of that is `GOWORK=off`.
 
 #### Phase 1 (M0) — Reframe the narrative (README, SKILL, llms.txt, ai-generation) (~1 session)
 
@@ -504,11 +535,11 @@ The *what* + *why* of each is in § Roadmap; here is only each milestone's **kic
 
 The plan hinges on pins (M0 is a version bump); this is the canonical table. **Targets are "latest tagged at execution time"** — the version numbers below are the plan-authoring floor; upstream keeps releasing, so M0 Phase 0's Audit re-checks and bumps to the current latest (not these).
 
-| Piece | Current | Target (latest at execution; floor shown) | Where |
+| Piece | Was | **Adopted** (M0 Phase 0, 2026-07-19) | Where |
 |---|---|---|---|
-| `github.com/livetemplate/livetemplate` | **v0.10.0** | latest tag (≥ **v0.16**) | `go.mod:11` — M0 Phase 0 |
-| `@livetemplate/client` | old (≈0.11.x) | latest tag (≥ **0.16**) | embedded/pinned client asset — M0 Phase 0 |
-| `github.com/livetemplate/lvt/components` | pseudo `2026-02-28` | latest tag | `go.mod:12` — M0 Phase 0 |
+| `github.com/livetemplate/livetemplate` | v0.10.0 | **v0.19.1** ✅ | `go.mod:11` — M0 Phase 0 |
+| `@livetemplate/client` | 0.14.3 (lockfile); `node_modules` had drifted to 0.11.9 | **0.18.2** ✅ — the version server v0.19.0 declares wire-compatible via `ClientVersion`, not merely "latest" | `client/package.json` → bundled into `internal/assets/client/` — M0 Phase 0 |
+| `github.com/livetemplate/lvt/components` | pseudo `2026-02-28` | **v0.2.0** ✅ (a real tag now exists) | `go.mod:12` — M0 Phase 0 |
 | Go | 1.26.x | unchanged | `go.mod` |
 | Data sources | sqlite (`modernc.org/sqlite`), pg, rest, graphql, file, csv/json, markdown, exec, wasm, computed | unchanged | `internal/source` |
 | E2E | chromedp (headless Chrome, four-channel capture) | unchanged | `*_e2e_test.go` |
@@ -529,7 +560,7 @@ This plan follows the skeleton's load-bearing parts (LLM session guide, per-phas
 
 ## Verification
 
-**Per-phase:** `go test ./...`; `go test -tags=browser ./...`; `tinkerdown validate` on any changed example/doc snippet; the four-channel e2e capture.
+**Per-phase:** `GOWORK=off go test ./...` (this includes the e2e suite — the `!ci`-tagged tests run by default locally; see § Implementation phases for the gating detail); `tinkerdown validate` on any changed example/doc snippet; the four-channel e2e capture. E2E needs `go build -o tinkerdown ./cmd/tinkerdown` first — several tests shell out to the binary and fail confusingly without it.
 
 **M1 acceptance (the whole-plan test):**
 1. In a repo with the demo workspace manifest, run the Claude Code skill `/tinkerdown "a console to approve PII / data-export access requests"`.
@@ -545,7 +576,8 @@ This plan follows the skeleton's load-bearing parts (LLM session guide, per-phas
 
 - **[M1] Reference app locked = PII / data-export access-approval console** (§ The reference demo). Rejected alternatives (K8s access-grant-via-PR, feature-flag approval) + why in Appendix A.
 - **[M1] Scoped-export must be genuinely bounded.** The demo's whole point is *scoped* access (row cap + filter), not blanket — a scoped-export action that quietly returns everything defeats the friction-removal story. Phase 4 Audit gates this.
-- **[M0] Multi-minor upstream bump may ripple.** Six+ minors at plan-authoring time and still growing — Phase 0 targets the *latest* tag at execution, so the change surface is wider than the plan-time numbers. Kebab action routing, comment stripping, and verbatim dynamic content can break parser/golden tests; treat Phase 0 as a gated phase, not a preamble.
+- ~~**[M0] Multi-minor upstream bump may ripple.**~~ **Retired — Phase 0 closed 2026-07-19.** Nine minors (v0.10.0 → v0.19.1) landed green with **zero source changes**: the feared breakers (kebab action routing, comment stripping, verbatim dynamic content) all predate v0.16 and were already absorbed, and tinkerdown's 10-symbol livetemplate API surface avoided the one removed API. The risk was mis-aimed — it watched the Go boundary, and the actual hazard was **JS bundle provenance** (below).
+- **[all milestones] Committed-artifact provenance.** `internal/assets/client/tinkerdown-client.browser.js` is a *generated file tracked in git*, so it can silently disagree with the lockfile that supposedly produced it — exactly what issue #295 recorded (`node_modules` stale at 0.11.9 vs a 0.14.3 lockfile, so any rebuild reverted shipped fixes). Mitigated in Phase 0 by `make build` running `npm ci` first. **Residual:** CI cannot catch a regression here, because the e2e tests that would are `//go:build !ci` and do not run there — so a local e2e run before committing a rebuilt bundle is the only gate, not a formality.
 - **[M1] "30 seconds" is a generation-reliability target, not a framework-latency target.** The framework leg is tens of ms; the budget is spent on the LLM. M1 must treat the generation-context assets (manifest + style guide + attribute reference + few-shot corpus) as first-class — that's what makes generation one-shot.
 - **[M1] Generated-app safety in M1 rests on the manifest + policy lint + proportional operation review + `confirm:` + `--allow-exec`, not yet on runtime `WithActionPolicy` (M3).** Acceptable for the demo with a human approver in the loop; M3 hardens it. State this explicitly so M1 isn't mistaken for production-grade authz.
 - **[cross-repo] Upstream-first milestones (M2–M4) require tagged releases before tinkerdown can pin them** — adds release overhead per **session-guide** convention 11.

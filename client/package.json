@@ -15,7 +15,7 @@
     "analyze": "node -e \"const fs=require('fs');const m=JSON.parse(fs.readFileSync('dist/meta.json'));Object.entries(m.outputs).forEach(([k,v])=>console.log(k,Math.round(v.bytes/1024)+'KB'));\""
   },
   "dependencies": {
-    "@livetemplate/client": "^0.14.3",
+    "@livetemplate/client": "^0.18.2",
     "monaco-editor": "^0.45.0"
   },
   "devDependencies": {
