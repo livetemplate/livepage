@@ -1,13 +1,19 @@
-# Tinkerdown - One-File AI App Builder
+# Tinkerdown - Throwaway Internal UIs in Markdown
 
-> Build working web apps in a single markdown file. No React. No build step. No CSS classes. Just run.
+> Generate a working internal UI as a single markdown file. Live data, a fixed attribute vocabulary, no React and no build step.
 
 ## Overview
 
-Tinkerdown outputs working apps in a single markdown file:
-- Single file = easy to generate, share, modify
+Tinkerdown outputs a working app as one markdown file. It exists to make internal UIs
+cheap enough to generate for a single question and delete afterwards — not apps anyone
+has to own.
+
+Why this shape suits generation:
+- **Fixed `lvt-*` vocabulary** = a small target you can hit correctly first try, instead of open-ended HTML/JS
+- **`tinkerdown validate`** = real-parser errors with line numbers and hints, so you can self-correct before serving
+- Single file = easy to generate, share, modify, throw away
 - No build step = instant feedback loop
-- No npm/React = LLMs generate simpler code
+- No npm/React = simpler code to generate
 - **No CSS classes needed** = PicoCSS styles semantic HTML automatically
 - SQLite auto-persistence = zero backend code
 

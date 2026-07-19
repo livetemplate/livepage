@@ -1,24 +1,32 @@
 ---
 name: tinkerdown
-description: Build single-file web apps in markdown. No React. No build step. Just run.
+description: Generate throwaway internal UIs as a single markdown file — live data, a fixed attribute vocabulary, no React and no build step.
 triggers:
   - tinkerdown
+  - internal tool
+  - admin dashboard
+  - throwaway UI
+  - quick dashboard
   - single-file app
   - markdown app
   - no-build app
-  - internal tool
-  - admin dashboard
-  - one-file app
 ---
 
-# Tinkerdown: One-File AI App Builder
+# Tinkerdown: Throwaway Internal UIs in Markdown
 
-Build working web apps in a single markdown file. No React. No build step. Just run.
+Generate a working internal UI as one markdown file: frontmatter declares the data
+sources, a fixed set of `lvt-*` attributes declares the interactivity, and
+`tinkerdown serve` makes it live. No React, no build step, no CSS classes.
+
+The point is the cost. These are UIs cheap enough to generate for a single question
+and delete afterwards — the view someone needs *this week* that would never survive a
+sprint-planning conversation. Keep the file if the need recurs; otherwise throw it away.
 
 ## When to Use Tinkerdown
 
 Use Tinkerdown for:
 - **Internal tools** - Admin dashboards, data viewers, CRUD apps
+- **One-off views** - "Show me X grouped by Y" against a table that already exists
 - **Prototypes** - Quick interactive demos
 - **Personal utilities** - Task managers, trackers, simple apps
 - **Data displays** - Tables, forms, dashboards connected to databases/APIs
@@ -27,6 +35,16 @@ Use Tinkerdown for:
 - Public-facing marketing sites (use static site generators)
 - Apps requiring complex client-side state (use React/Vue)
 - Real-time multiplayer games
+
+## Generate, then validate
+
+Interactivity comes from a **fixed vocabulary**, not freeform HTML — that constraint is
+what makes generated output reliable. Stay inside it (see `reference.md`) rather than
+reaching for custom JavaScript.
+
+Always run `tinkerdown validate <file>` on generated markdown before serving it. It
+parses with the real parser and reports errors with file, line, and a hint, so you can
+self-correct to a clean pass instead of discovering breakage in the browser.
 
 ## Quick Start
 

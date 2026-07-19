@@ -2,7 +2,7 @@
 
 > **v0.2.x — early but tagged. Expect breaking changes between minors.**
 
-**Markdown is great for writing. HTML is great for showing. Tinkerdown lets you write the first and serve the second — from one file.**
+**Internal UIs cheap enough to throw away. Describe what you need, get a live app against your real data, delete it when you're done.**
 
 <p align="center">
   <img src="docs/assets/demo.svg" alt="Animated demo showing a markdown file with YAML frontmatter and lvt attributes being served by Tinkerdown into a live interactive task manager with table, status badges, and action buttons" width="960">
@@ -10,15 +10,24 @@
 
 Tinkerdown turns a single markdown file — frontmatter for data sources, prose for content, declarative attributes for interactivity — into a live, themed, URL-routable web app. Built on [LiveTemplate](https://github.com/livetemplate/livetemplate).
 
+## The problem
+
+Internal tooling gets built like a product: one bloated "UI for everyone," a permanent feature backlog, and never enough engineering capacity. Every PM, engineer, and TPM wants their own variation, and the cost per variation is high enough that most are simply never built.
+
+That cost assumption is what changed. An LLM can write a working UI in seconds — but only if the target is a *small, constrained* vocabulary rather than an open-ended framework, and only if it's pointed at data that's already wired up. Tinkerdown is that target: a markdown file, a fixed attribute set, and live data sources. Cheap enough that the answer to "could we get a view for this?" stops being a backlog item.
+
+The unit isn't an app you maintain. It's a UI you generate for one question, use, and delete — or keep, if it turns out you need it every week.
+
 ## Why Tinkerdown?
 
-- **One file, co-authorable.** The source stays human- and AI-editable markdown. The rich rendered page is a *result*, not the artifact you have to maintain.
-- **Declarative, not freeform.** Interactivity comes from a fixed vocabulary of `lvt-*` attributes — predictable for LLMs, consistent across pages, no generic LLM-output aesthetic.
-- **Live data, not a snapshot.** Bind to SQLite, PostgreSQL, REST, JSON, CSV, shell commands, markdown, WASM, or computed sources. The rendered page reflects current state, not a frozen export.
+- **A vocabulary an LLM can hit reliably.** Interactivity comes from a fixed set of `lvt-*` attributes, not freeform HTML and JavaScript. Small enough to generate correctly on the first try, consistent across pages, and no generic LLM-output aesthetic.
+- **Cheap to throw away.** The admin panel for this sprint. The tracker for that hiring round. The dashboard for the incident retro. A markdown file you delete when the question is answered — not an app anyone has to own.
+- **Deterministic before it's live.** `tinkerdown validate` parses a generated file with the real parser and reports errors with line numbers and hints, so a generating agent can self-correct to a clean pass before anything is served.
+- **Live data, not a snapshot.** Bind to SQLite, PostgreSQL, REST, GraphQL, JSON, CSV, shell commands, markdown, WASM, or computed sources. The rendered page reflects current state, not a frozen export.
+- **One file, co-authorable.** The source stays human- and AI-editable markdown. The rich rendered page is a *result*, not the artifact you have to maintain — so the next change is a text edit, not another full re-prompt.
 - **Real URLs.** Every page is linkable, bookmarkable, deep-linkable. No in-memory SPA state hiding behind a single `/`.
 - **Git-native and self-hosted.** Plain text in a repo. Version history, search, collaboration, offline access, no subscriptions.
 - **Progressive complexity.** Standard markdown → declarative attributes → Go templates. Each step builds on the last without rewriting. See the [Progressive Complexity Guide](docs/guides/progressive-complexity.md).
-- **Disposable-software friendly.** The admin panel for this sprint. The tracker for that hiring round. The dashboard for the incident retro. Things you'd never scaffold a React app for, but that earn their keep for days or weeks.
 
 ## Why not just ask Claude for an HTML file?
 

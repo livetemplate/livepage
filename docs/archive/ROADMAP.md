@@ -304,10 +304,10 @@ Go's `html/template` is a known quantity—mustache syntax is universal, conditi
 - `lvt-window-{event}` - Window-level events
 
 *Lifecycle & Reactive:*
-- `lvt-{action}-on:{event}` - Lifecycle hooks (reset, addClass, disable, etc.)
+- `lvt-el:{method}:on:{state}` - Lifecycle hooks (reset, addClass, toggleAttr, etc.)
 - `data-confirm` - Confirmation dialogs
 - `data-*`, `lvt-value-*` - Data extraction
-- `lvt-preserve` - Preserve form fields during DOM updates
+- `lvt-ignore` - Skip an element and its subtree during DOM diffing
 - `lvt-disable-with` - Button text during submit
 
 *UI Directives:*

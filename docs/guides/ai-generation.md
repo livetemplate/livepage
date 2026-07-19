@@ -6,19 +6,13 @@ Generate Tinkerdown apps using natural language with AI assistants.
 
 Tinkerdown is designed to work seamlessly with AI assistants like Claude Code. You can describe what you want to build in natural language, and the AI will generate a complete working app.
 
+The reason this works is the constraint: interactivity comes from a **fixed `lvt-*` vocabulary** rather than open-ended HTML and JavaScript, so there is a small, well-defined target to hit — and `tinkerdown validate` gives real-parser errors with line numbers and hints, so a generating agent can self-correct to a clean pass before anything is served.
+
 ## Using Claude Code Skills
 
-Tinkerdown includes skills that help AI assistants understand and generate apps correctly.
+Tinkerdown ships one skill, [`skills/tinkerdown`](../../skills/tinkerdown/), which teaches an assistant the attribute vocabulary, the source types, and the worked examples. With it loaded, you don't invoke a command — you describe what you want in plain language and the assistant writes the markdown.
 
-### Available Commands
-
-| Command | Description |
-|---------|-------------|
-| `/lvt-plan` | Plan and design a new Tinkerdown app interactively |
-| `/new-app` | Create a new Tinkerdown application |
-| `/add-resource` | Add a CRUD resource with database, queries, and UI |
-| `/quickstart` | Rapid end-to-end workflow for new apps |
-| `/troubleshoot` | Debug common issues |
+> **Generation workflow.** The loop today is: describe → the assistant writes `app.md` → `tinkerdown validate app.md` → fix any reported errors → `tinkerdown serve`. A dedicated generate skill that runs this loop end-to-end (including declaring which sources and actions an app is allowed to touch) is in development; see [the ephemeral-UI plan](../plans/2026-07-09-ephemeral-ui-reframe.md). Until it lands, run the steps above.
 
 ### Example: Creating an App with Natural Language
 

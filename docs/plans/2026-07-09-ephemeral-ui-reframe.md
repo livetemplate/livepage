@@ -189,7 +189,7 @@ All follow the Anthropic skill shape already used by `skills/tinkerdown/` (conci
 
 Ordered milestones. **M0 and M1 are fully detailed** (full phase blocks); M2–M5 are outline-only and get expanded at their kickoff (see LLM session guide convention 9).
 
-- **M0 — Reframe + upstream bump.** Reposition the narrative (README/SKILL/llms.txt/ai-generation) around ephemeral generated UIs; **bump `livetemplate` + client + components to their latest tags** and absorb behavior changes. *Lights up:* the fast, correct runtime substrate + the honest story. *(no demo yet)*
+- **M0 — Reframe + upstream bump + a trustworthy vocabulary.** Reposition the narrative (README/SKILL/llms.txt/ai-generation) around ephemeral generated UIs; **bump `livetemplate` + client + components to their latest tags** and absorb behavior changes; **reconcile the `lvt-*` attribute reference with what the client actually implements** (Phase 2 — added after Phase 1's Audit found 8 of 11 sampled attributes stale). *Lights up:* the fast, correct runtime substrate, the honest story, and a vocabulary reference that is safe to hand an LLM — the last being a hard prerequisite for M1, not polish. *(no demo yet)*
 - **M1 — THE DEMO (thin vertical slice).** The five M1 deliverables (see § Deliverables at a glance) on existing primitives. *Lights up:* the target acceptance test — generate a real, friction-removing UI in ~30s — *and* re-run it from a skill in seconds.
 - **M2 — Deterministic validation (upstream).** `livetemplate.Validate(templateText)` (diff-cleanliness + attribute diagnostics) + tinkerdown **policy lint** in `validate`. *Lights up:* first-pass generation reliability; reject unknown `lvt-*` / non-approved refs before serving.
 - **M3 — Runtime policy + introspection (upstream).** `WithActionPolicy` per-action/field authz + state/source introspection metadata. *Lights up:* defense-in-depth (the running app can't exceed granted access) + LLM binds to real fields.
@@ -325,27 +325,82 @@ Sections marked `[skip on phase execution]` (Appendix A) are historical context 
 
 **Design refs:**
 - § Context
-- `README.md`, `skills/tinkerdown/SKILL.md`, `docs/llms.txt`, `docs/llm-system-prompt.md`, `docs/guides/ai-generation.md` (advertises unbuilt commands), `docs/archive/ROADMAP.md`
+- `README.md`, `skills/tinkerdown/SKILL.md`, `docs/llms.txt`, `docs/llm-system-prompt.md`, `docs/guides/ai-generation.md` (advertises unbuilt commands), `docs/archive/ROADMAP.md`, **`docs/reference/lvt-attributes.md`** *(added during Audit — #230's primary target; the original ref listed only the archived ROADMAP copy)*
+
+**The governing constraint (operator decision at kickoff): claim only what is true at M0.** The reframe's *destination* is policy-gated generation, but M0 ships none of it. Every edit in this phase states the present tense honestly and forward-references the rest. Three edits were at risk of writing M1 capability as shipped — the phantom-command redirect, the exec framing, and any `/tinkerdown "<intent>"` example — and all three are handled below.
+
+**Audit:**
+- [x] **Design-ref completeness check** — **incomplete as written**: #230's real target is `docs/reference/lvt-attributes.md` (live reference), not just the archived ROADMAP the ref listed. Ref sharpened above, per convention 1.
+- [x] Read the current README/SKILL/llms.txt lead sections; list the "one-file markdown app" framings to reposition. Repositioned the leads and `SKILL.md`'s frontmatter `description` + `triggers` (which told the old story and would otherwise contradict the rewritten body). Progressive-complexity tiers, concrete examples, and the "Why not just ask Claude for an HTML file?" section kept — they already carried the reframe.
+- [x] Confirm which advertised-but-unbuilt commands in `ai-generation.md` to remove vs. redirect — **all five are phantom** (`/lvt-plan`, `/new-app`, `/add-resource`, `/quickstart`, `/troubleshoot`), not the three the plan assumed; `skills/tinkerdown` is the only skill in the repo. Redirecting them to `/tinkerdown` would have swapped five phantoms for one, since `/tinkerdown`-as-generator is itself M1. Replaced with the flow that works today.
+- [x] Decide: does `llm-system-prompt.md` seed the M1 skill's generation context? **Yes** — it is already a 285-line attribute-and-source primer, and its only anti-reframe line was the exec framing, now fixed. Feed-forward to M1 Phase 3's "decide the skill's generation context" Audit item: adopt it as the seed rather than authoring a new prompt.
+- [x] **(added)** Verify the `lvt-*` renames against the client repo before applying them, per project CLAUDE.md. Necessary: `lvt-ignore`/`lvt-ignore-attrs` are real (`livetemplate-client.ts:1917`, checked on `fromEl`), but the client also has a *separate* `lvt-form:preserve` (`state/form-lifecycle-manager.ts:67`) that a careless reading of #230 could have confused it with.
+
+**Implementation:**
+- [x] Rewrite README lead + add a "The problem" section framing the reframe (internal tooling's cost-per-variation, and what changes when an LLM can hit a constrained vocabulary). Augmented rather than replaced — the existing bullets already carried half the story.
+- [x] Update `SKILL.md` (frontmatter + lead + a "Generate, then validate" section) and `llms.txt` to describe the generate-and-throw-away model, keeping `llms.txt`'s required-header contract intact.
+- [x] Fix `ai-generation.md`: **removed** the five-command table; documented the real loop (describe → assistant writes `app.md` → `validate` → fix → `serve`) and forward-referenced the dedicated generate skill as in development, linking this plan.
+- [x] Doc fixes: #226 (ROADMAP lifecycle pattern → `lvt-el:{method}:on:{state}`), #230 (`lvt-preserve` → `lvt-ignore` in `docs/reference/lvt-attributes.md` + the archived copy).
+- [x] Do **not** change exec gating — reframed the *narrative* only: `docs/llm-system-prompt.md` went from "use sparingly" to exec as a **privileged first-class source gated behind `--allow-exec`** (today's real gate, verified at `serve.go:58`, `websocket.go:1293`, `webhook.go:712`). The section describes that gate and promises nothing further — M1's manifest approval is deliberately *not* forward-referenced here, since an LLM system prompt should state current rules, not roadmap.
+
+**Acceptance criteria:**
+- [x] **Simplify:** prose pass — each file made internally coherent (lead, frontmatter, and triggers telling one story), not just its opening paragraph.
+- [x] **Unit:** `skill_examples_test.go` + `TestLLMSTxtExists` green (5/5; `llms.txt` retains `# Tinkerdown`, `## Quick Start`, `## Key Attributes`, `name=`, `lvt-source`).
+- [x] **Integration/E2E:** N/A (docs). No code snippet changed in a way that alters its validity; the edits are prose, headings, and attribute names.
+
+**Learn:**
+
+*What surprised us.*
+1. **The plan under-counted the phantom commands and mis-scoped the fix.** Five, not three — and the Implementation's "redirect to the real `/tinkerdown` (M1)" would have replaced five non-existent commands with one that also does not exist yet. The trap is subtle because the redirect *reads* like a fix. The operator's "claim only what is true at M0" call is what caught it; without that constraint the phase would have shipped a doc advertising an M1 command.
+2. **`docs/reference/lvt-attributes.md` has systematically rotted, far beyond #230.** Sampling 11 documented attributes against the client, **8 are stale** — `lvt-scroll`, `lvt-highlight`, `lvt-animate` (now `lvt-fx:*`), `lvt-throttle` (`lvt-mod:*`), `lvt-disable-with` (`lvt-form:*`), plus `lvt-click-away`, `lvt-focus-trap`, `lvt-modal-open` absent entirely. The lifecycle section also documents the same dead `lvt-{action}-on:{event}` form that #226 flags in the *archive*, and its "Available events" table lists `loading` where the client has `pending`/`done`. The doc predates the client's Tier-2 namespace migration. **Deliberately not fixed here** — that is a reference audit, not a narrative reframe, and mid-phase scope expansion is how a docs phase becomes three. Tracked separately; see § Risks.
+3. **#230 is not a pure rename, and the client has a near-miss attribute.** The entry described `lvt-preserve` as "preserve form values," but `lvt-ignore` is a general morphdom escape hatch (skip element + subtree, Phoenix `phx-update="ignore"` equivalent) of which form-value preservation is one *use case*. Separately, `lvt-form:preserve` genuinely exists and is a different thing. Renaming without reading the client would have produced a correctly-named entry with a wrong definition.
+
+*PLAN.md drift fixed in this commit.*
+- Design refs gained `docs/reference/lvt-attributes.md` (#230's actual target).
+- "advertised-but-unbuilt commands" corrected from three to **five**, with the redirect trap named.
+- The operator's M0-honesty constraint recorded at the top of the phase, since it governed three separate edits rather than just the "disk-free" line it was raised about.
+
+*Feed-forward to **M1 Phase 1**'s Audit.*
+- `docs/llm-system-prompt.md` is confirmed as the seed for M1 Phase 3's generation context — adopt, don't re-author.
+- The exec narrative now says "privileged, gated behind `--allow-exec`, manifest approval coming in M1." M1 Phase 1 must actually deliver that, or the doc becomes a promise instead of a description.
+- `README.md` deliberately does **not** claim a disk-free ephemeral path (M0 Phase 0 finding 4). When M1 Phase 3 lands `WithParseFS`, the README's "cheap to throw away" bullet is where that claim belongs.
+
+*New / changed risks.*
+- **New (medium): live reference documentation is materially out of date** — 8 of 11 sampled attributes. Users and generating agents both read `docs/reference/lvt-attributes.md`, and M1's whole premise is that an agent can hit the vocabulary correctly. A reference that names attributes the client no longer implements actively degrades that. **Scheduled as Phase 2 (M0) below** rather than left as a backlog issue, because M1 Phase 3 consumes this reference as generation context — it is a prerequisite, not adjacent debt.
+
+#### Phase 2 (M0) — Attribute-reference audit: reconcile the docs with the client (~1 session)
+
+> **Goal at end:** every `lvt-*` attribute documented in tinkerdown is one the current `@livetemplate/client` actually implements, under its current name — so the reference is safe to feed an LLM as generation context.
+
+**Why this is a phase and not a doc chore:** M1's central claim is that a *constrained, well-documented* vocabulary makes generation reliable first-try, and M1 Phase 3 plans to hand this reference to the generating agent. A reference naming attributes the client dropped would teach the agent to emit invalid output — the exact failure the reframe exists to prevent. Every hour spent here is bought back in M1's first-pass validity rate.
+
+**Design refs:**
+- Phase 1 (M0) Learn, findings 2 and 3 (the sampled staleness; the `lvt-ignore` vs `lvt-form:preserve` near-miss)
+- `docs/reference/lvt-attributes.md` (primary), `docs/llms.txt` "Key Attributes", `skills/tinkerdown/reference.md`, `docs/llm-system-prompt.md` — the four surfaces that teach the vocabulary
+- Upstream `../client`: `livetemplate-client.ts`, `dom/reactive-attributes.ts` (the `lvt-el:` method dispatch), `dom/event-delegation.ts`, `state/form-lifecycle-manager.ts`; `CHANGELOG.md` "New Tier 2 namespaces" + "Backward-compat shims"
+- Project CLAUDE.md: check the client before documenting any `lvt-*` attribute
 
 **Audit:**
 - [ ] **Design-ref completeness check.**
-- [ ] Read the current README/SKILL/llms.txt lead sections; list the "one-file markdown app" framings to reposition (keep the progressive-complexity tiers — they still hold).
-- [ ] Confirm which advertised-but-unbuilt commands in `ai-generation.md` to remove vs. redirect to the real `/tinkerdown` (built in M1).
-- [ ] Decide: does `llm-system-prompt.md` become the seed of the M1 skill's generation context? (Feed-forward.)
+- [ ] Build the **full** inventory, not a sample: every `lvt-*`/`data-*` attribute named across the four doc surfaces, cross-referenced against what the client implements. Phase 1 sampled 11 and found 8 stale; assume the true rate is similar until measured.
+- [ ] For each stale entry classify the fix: **renamed** (`lvt-scroll` → `lvt-fx:scroll`, `lvt-throttle` → `lvt-mod:throttle`, `lvt-disable-with` → `lvt-form:disable-with`, `lvt-{action}-on:{event}` → `lvt-el:{method}:on:{state}`), **removed** (`lvt-click-away`, `lvt-focus-trap`, `lvt-modal-open` — absent from the client; confirm whether they were dropped or never existed), or **wrong description** (the `lvt-ignore` case: right name, wrong definition).
+- [ ] Check whether **backward-compat shims** still accept the old names. If they do, the docs are stale-but-working and this is a rename pass; if they don't, the docs are actively broken and that changes the phase's urgency and the CHANGELOG entry.
+- [ ] Verify the corrected values against the source, not the CHANGELOG: `lvt-el:` methods are `reset`/`addClass`/`removeClass`/`toggleClass`/`setAttr`/`toggleAttr` and lifecycle states are `pending`/`success`/`error`/`done` (the current doc lists `loading`, which does not exist) — per `dom/reactive-attributes.ts`.
+- [ ] Decide whether any attribute documented as Tinkerdown-specific is in fact client-owned, or vice versa — the reference's "Attribute Ownership" section makes a claim that has not been checked.
 
 **Implementation:**
-- [ ] Rewrite README lead + "Why Tinkerdown" around the reframe (keep the concrete examples; add the ephemeral-generated-UI framing + the reframe's data-source/policy/style-guide/UI-stack pillars).
-- [ ] Update `SKILL.md` + `llms.txt` to describe the generate-and-throw-away model.
-- [ ] Fix `ai-generation.md`: remove/redirect phantom commands; point at the (M1) skill.
-- [ ] Doc fixes: #226 (ROADMAP lifecycle-attribute pattern), #230 (lvt-preserve→lvt-ignore).
-- [ ] Do **not** change exec gating yet (that's M1's manifest) — but reframe the *narrative* so exec is "approved + gated," not "avoid."
+- [ ] Correct `docs/reference/lvt-attributes.md`: rename, remove, or re-describe each entry per the audit; fix the lifecycle section's methods and events tables.
+- [ ] Reconcile the other three vocabulary surfaces so they agree with the reference and each other.
+- [ ] Where an attribute moved namespace, note the old name once so existing apps can find the migration — a rename table beats silent substitution.
+- [ ] Update `CHANGELOG.md` if any documented-and-shipped behavior turns out to be genuinely broken rather than merely misdocumented.
 
 **Acceptance criteria:**
-- [ ] **Simplify:** prose pass for clarity.
-- [ ] **Unit:** `skill_examples_test.go` + `TestLLMSTxtExists` still green (llms.txt must retain required headers).
-- [ ] **Integration/E2E:** N/A (docs) — but any code snippet in changed docs must `tinkerdown validate` clean.
+- [ ] **Simplify:** prose pass; prefer deleting an entry over documenting an attribute nobody should use.
+- [ ] **Unit:** `skill_examples_test.go` + `TestLLMSTxtExists` green; every skill example still validates.
+- [ ] **Integration:** every `lvt-*` attribute appearing in `examples/` and in the docs' own snippets resolves to one the client implements — **script this check**, since it is the invariant that rots, and a scripted check is the only thing that keeps it from rotting again.
+- [ ] **E2E:** N/A (docs) — but any example whose attributes were renamed must still serve and behave (four-channel capture) if its markdown changed.
 
-**Learn:** 4 prompts.
+**Learn:** what surprised us / plan drift / feed-forward to **M1 Phase 3**'s Audit (the reference is now trustworthy as generation context — record the measured staleness rate, since it sets the prior for how much the generating agent can rely on docs generally) / new-or-changed risks.
 
 ---
 
@@ -600,6 +655,7 @@ This plan follows the skeleton's load-bearing parts (LLM session guide, per-phas
 - **[M1] Reference app locked = PII / data-export access-approval console** (§ The reference demo). Rejected alternatives (K8s access-grant-via-PR, feature-flag approval) + why in Appendix A.
 - **[M1] Scoped-export must be genuinely bounded.** The demo's whole point is *scoped* access (row cap + filter), not blanket — a scoped-export action that quietly returns everything defeats the friction-removal story. Phase 4 Audit gates this.
 - ~~**[M0] Multi-minor upstream bump may ripple.**~~ **Retired — Phase 0 closed 2026-07-19.** Nine minors (v0.10.0 → v0.19.1) landed green with **zero source changes**: the feared breakers (kebab action routing, comment stripping, verbatim dynamic content) all predate v0.16 and were already absorbed, and tinkerdown's 10-symbol livetemplate API surface avoided the one removed API. The risk was mis-aimed — it watched the Go boundary, and the actual hazard was **JS bundle provenance** (below).
+- **[M1 — blocking for generation quality] `docs/reference/lvt-attributes.md` is materially out of date.** Found in M0 Phase 1's Audit: sampling 11 documented attributes against the client, **8 are stale** — `lvt-scroll`/`lvt-highlight`/`lvt-animate` migrated to `lvt-fx:*`, `lvt-throttle` to `lvt-mod:*`, `lvt-disable-with` to `lvt-form:*`, and `lvt-click-away`/`lvt-focus-trap`/`lvt-modal-open` are absent from the client entirely. The lifecycle section still documents the dead `lvt-{action}-on:{event}` form (the same bug #226 raises against the *archive*), and its events table lists `loading` where the client has `pending`/`done`. The doc predates the client's Tier-2 namespace migration. **Why this is a plan risk and not just tech debt:** M1's entire premise is that a constrained, well-documented vocabulary makes generation reliable first-try, and M1 Phase 3 plans to feed `reference.md` to the generating agent. A reference naming attributes the client no longer implements would teach the agent to emit invalid output — the exact failure the reframe claims to avoid. **Scheduled as Phase 2 (M0)** — a full reference audit is its own phase, not a rider on a narrative pass, and it must complete before M1 Phase 3 wires the reference into the generation context. Its Acceptance includes *scripting* the docs-vs-client check, since this is an invariant that rots silently and a one-time correction would simply rot again.
 - **[all milestones] Committed-artifact provenance.** `internal/assets/client/tinkerdown-client.browser.js` is a *generated file tracked in git*, so it can silently disagree with the lockfile that supposedly produced it — exactly what issue #295 recorded (`node_modules` stale at 0.11.9 vs a 0.14.3 lockfile, so any rebuild reverted shipped fixes). Mitigated in Phase 0 by `make build` running `npm ci` first. **Residual:** CI cannot catch a regression here, because the e2e tests that would are `//go:build !ci` and do not run there — so a local e2e run before committing a rebuilt bundle is the only gate, not a formality. Tracked as [#297](https://github.com/livetemplate/tinkerdown/issues/297) (browser e2e smoke subset in CI), with a standing pre-bump checklist under § M2–M5 phases so the milestone that next regenerates the artifact makes the call deliberately rather than rediscovering this.
 - **[M1] "30 seconds" is a generation-reliability target, not a framework-latency target.** The framework leg is tens of ms; the budget is spent on the LLM. M1 must treat the generation-context assets (manifest + style guide + attribute reference + few-shot corpus) as first-class — that's what makes generation one-shot.
 - **[M1] Generated-app safety in M1 rests on the manifest + policy lint + proportional operation review + `confirm:` + `--allow-exec`, not yet on runtime `WithActionPolicy` (M3).** Acceptable for the demo with a human approver in the loop; M3 hardens it. State this explicitly so M1 isn't mistaken for production-grade authz.

@@ -232,12 +232,15 @@ Control modals.
 
 ## Form Handling
 
-### lvt-preserve
+### lvt-ignore
 
-Preserve form values during DOM updates.
+Skip an element and its entire subtree during DOM diffing. Commonly used to preserve
+form values a user is editing, but it applies to any element whose live DOM state the
+server should not overwrite. Setting `data-lvt-force-update` on the server's version of
+the element bypasses the guard and resumes diffing.
 
 ```html
-<input name="search" lvt-preserve>
+<input name="search" lvt-ignore>
 ```
 
 ### lvt-disable-with
@@ -330,7 +333,7 @@ These are processed by the `@livetemplate/client` library:
 - Rate limiting: `lvt-throttle`, `lvt-debounce`
 - UI directives: `lvt-scroll`, `lvt-highlight`, `lvt-animate`, `lvt-autofocus`, `lvt-focus-trap`
 - Modals: `lvt-modal-open`, `lvt-modal-close`
-- Forms: `lvt-preserve`, `lvt-disable-with`, `data-confirm`
+- Forms: `lvt-ignore`, `lvt-disable-with`, `data-confirm`
 - Lifecycle: `lvt-{action}-on:{event}`
 
 ### Tinkerdown-Specific Attributes

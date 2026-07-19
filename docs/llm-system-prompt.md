@@ -110,13 +110,22 @@ sources:
     from: https://api.github.com/users/USER/repos
 ```
 
-### Exec (for system commands - use sparingly)
+### Exec (system commands — privileged, gated behind `--allow-exec`)
 ```yaml
 sources:
   status:
     type: exec
     cmd: echo '[{"name":"test","value":"123"}]'
 ```
+
+Exec is a first-class source, not a last resort — wrapping a CLI you already trust
+(`kubectl`, `gh`, `docker`, a reporting script) is one of the things Tinkerdown is
+genuinely good at. It is privileged rather than discouraged: exec sources and actions
+are **refused unless the operator starts the server with `--allow-exec`**, so the
+decision to permit shell execution belongs to whoever runs it, not to the markdown.
+
+Use it where a command is the natural source of the data, and prefer a specific
+command over a general one.
 
 ## Auto-Rendering Components
 
