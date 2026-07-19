@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Fetch Kubernetes pods and format as JSON array
 # Customize this command for your cluster
 

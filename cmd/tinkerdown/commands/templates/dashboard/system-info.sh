@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # System information as JSON
 # Works on macOS and Linux
 

@@ -43,3 +43,6 @@ testdata/tmp/
 # Locally-built tinkerdown binaries
 /tinkerdown
 /tinkerdown-test
+
+# prereview review sessions (local comment store)
+.prereview/

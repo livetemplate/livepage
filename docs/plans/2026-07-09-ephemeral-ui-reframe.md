@@ -1,0 +1,731 @@
+# Plan: Tinkerdown — ephemeral, LLM-generated internal UIs from your approved data, policies, and style
+
+> **How to read this plan — pick your path.**
+> - **Human reviewer (~5 min):** read **§ Deliverables at a glance → § Context → § The reference demo → § Roadmap**, then stop at the **"⬇ Execution contract"** divider. That's the whole story: what's being built, why, and in what order. (§ four inputs, § Upstream gap analysis, § Architecture, § Package layout, § Skills delivered are optional depth.)
+> - **Executing LLM:** everything below the divider — **LLM session guide, delivery protocol, Implementation phases, Tech stack, skeleton deltas, Verification, Risks, Appendices** — is your contract; the top matter is context.
+>
+> **Target acceptance test (the whole plan exists to make this true):** an operator runs the Claude Code skill `/tinkerdown "a console to approve PII / data-export access requests"`, reviews and OKs the operations the generated app will run, and a working, live UI is serving in **~30 seconds**.
+
+---
+
+## Deliverables at a glance
+
+What this reframe ships, most-important first. **M1 is the headline** (makes the target acceptance test real); M0 is the foundation; M2–M5 harden. **See the concrete expected output — the `tinkerdown.yaml` manifest + the generated `app.md` — in [§ Appendix B](#appendix-b--expected-output-worked-example-skip-on-phase-execution).**
+
+**M1 — the demo (the core deliverable):**
+1. **`/tinkerdown`** — a Claude Code skill that turns an intent into a live, policy-gated UI (generate → validate loop → review → ephemeral serve).
+2. **Workspace manifest** — a team declares *approved* data sources + named `confirm:` actions once (extends `tinkerdown.yaml`), plus an **optional** house style (sane PicoCSS/theme defaults if omitted).
+3. **Policy enforcement + operation transparency** — the real safeguard is an automated **policy lint** in `tinkerdown validate` that stops a generated app from wiring any source/action the manifest didn't approve (not a re-approval of your intent). On top, for apps that perform *privileged* operations (exec/write/network/sensitive data), generation **surfaces the concrete operations** the LLM-authored app will run — e.g. `SELECT … FROM orders_pii LIMIT 500`, `gh pr create` — before it serves, so you review the actual behavior, not just the one-line intent. Proportional: read-only UIs get no prompt.
+4. **PII / data-export access-approval console** — the reference app: request queue → Approve (scoped export + durable audit record, optional grant PR) / Deny. Removes real, high-stakes friction.
+5. **`skills/pii-access-approval/`** — the workflow captured as a reusable skill (re-run in seconds), **plus** the general **`/tinkerdown:save` capture capability** — the *persist* path (convention 13): ephemeral UIs are throwaway by default; **when the user chooses to keep one**, capture it as a reusable skill from the dev conversation rather than just saving the `app.md`. Opt-in, never automatic. *(Naming: the generator is the primary `/tinkerdown`; other capabilities are namespaced `/tinkerdown:<verb>`.)*
+
+**M0 — foundation:** repositioned narrative (README/SKILL/llms.txt) + upstream version bump to latest (`livetemplate` v0.10→latest, client, components).
+
+**M2–M5 — hardening (upstream-first):** `livetemplate.Validate()` API + policy lint · `WithActionPolicy` runtime authz + source introspection · richer `lvt/components` + enforceable design-token style guide · save/share gallery (stores captured skills) + external-embed handshake.
+
+---
+
+## Context
+
+**The reframe.** Tinkerdown today is positioned as *"write markdown, serve HTML — one-file apps."* This plan reframes it as **the tool teams use to let LLMs generate contextual, specific, ephemeral UIs on the fly against their approved data sources — under policy and a house style.** The **UI is disposable**; the **substrate** it is generated from — approved sources, policy, house style, saved skills — is what is durable and reshaped over time.
+
+**The problem it kills.** Internal tooling is built like shipping a phone OS: one bloated "UI for all," never enough eng capacity, a permanent feature backlog, and every builder (PM, SDE, TPM) wanting their own twist. The investment per variation is too high, so most never get built. With LLMs we no longer need the one-UI-for-all pattern. If a team defines its **approved data sources, policies, and a UX style guide** once, plus a **small, constrained UI stack**, an LLM can generate a bespoke, use-and-throw UI in seconds. **The UI is ephemeral; the substrate — sources, policy, style, saved skills — is durable**, so you regenerate from an up-to-date source of truth instead of maintaining a stale app.
+
+**Where existing tools fall short** *(full landscape + data in [§ Appendix C](#appendix-c--competitive-landscape-skip-on-phase-execution))*. Three mature families each solve one axis and none solve all. **Low-code internal-tool builders** (Retool, Appsmith, Superblocks, ToolJet, Budibase, Windmill) are built on the opposite premise — you hand-build and *maintain* one durable catch-all app per workflow; their new AI features generate, and Superblocks **Clark** even *governs* (design system, permissions, audit) — but the output is a **persistent** app in **freeform React**, not a disposable artifact. **AI UI generators** (v0, bolt.new, Lovable, Replit Agent, Val Town, Claude Artifacts) nail prompt-to-UI and sometimes ephemerality, but emit **opaque code you re-prompt** rather than edit, bind to **no governed data** (Claude Artifacts' sandbox *blocks* live data; MCP-connected generative UI reaches whatever is wired, ungoverned), and offer a thousand ways to be subtly wrong. **Declarative data-app frameworks** (Streamlit, Gradio, Evidence.dev, Datasette) are lighter and live-data-friendly but still **human-authored, human-maintained code**. The two closest near-misses each miss one axis: **Superblocks Clark** (governed generation, but persistent + freeform-React) and **Anthropic's generative UI + MCP** (generation + ephemeral + live data, but no approved-sources gate + opaque source). **No tool combines all four of {LLM-generates-bespoke-UI · governed/approved data sources · ephemeral/disposable · editable non-opaque source}** — that intersection is tinkerdown's whitespace, held by three properties nobody else combines: a **constrained `lvt-*` single-file vocabulary** (deterministic *and* hand-editable), **live server-authoritative data over WebSocket** against approved sources, and a **policy gate + ephemeral-by-default** model. It sits in the "malleable / disposable software" lineage — Ink & Switch's *Malleable Software*, Geoffrey Litt's LLM-end-user-programming work, and Thariq Shihipar's *Unreasonable Effectiveness of HTML* (already cited in the README) — but supplies the governed, constrained, live-data substrate those essays don't.
+
+**Ephemerality vs. malleability — and what ephemerality actually buys us.** The malleable-software vision is about *reshaping one tool at the point of use* — the tool persists and bends to you. Tinkerdown is subtly different and, for internal tooling, stronger: **the individual UI is ephemeral; malleability lives in the *substrate*.** You don't evolve one dashboard forever — you evolve the durable assets (**approved sources, policy, house style, saved skills**) and *disposably generate* a fresh, hyper-specific UI from them whenever you need one. What ephemerality gives us that persistent-malleable software doesn't:
+- **Zero maintenance / no accumulation.** The pain we kill is *maintaining* internal tooling. A UI you throw away never becomes a liability — no updates, no backlog, no tech debt. A malleable tool that persists still accumulates and must be kept.
+- **Tractable governance.** A per-generation policy gate re-evaluates safety *every time* against a bounded, short-lived surface. A long-lived tool that's continuously reshaped has permissions + behavior that drift and are harder to audit.
+- **Specificity without generality pressure.** *Durability* is what forces the "one UI for all" bloat ("since we keep it, it must handle every case"). Throwaway removes that pressure — each UI is sharp and minimal for *its* moment.
+- **A flipped cost model.** Generation is cheap (seconds); preservation is expensive (forever). We bet on **cheap regeneration from an up-to-date source of truth** over expensive upkeep of a stale UI — the data + policy + style are the durable assets; the UI is disposable.
+
+Malleability is still there for the ones worth keeping — but it means **editing the human-/AI-readable markdown source, or re-running a saved skill** (Design goal #4), not maintaining a frozen app. Net: **ephemerality at the UI layer, malleability at the substrate layer** — the opposite of the one-big-app model, and what makes governance and zero-maintenance both achievable.
+
+**Why now.** Three of the four pillars already exist in tinkerdown:
+1. **A constrained vocabulary** — the fixed `lvt-*` attribute set (predictable for LLMs; no generic-LLM-output aesthetic).
+2. **Live data adapters** — sqlite, postgres, rest, graphql, file, csv/json, markdown, exec (shell), wasm, computed.
+3. **Structural auto-generation** — `auto_tables.go` / `auto_tasks.go` already infer interactive CRUD UI from a source + a plain markdown table/task-list, with **no LLM in the loop**.
+
+The missing fourth pillar is the **policy + generation layer**: a way for a team to declare *approved* sources/actions and a house style once, and a skill that lets an LLM generate a bespoke UI against them, validated deterministically, served ephemerally. This plan builds that fourth pillar and repositions everything around it.
+
+**Design goals (the re-design bar — an ephemeral UI is only worth it if all of these hold):**
+1. **Fast to generate.** `/tinkerdown "<intent>"` → live UI in **~30s**; re-run from a saved skill in **seconds**. The framework leg is near-instant — parse + first SSR + WebSocket upgrade ≈ **low tens of ms** (see § Upstream gap analysis), so the budget is the LLM, and "fast" means **one-shot generation reliability**. The levers, all first-class in this plan: the **constrained `lvt-*` single-file vocabulary** (small output surface → fewer tokens, fewer ways to be wrong, fewer retries); **pre-approved sources** in the manifest (no discovery step — the LLM binds to named, known sources); a **rich generation context** (manifest + attribute reference + few-shot corpus); a **fast deterministic `validate` self-correction loop** (real-parser feedback the LLM converges on); and the **capture-as-skill** path (re-run needs *no* LLM at all). Speed is measured + tracked in M1 Phase 5.
+2. **Governed.** Generate only against **approved sources + actions**, under policy; the policy lint enforces it, and the operator OKs privileged operations before serving.
+3. **Deterministic / correct.** The constrained vocabulary + `tinkerdown validate` (the *real* parser) gate every generated doc to a **clean pass before serving**; the running UI is **server-authoritative** (no client/server drift).
+4. **Ephemeral UI layer, malleable substrate layer.** The individual UI is thrown away after use; malleability lives in the durable *substrate* — approved sources, policy, house style, saved skills. Persist a UI on demand by capturing it as a reusable skill; otherwise just regenerate from the (updated) substrate. (See § Context — Ephemerality vs. malleability.)
+5. **Editable, non-opaque source.** The artifact is a single **human- and AI-editable markdown file**, not opaque generated code (the differentiator vs. every AI code generator — see § Context "Where existing tools fall short").
+6. **Fix gaps upstream, not in tinkerdown** (`../livetemplate` server + `../client`); where a capability legitimately belongs in tinkerdown (generation→serve orchestration) the plan says so explicitly.
+
+*(1–3 are the load-bearing triad: **fast + governed + deterministic**. If any fails, generated-on-the-fly UIs aren't usable — too slow, unsafe against real data, or unreliable.)*
+
+---
+
+## The reference demo — a PII / data-export access-approval console (locked)
+
+This is the concrete M1 target. Chosen from a research pass over real request→human-approval workflows (see Appendix A for the rejected alternatives and why). It removes **high-stakes, real friction** and exercises the entire reframe.
+
+**The friction (real, high-stakes).** An analyst or support agent needs access to sensitive data — a PII export, a prod-DB read — to resolve a chargeback dispute, service a GDPR data-subject request, or debug a customer issue. Today the loop is: **Slack-ping someone with prod access → they hand-run a query → weak/absent audit trail → compliance exposure** (who accessed which PII, when, why, for how long — hard to prove to an auditor). This is over-broad, slow, and unauditable. Real HITL-approval tooling frames PII/data-export as the case that *must* route to a review tier with a durable audit record.
+
+**The generated console (what the skill produces).** *(The concrete `app.md` + the workspace manifest it references are in [§ Appendix B — Expected output](#appendix-b--expected-output-worked-example-skip-on-phase-execution).)*
+- **Pending-requests queue** (a data source). Each row shows what an approver needs to decide safely: requester + team, the dataset/resource requested (e.g. `orders_pii`, `users_email`), the scope (row estimate / filter / a preview of the exact scoped query), business justification, linked ticket/incident, requested duration/TTL, requested-at, and sensitivity/compliance tags (PII/PCI/GDPR).
+- **Approve** (`confirm:` action) → produces a **concrete, auditable output**: (1) a durable **audit record** (approver, timestamp, exact scope, reason, TTL) appended to a writable source, and (2) the concrete action — a **scoped, parameterized export job** (a bounded query, delivered as a time-boxed artifact) *and/or* an optional **PR to an access-grants-as-code file** (`access-grants/<date>-<user>-<dataset>.yaml`) for GitOps-minded teams. Primary output is the grant + audit record; the PR is an optional git-native variant that reuses the same `gh pr create` primitive.
+- **Deny** (`confirm:` action) → transitions the request to `denied`, records approver + reason, notifies the requester. No data access granted.
+- **Request intake** → the app's own "Request access" form (a writable source), or a Slack slash-command / webhook POST for realism.
+
+**Why it fits the reframe perfectly (existing primitives only):**
+- **Requests queue** → a data source (sqlite/markdown/rest). *(reuse `auto_tables`.)*
+- **Approve / Deny** → named `confirm:` actions in the manifest (`sql`/`exec`/`http` with typed params). *(reuse `config.Action` + `execargs` typed form.)*
+- **Scoped export job** → a parameterized `sql`/`exec` action (bounded query). *(reuse `execargs`/`SQLExecutor`.)*
+- **Audit record** → a writable source append (sqlite/markdown). *(reuse `WritableSource`.)*
+- **House style** → `styling.site_css` + theme.
+- **Ephemeral** → served via the disk-free `ParseString` + playground-session path.
+
+**The two safety layers (generic machinery, not a separate demo).** Every generated UI passes through the same gate; here it's shown applied to the PII console. (1) The **policy lint** (automated, always on) rejects a generated app that references any source/action the manifest didn't approve — the non-redundant safeguard, not a re-approval of the operator's intent. (2) **Operation transparency** (proportional): because an *LLM* authored the implementation, generation surfaces the *concrete* privileged operations the generated app will run before it serves — for this PII console: read the requests store, run the **scoped** export `SELECT … FROM orders_pii LIMIT 500`, append audit records, and (optionally) `gh pr create`. The operator reviews the actual behavior their one-line intent didn't specify; a read-only UI would get no such prompt. Both layers are **generic skill machinery** (manifest + generate skill, built once), not demo-specific code — per the "generic core library code" rule.
+
+**Locally runnable E2E (no real prod DB, no real PII).** A fixture SQLite of *synthetic* "PII" rows makes the export job real but harmless; the requests queue + audit log are seeded/writable SQLite (or markdown); the optional access-grant PR uses a fixture git repo + the `gh` CLI. Approve runs a genuinely scoped export against the fixture DB, writes a real audit entry, and (optionally) opens a real PR — all demoable without touching production.
+
+---
+
+## The four team-defined inputs — and the house-style gap
+
+The brief names four things a team defines once so LLMs can safely generate against them: **(1) approved data sources, (2) policies, (3) a UX style guide, (4) a small UI stack.** Tinkerdown covers 1, 2, and 4 well (source adapters; the manifest's approved-set + `confirm:` actions; the fixed `lvt-*` vocabulary + `lvt/components`). **(3) is the weakest today** — the exploration flagged it: house style is just `styling.theme` (clean/dark/minimal) + `styling.site_css`, with *no design-token schema and no enforced component set*. That's a problem, because "no generic LLM-output aesthetic" is a core selling point — a bespoke UI that ignores the house style is off-brand.
+
+**How the plan threads the UX style guide:**
+- **M1 (this milestone) — make house style LLM-consumable, coarse enforcement.** The manifest's style block = `theme` + `site_css` **plus a short `style-guide.md`** (house tone, layout conventions, which `lvt/components` to prefer, do/don't) that the `/tinkerdown` skill injects into its generation context so output conforms by construction. **The whole style block is optional** — with none, generation falls back to tinkerdown's sane defaults (PicoCSS semantic styling + default theme), so a team can adopt generation with zero style setup and add house style later. Enforcement in M1 is coarse (the shared `site_css` skins every generated page; the visual-conformance check in Phase 5). *This is a conscious M1 scope: consume the style guide, don't yet mechanically enforce tokens.*
+- **M4 — elevate to an enforceable spec.** Alongside the `lvt/components` enrichment, promote house style to **design tokens + an enforced component set** (the real "style guide object" the exploration found missing), so generated UIs can't drift off-brand even without a careful prompt.
+
+---
+
+## Upstream gap analysis — what to fix in `livetemplate`/`client`/`lvt` vs tinkerdown
+
+*(From a direct read at plan-authoring time: `../livetemplate` @ v0.16.0, `../client` @ v0.16.2, `../lvt/components`. Targets below are "latest at execution" — see § Tech stack.)*
+
+**Version reality — the cheapest lever first.** Tinkerdown pins **`livetemplate v0.10.0`** (`go.mod:11`) and an old client; upstream was **v0.16.0 / client 0.16.2 at plan-authoring time** (and keeps moving — M0 Phase 0 targets whatever is latest at execution, not these numbers). Six+ minors of relevant fixes already shipped and are simply unconsumed: **ephemeral sweep-TTL** (`WithEphemeralSweepTTL`), **verbatim dynamic content** (no whitespace-collapse corrupting code/`pre-wrap` — matters when generated UIs echo code), **app-level heartbeat/liveness**, and **`data-lvt-force-update`** (one-shot server-authoritative override for checkboxes/radios/`<details>`). **First move is a version bump, not new code.**
+
+| # | Gap | Home (fix upstream, not tinkerdown) | Needed for | Milestone |
+|---|-----|------|-----------|-----------|
+| 0 | Old pins hide shipped fixes | Bump `livetemplate`, client, `lvt/components` → latest tags | Ephemeral speed + determinism | **M0** |
+| 1 | No validation API for a generated attribute-doc (allowed tags/`lvt-*`, diff-cleanliness, bound refs) | `livetemplate.Validate(templateText)` [server] | Deterministic first-pass correctness | **M2** |
+| 2 | No state/source **introspection** (fields + action names as metadata) | Reflective metadata surface [server] | LLM binds to real fields | **M3** |
+| 3 | Permission enforcement is coarse; no per-action/field authz | Declarative `WithActionPolicy` hook [server] | Runtime safety (defense in depth) | **M3** |
+| 4 | Primitive library too thin (no charts, badges, cards, stat tiles, alerts, empty-states) | Enrich `lvt/components` [components] | "LLMs rarely need custom HTML" | **M4** |
+| 5 | External-app embedding is iframe-bridge only | Embed handshake [client] | Sandboxed external embeds | **M5** |
+| 6 | Generation→validate→serve **orchestration** | **Legitimately tinkerdown** (all 3 exploration agents concur) | The skill itself | **M1** |
+
+**The load-bearing decision (per operator sign-off):** M1 ships the demo on primitives that already exist (items 6 + M0's bump); items 1–5 are explicit *hardening* milestones **after** the demo runs. This is a deliberate sequencing choice, not a shortcut — the generation orchestration is the one layer that always lived in tinkerdown.
+
+---
+
+## Architecture overview
+
+```
+   Operator (in Claude Code)
+        │  /tinkerdown "a console to approve PII / data-export access requests"
+        ▼
+  ┌─────────────────────────────────────────────────┐
+  │  Claude Code skill (skills/tinkerdown)          │  [M1 — tinkerdown]
+  │  1. read workspace manifest (approved sources,  │
+  │     actions, style guide) + attribute reference │
+  │     + few-shot corpus                           │
+  │  2. emit app.md (constrained lvt-* vocabulary)  │
+  │  3. `tinkerdown validate` ── loop until clean ──┐│  ← deterministic gate
+  │  4. if privileged: show operation summary,      ││    [M1: real parser;
+  │     operator OKs the concrete ops (else skip)   ││     M2: + Validate() API]
+  │  5. `tinkerdown serve` (ephemeral session)      ││
+  └─────────────────────────────────────────────────┘│
+        │                                            │
+        ▼                                            │
+  ┌───────────────────────────┐                      │
+  │ tinkerdown runtime (Go)   │                      │
+  │ ParseString → live page   │◀── validate ─────────┘
+  │ ephemeral session (TTL)   │      (same real parser as serve)
+  │ approved sources only ────┼──▶ requests store / scoped export / audit
+  │ confirm: actions ─────────┼──▶ approve → export job + audit record
+  │                           │      (+ optional gh pr create grant)
+  └───────────────────────────┘
+        │  SSR HTML + WebSocket tree-diffs
+        ▼
+  Browser: live UI (server-authoritative; data-lvt-force-update)
+        └── @livetemplate/client (constrained lvt-* vocabulary)  [upstream]
+```
+
+**Key flows.**
+1. **Generate** — skill reads manifest + reference → emits `app.md` → `validate` loop → review → `serve`. *(M1)*
+2. **Approve** — a `confirm:` action that runs a scoped export + appends a durable audit record (+ optionally opens a GitOps grant PR via `gh pr create`). *(M1)*
+3. **Policy gate at generation** — the skill may only wire up sources/actions the manifest approves; `validate` (M1) + `livetemplate.Validate()` (M2) enforce doc cleanliness; `WithActionPolicy` (M3) enforces at runtime. *(M1→M3)*
+4. **Ephemeral lifecycle** — disk-free `ParseString` + TTL session; thrown away or saved to a gallery. *(M1 render; M5 save/share)*
+
+---
+
+## Package layout (shape only; per-file detail lives in each phase)
+
+**tinkerdown (this repo):**
+- `skills/tinkerdown/` — the **existing** skill, extended so **generation is its default action** (`/tinkerdown "<intent>"`); sub-capabilities are **namespaced** (`/tinkerdown:save`, …). Adds the generation context (reference + few-shot corpus) + validate loop.
+- `internal/config/` — extend for the **workspace manifest** (approved sources, named actions, optional style guide + `describes:` metadata). *(reuse `config.go` `SourceConfig`, `AuthConfig`, `Action`, `StylingConfig`.)*
+- `internal/server/playground.go` — the disk-free ephemeral render substrate (`ParseString`, `PlaygroundSession`) the generate path serves through.
+- `cmd/tinkerdown/commands/validate.go` — the deterministic feedback gate (already parses via real `ParseFileInSite`); extend with **policy validation** (approved-source/action lint).
+- `internal/source/{exec.go,sqlite.go}`, `auto_tables.go`, `execargs` (typed action forms), `WritableSource`/`SQLExecutor` — the queue + scoped-export + audit-append + approve-and-run primitives the demo reuses.
+
+**upstream (fix here per the rule):**
+- `../livetemplate` — version bump (M0); `Validate()` API (M2); introspection + `WithActionPolicy` (M3).
+- `../client` — consume via bump (M0); embed handshake (M5).
+- `../lvt/components` — enrich vocabulary (M4).
+
+---
+
+## Skills delivered (a first-class deliverable, per convention 13)
+
+**Naming convention:** the generator is the **primary default skill `/tinkerdown`** (generation is what you get by default); every other tinkerdown capability is **namespaced** `/tinkerdown:<verb>` (e.g. `/tinkerdown:save`). Captured workflow skills are their own standalone skills. The reframe ships:
+
+1. **`/tinkerdown` — the primary generator** (M1 Phase 3). The existing `skills/tinkerdown/` skill, extended so its **default action** is: read the manifest + attribute reference + few-shot corpus → emit `app.md` → validate loop → review → ephemeral serve. Produces *any* bespoke UI against approved sources.
+2. **`/tinkerdown:save` — the capture/persist capability** (M1 Phase 6) — a **namespaced sub-skill**, **invoked when the user chooses to persist** an ephemeral UI, that distils the just-completed generation/development conversation into a durable, re-runnable skill following Anthropic best practices. This is the *persist* path of convention 13 — **opt-in, never automatic** (ephemeral UIs are throwaway by default).
+3. **`skills/pii-access-approval/` — the concrete captured artifact** (M1 Phase 6). The multi-step PII / data-export approval workflow *deliberately persisted* (via `/tinkerdown:save`) as a standalone reusable skill: the manifest, the golden `app.md`, the approve/deny/export/audit wiring, and how to serve it — so an operator gets the working console in seconds (the "save it — the need recurs" path), not by re-generating. Both the demo artifact and the worked example of capture-on-persist.
+
+All follow the Anthropic skill shape already used by `skills/tinkerdown/` (concise `SKILL.md` + `reference.md` + `examples/` + a `validate` step + explicit triggers).
+
+---
+
+## Roadmap
+
+Ordered milestones. **M0 and M1 are fully detailed** (full phase blocks); M2–M5 are outline-only and get expanded at their kickoff (see LLM session guide convention 9).
+
+- **M0 — Reframe + upstream bump.** Reposition the narrative (README/SKILL/llms.txt/ai-generation) around ephemeral generated UIs; **bump `livetemplate` + client + components to their latest tags** and absorb behavior changes. *Lights up:* the fast, correct runtime substrate + the honest story. *(no demo yet)*
+- **M1 — THE DEMO (thin vertical slice).** The five M1 deliverables (see § Deliverables at a glance) on existing primitives. *Lights up:* the target acceptance test — generate a real, friction-removing UI in ~30s — *and* re-run it from a skill in seconds.
+- **M2 — Deterministic validation (upstream).** `livetemplate.Validate(templateText)` (diff-cleanliness + attribute diagnostics) + tinkerdown **policy lint** in `validate`. *Lights up:* first-pass generation reliability; reject unknown `lvt-*` / non-approved refs before serving.
+- **M3 — Runtime policy + introspection (upstream).** `WithActionPolicy` per-action/field authz + state/source introspection metadata. *Lights up:* defense-in-depth (the running app can't exceed granted access) + LLM binds to real fields.
+- **M4 — Component vocabulary + enforceable house style (upstream `lvt/components` + tinkerdown).** Charts, badges, cards, stat tiles, alerts, empty-states; **plus** promoting the UX style guide from coarse (`site_css` + `style-guide.md`) to **design tokens + an enforced component set** (the "style guide object" the exploration found missing). *Lights up:* richer generated dashboards with no free-form HTML, guaranteed on-brand.
+- **M5 — Persist to the malleable substrate (save & share).** This is where **malleability lives**: persist a generated UI to the repo + a gallery + share link by storing the captured **skill** (per convention 13 / M1 Phase 6), not just the `app.md` — so "save" means a re-runnable workflow you evolve, while individual UIs stay ephemeral; plus **substrate extensibility** (teams can add their own approved source types) and the external-app embed handshake. *Lights up:* "throw away the UI, keep + reshape the substrate" (folds issues #223 host read-only apps, #282 review mode, #249 external embed, #216 writable WASM sources, #222 custom Go+WASM sources).
+
+**Open-issue walkthrough.** Triaged into three buckets against this reframe. *(Counts drift: **48 open** at plan authoring, **82** by 2026-07-19 — the repo files `from-review` issues continuously. The named issue→milestone mappings below stay valid; **re-run the triage at M0 kickoff** rather than trusting the totals, same as the version pins.)*
+- **Folded into milestones (reframe-aligned):** #223 host read-only apps → **M5** gallery; #282 review mode → **M5**; #249 `lvt-external` embed any framework → **M5** embed handshake; #216 writable WASM sources → **M5** sources; #222 custom sources in Go+WASM → **M5**; #226 ROADMAP lifecycle-attr pattern + #230 `lvt-preserve`→`lvt-ignore` doc fixes → **M0** reframe pass.
+- **Reliability/tech-debt, pulled in only if a phase's Audit finds it blocking:** #269 hot-reload serves stale `/`, #275 Kroki timeout blocks discovery, #259 multi-range highlight overlay misalign (all P2) — none sit on the M1 critical path, but #269 touches serve/hot-reload which M0's bump also touches, so M0 Audit checks it.
+- **Orthogonal `from-review` follow-ups (~35 at authoring and growing — #258–#273 etc., mostly P3/P4):** refactors/test-coverage/perf nits with no bearing on the reframe. Not scheduled here; left to normal backlog grooming. Explicitly *out of scope* so the reframe stays a thin vertical, not a debt-paydown.
+
+---
+
+## ⬇ Execution contract (human reviewers can stop above)
+
+*Everything below is for the implementing LLM — the session rules, the per-phase checklists, verification, and the decisions log. A product reviewer doesn't need to read it end-to-end.*
+
+---
+
+## LLM session guide — how to execute this plan
+
+Consumed by Claude Code, **one phase per session**. This is the executing LLM's contract.
+
+1. **Read only what this phase needs.** Each phase's **Design refs** cite specific sub-sections. Read those + the phase block. Sharpen a vague Design ref in the same commit if you had to read more.
+2. **Audit first, code second.** Every phase opens with **Audit** — verify prerequisites, surface ambiguity, enrich the Implementation list inline with new `[ ]` items. Complete it before implementation.
+3. **Acceptance criteria are the success bar** — not the Implementation checkboxes. First criterion is always **/simplify** against the diff.
+4. **Persist drift to the plan** in the same commit as the code. The plan is the source of truth.
+5. **Learn forward — surprises only.** End each phase with **Learn** (4 prompts). "No surprises" is valid. Predicted findings belong in Audit or Risks, not Learn.
+6. **Stay in scope.** Only the Implementation checklist + audit-derived additions. Ask before adding anything else.
+7. **One coherent commit per phase.**
+8. **When in doubt, ask.** Prefer a clarifying question over an invented design decision.
+9. **Outline expansion is a milestone's first task.** M2–M5 designs are outline-only; the first phase of each milestone expands its design (informed by the prior milestone's Learn) + produces any mockups, then re-points that milestone's Design refs, before implementation.
+10. **"Work on the next phase" → auto-position.** Scan the progress tracker top-to-bottom for the first phase with unchecked `[ ]` Implementation boxes; surface any incomplete prior-phase Learn; read Goal + Design refs + prior Learn; begin with Audit. A named phase overrides.
+11. **Cross-repo phases target the upstream repo explicitly.** For M0/M2/M3/M4/M5 work living in `../livetemplate`, `../client`, `../lvt`: point `/simplify`, `/prereview`, and the delivery protocol at the external repo (`git -C <repo> diff`); run the delivery loop once per upstream repo; **cut a tagged release** of each upstream package (via its `release.sh`) so tinkerdown can pin it; verify the consuming demo builds against the **published** dep (no `go.work` shim committed).
+12. **Dogfood the ecosystem — no custom JS, no extra UI deps.** All interactivity via `lvt-*` (client + `lvt/components`). If a UI primitive is missing, **stop the phase, fix upstream first, ship it, then resume** — add the upstream work as a checked Implementation item so the dependency is visible. Necessary service clients (GitHub API, etc.) are exempt.
+13. **Persisting an ephemeral UI = capturing it as a reusable skill (opt-in, not automatic).** Ephemeral UIs are **throwaway by default** — that's the point of the reframe. But **when the user decides an ephemeral UI is worth keeping** (the "save if the need recurs" path), don't just save the `app.md`: **capture the whole workflow as a reusable Claude Code skill** so it re-runs *efficiently, effectively, and quickly* (near-instant) instead of being re-generated. The capture distils the working artifact + the steps that produced it (from the development/generation conversation) into a `SKILL.md`, following **Anthropic's skill-authoring best practices**: progressive disclosure (concise `SKILL.md` + deeper `reference.md`), explicit `name`/`description`/`triggers` frontmatter, bundled few-shot examples + any helper scripts, a clear "when to use / when not to," and a validation step. This is a reusable capability — the namespaced **`/tinkerdown:save`** sub-skill (see § Skills delivered) — **invoked on the user's request to persist, never fired automatically after generation.**
+
+Sections marked `[skip on phase execution]` (Appendix A) are historical context for humans.
+
+---
+
+## Per-phase delivery protocol (defined once)
+
+**Precondition:** `prereview` CLI reachable; `gh` authenticated. After Implementation + Acceptance pass locally, every phase runs the same loop:
+
+1. **Manual verification in a real browser** at the devbox URL (never `curl`) — watch browser console + server stderr + WS frames while clicking through. Non-optional for any UI-touching phase.
+2. **`/prereview` hand-off** → iterate until the user signs off.
+3. **Open PR** → the Claude Code review bot auto-reviews.
+4. **`/prcommentsfix` convergence loop** against bot comments until clean.
+5. **Final post-bot signoff → merge.** Never self-merge without explicit signoff.
+
+---
+
+## Implementation phases — progress tracker
+
+> Tick boxes as work completes. Each phase ends with `go test ./...` (+ `go test -tags=browser ./...` where applicable) green, and — for E2E — the CLAUDE.md four-channel capture: browser console, server stderr, WebSocket frames, rendered HTML + screenshot.
+
+**Phase block shape (every phase):** `Goal at end` · `Design refs` (specific sub-sections) · `Audit` (first task; starts with a Design-ref completeness check) · `Implementation` (`[ ]` checkboxes) · `Acceptance criteria` (Simplify → Unit → Integration → E2E) · `Learn` (4 prompts: what surprised us / plan drift fixed / feed-forward to next Audit / new-or-changed risks).
+
+**Phase sizing:** each fits one Claude Code session (~1–3 days human-equiv). Overrun → split.
+
+---
+
+### M0 phases — reframe + upstream bump (full detail)
+
+#### Phase 0 (M0) — Upstream version bump: `livetemplate` + client + components to latest (~1 session)
+
+> **Goal at end:** tinkerdown builds and all tests (incl. browser e2e) pass green against **the latest tagged `livetemplate` release**, the matching `@livetemplate/client`, and the latest `lvt/components` — with any behavior changes absorbed. *(v0.16.x is the floor at plan-authoring time; upstream will have advanced by execution — the Audit re-checks the current latest and targets that.)*
+
+**Design refs:**
+- § Upstream gap analysis (version reality; the 4 shipped-but-unconsumed fixes)
+- `go.mod:11` (server pin), the embedded client version, `internal/server/` (render/ws), `parser.go`/`page.go` (attribute passthrough)
+- Upstream `../livetemplate/CHANGELOG.md` v0.11→latest entries (kebab action routing, comment stripping, verbatim dynamic content, heartbeat, ephemeral sweep-TTL, force-update — plus anything shipped after v0.16)
+
+**Audit:**
+- [ ] **Design-ref completeness check** — each Implementation item maps to a cited sub-section.
+- [ ] **Re-check the current latest upstream versions first** (`git -C ../livetemplate tag | sort -V | tail`, `../client` `package.json`/tags, `lvt/components` tags) — upstream will have advanced past v0.16 since plan authoring. Target the **latest** stable tags, not the plan-time numbers.
+- [ ] Read the upstream CHANGELOG from tinkerdown's current pin **through the latest tag** in full; list every behavior change that could touch tinkerdown's parser/render/ws (comment stripping vs tinkerdown's own comment handling; kebab-case action routing vs `name=` dispatch; verbatim dynamic content vs any whitespace assumptions).
+- [ ] Confirm the embedded/pinned client version and how it's shipped (embedded asset vs CDN) — bump the right place.
+- [ ] Check `lvt/components` pseudo-version → is a tagged release available to pin instead?
+- [ ] Inventory tinkerdown tests that assert on exact rendered HTML/whitespace — these are the likely breakers.
+
+**Implementation:**
+- [ ] Bump `go.mod` server pin to the **latest tagged release** (≥ v0.16); update client asset/pin + `lvt/components` pin to their latest tags. `go mod tidy`.
+- [ ] Fix compile/API breaks; absorb behavior changes (adjust golden files / whitespace assertions as needed, verifying each change is correct not just green).
+- [ ] Wire up newly-available primitives that the reframe wants: `WithEphemeralSweepTTL` on the playground/ephemeral session path; confirm `data-lvt-force-update` is available for server-authoritative controls (see memory: checkbox toggle case).
+- [ ] Update `CHANGELOG.md`.
+
+**Acceptance criteria:**
+- [ ] **Simplify:** `/simplify` against the diff.
+- [ ] **Unit:** `go test ./...` green (parser, page, source, config golden tests).
+- [ ] **Integration:** source integration tests (sqlite/rest/exec) green.
+- [ ] **E2E:** `go test -tags=browser ./...` — a representative sample (auto-table, exec-toolbar, checkbox-toggle) green with four-channel capture; verify the WebSocket still connects and diffs apply (the class of bug the exemplar caught: degraded live page that text tests miss).
+
+**Learn:** what surprised us / plan drift fixed / feed-forward to **Phase 1 (M0)**'s Audit / new-or-changed risks.
+
+#### Phase 1 (M0) — Reframe the narrative (README, SKILL, llms.txt, ai-generation) (~1 session)
+
+> **Goal at end:** the top-line story leads with ephemeral, LLM-generated, policy-gated internal UIs; the exec-source "use sparingly" framing is replaced by "approved + gated"; stale docs (#226 ROADMAP, #230 lvt-preserve→lvt-ignore) fixed.
+>
+> **Why this is mostly repositioning, not net-new writing:** the repo already half-believes the reframe (archived `docs/archive/ROADMAP.md` vision: *"platform… AI systems generating functional apps from natural language"*; `docs/research/examples/llm-generated-apps/`; a ready `docs/llm-system-prompt.md`; the `basic` scaffold is literally "k8s pods via exec"). The gap is that the **top-line story** (README/SKILL/llms.txt) still leads with "one-file markdown apps," and the LLM prompt *steers away* from exec because nothing gates it. This phase also makes good on a promise the docs already made: `docs/guides/ai-generation.md` advertises `/lvt-plan`, `/new-app`, `/add-resource` commands **that were never built** — redirect them to the real `/tinkerdown` (M1).
+
+**Design refs:**
+- § Context
+- `README.md`, `skills/tinkerdown/SKILL.md`, `docs/llms.txt`, `docs/llm-system-prompt.md`, `docs/guides/ai-generation.md` (advertises unbuilt commands), `docs/archive/ROADMAP.md`
+
+**Audit:**
+- [ ] **Design-ref completeness check.**
+- [ ] Read the current README/SKILL/llms.txt lead sections; list the "one-file markdown app" framings to reposition (keep the progressive-complexity tiers — they still hold).
+- [ ] Confirm which advertised-but-unbuilt commands in `ai-generation.md` to remove vs. redirect to the real `/tinkerdown` (built in M1).
+- [ ] Decide: does `llm-system-prompt.md` become the seed of the M1 skill's generation context? (Feed-forward.)
+
+**Implementation:**
+- [ ] Rewrite README lead + "Why Tinkerdown" around the reframe (keep the concrete examples; add the ephemeral-generated-UI framing + the reframe's data-source/policy/style-guide/UI-stack pillars).
+- [ ] Update `SKILL.md` + `llms.txt` to describe the generate-and-throw-away model.
+- [ ] Fix `ai-generation.md`: remove/redirect phantom commands; point at the (M1) skill.
+- [ ] Doc fixes: #226 (ROADMAP lifecycle-attribute pattern), #230 (lvt-preserve→lvt-ignore).
+- [ ] Do **not** change exec gating yet (that's M1's manifest) — but reframe the *narrative* so exec is "approved + gated," not "avoid."
+
+**Acceptance criteria:**
+- [ ] **Simplify:** prose pass for clarity.
+- [ ] **Unit:** `skill_examples_test.go` + `TestLLMSTxtExists` still green (llms.txt must retain required headers).
+- [ ] **Integration/E2E:** N/A (docs) — but any code snippet in changed docs must `tinkerdown validate` clean.
+
+**Learn:** 4 prompts.
+
+---
+
+### M1 phases — THE DEMO (full detail)
+
+> Reference app locked: the **PII / data-export access-approval console** (§ The reference demo). M1 delivers it end-to-end via `/tinkerdown`.
+
+#### Phase 1 (M1) — Workspace manifest: approved sources + named actions + style guide (~1 session)
+
+> **Goal at end:** a project can declare, once, a set of **approved** data sources + named `confirm:` actions + (optionally) a house style — the surface an LLM is allowed to wire up — and tinkerdown loads it. **House style is optional**: absent one, generation uses tinkerdown's sane defaults (PicoCSS semantic styling + the default theme).
+
+**Design refs:**
+- § Context (the four pillars) · § The reference demo (what the manifest must express for the PII console)
+- `internal/config/config.go` — `SourceConfig` (`:143`), `AuthConfig`/`APIKeyConfig` permissions (`:570`), `Action` + `confirm:` (`:296`), `StylingConfig`/`site_css` (`:516`), `LoadFromDir` (`:786`)
+- `docs/reference/config.md` (shared-sources semantics, frontmatter-overrides-config priority)
+
+**Audit:**
+- [ ] **Design-ref completeness check.**
+- [ ] Confirm the recommended shape: **extend `tinkerdown.yaml`** (reuse `SourceConfig`/`Action`/`AuthConfig`/`StylingConfig`) vs. a new file. Decide the `approved:` semantics — is an approved source simply "declared in `tinkerdown.yaml`" (existing behavior) or a new explicit `approved: true` marker that gates *generation* (distinct from *definition*)? Resolve here; it shapes Phase 2's lint.
+- [ ] Determine how a manifest source/action carries the metadata the operation summary needs: a human-readable description of what it touches (dataset, scope, whether it writes/execs/network) so the summary is meaningful.
+- [ ] Verify `Action` already supports typed params + `confirm:` for the export/approve/deny actions the demo needs; note any gap.
+
+**Implementation:**
+- [ ] Extend the project config with an explicit **approved-for-generation** notion (marker or a dedicated `generation:` block listing approved source/action names) + per-item human-readable `describes:` metadata for the operation summary. Keep backward-compat (existing `tinkerdown.yaml` still loads).
+- [ ] A `Manifest` accessor: given a loaded config, return the approved sources, approved named actions (with `confirm:` + params), and the **style guide** (theme + `site_css` + an optional `style-guide.md` path — house tone/layout/preferred-components/do-don't) as one struct the skill + validate + operation summary consume. **The style guide is optional** — when absent the accessor returns tinkerdown's default (PicoCSS + default theme), so generation always has a sane baseline.
+- [ ] Seed the demo manifest under the reference-app fixture (approved: requests-store source, scoped-export action, audit-append source/action, deny action, optional grant-PR action; style = theme + `site_css` + a short `style-guide.md`).
+
+**Acceptance criteria:**
+- [ ] **Simplify:** `/simplify` the diff.
+- [ ] **Unit:** config-load tests — approved-set resolution, describes-metadata, backward-compat with a plain `tinkerdown.yaml`, override priority unchanged.
+- [ ] **Integration:** load the demo manifest; assert the `Manifest` accessor returns exactly the approved sources/actions/style.
+- [ ] **E2E:** N/A (config) — covered downstream.
+
+**Learn:** what surprised us / plan drift fixed / feed-forward to Phase 2's Audit / new-or-changed risks.
+
+#### Phase 2 (M1) — Generation-time policy lint + operation summary (~1 session)
+
+> **Goal at end:** `tinkerdown validate` rejects a generated `app.md` that references any source/action the manifest hasn't approved (the enforcement); and it can emit an **operation summary** — the concrete privileged operations the app performs (sources touched, actions run, whether they exec/write/network/touch sensitive data) — which the skill surfaces **proportionally** (privileged apps only; read-only apps skip it).
+
+**Design refs:**
+- § The reference demo (policy lint + operation transparency) · § Deliverables (#3) · Phase 1 Learn (manifest shape)
+- `cmd/tinkerdown/commands/validate.go` (`ParseFileInSite` gate `:81`), `errors.go` (`ParseError` with `File/Line/Hint` — the LLM-friendly feedback), `parser.go` `getLvtSourceFromContent` (`:531`)
+
+**Audit:**
+- [ ] **Design-ref completeness check.**
+- [ ] Confirm `validate` can extract every source ref (`lvt-source`, `lvt-persist`) + action ref (`name=` on button/form, named actions) from a parsed doc — reuse the parser's existing extraction, don't re-regex.
+- [ ] Decide the operation-summary output format (JSON on a `--summary` flag?) so the Phase-3 skill can consume it deterministically, and decide the **proportionality rule** (what counts as "privileged" → surfaced; read-only → skipped).
+- [ ] Confirm policy failures surface as `ParseError`-quality diagnostics (line + hint: "source `X` is not approved in tinkerdown.yaml; approved: [...]") so the skill's validate loop can self-correct.
+
+**Implementation:**
+- [ ] `validate` gains a manifest-aware **policy lint**: every source/action referenced by the doc must be in the approved set; unapproved refs → a clear diagnostic (line, offending ref, approved list, hint). This is the enforcement — always on.
+- [ ] `validate --summary` (or equivalent) emits the **operation summary**: the approved sources/actions the doc actually uses + their `describes:` metadata + risk flags (execs? writes? network? PII?), as structured output, with a `privileged` bit so the skill knows whether to surface it.
+- [ ] Wire the lint so it runs only when a manifest with a generation/approved block is present (plain projects behave as today — no regression).
+
+**Acceptance criteria:**
+- [ ] **Simplify:** `/simplify` the diff.
+- [ ] **Unit:** lint accepts an all-approved doc; rejects an unapproved-source doc + an unapproved-action doc with a line+hint; operation summary lists exactly the used approved items with correct risk flags + `privileged` bit (read-only doc → not privileged).
+- [ ] **Integration:** run `validate` + `validate --summary` against the demo app.md fixture.
+- [ ] **E2E:** N/A (CLI) — exercised in Phase 5.
+
+**Learn:** 4 prompts.
+
+#### Phase 3 (M1) — The `/tinkerdown` Claude Code skill (~1 session)
+
+> **Goal at end:** the **existing `skills/tinkerdown/` skill is extended so generation is its default action** — running `/tinkerdown "<intent>"` reads the manifest + attribute reference + few-shot corpus, emits `app.md`, loops on `tinkerdown validate` until clean, surfaces the operation summary (if privileged), then serves ephemerally. (Sub-capabilities land as namespaced `/tinkerdown:<verb>` skills — e.g. `/tinkerdown:save` in Phase 6.)
+
+**Design refs:**
+- § Architecture (the generate flow) · Phase 1–2 Learn (manifest + operation summary)
+- `skills/tinkerdown/SKILL.md` + `reference.md` + `examples/*` (existing skill format + few-shot corpus; note the mandated "Prompt to Generate This" sections), `docs/llm-system-prompt.md` (285-line seed prompt), `docs/llms.txt`
+- `internal/server/playground.go` (`ParseString`, `PlaygroundSession`, TTL) — the ephemeral serve substrate
+
+**Audit:**
+- [ ] **Design-ref completeness check.**
+- [ ] Decide the skill's generation context: reuse `docs/llm-system-prompt.md` + `reference.md` + the `examples/` corpus + the loaded manifest (approved sources/actions/style). Confirm the corpus's few-shot pairs are current post-M0.
+- [ ] Decide ephemeral serve mechanism: the existing `serve` (writes a temp file) vs. the disk-free `playground` render path. Prefer whichever is faster + cleaner for throwaway. Measure.
+- [ ] Define the validate loop's stop condition + max iterations (deterministic self-correction budget).
+
+**Implementation:**
+- [ ] `skills/tinkerdown/SKILL.md` — instructs Claude Code to: (1) load the manifest (approved sources/actions **+ the style guide: theme + `site_css` + `style-guide.md`**) + reference + corpus, (2) emit `app.md` using only approved sources/actions + the constrained `lvt-*` vocabulary, conforming to the house style, (3) run `tinkerdown validate` (policy lint enforced) and self-correct on diagnostics until clean, (4) run `validate --summary`; **if the app is privileged**, present the operation summary and get the operator's OK (read-only → skip straight through), (5) `serve` (ephemeral).
+- [ ] Bundle the generation context assets (reference + few-shot corpus) with the skill; keep them the single source of truth (don't fork `reference.md`).
+- [ ] Redirect the phantom `/new-app` etc. references (from M0 Phase 1) to this real skill.
+
+**Acceptance criteria:**
+- [ ] **Simplify:** prose + asset pass.
+- [ ] **Unit/structural:** a test asserting the skill bundle is well-formed + the referenced assets exist (mirror `skill_examples_test.go`).
+- [ ] **Integration:** dry-run the skill's validate loop against a deliberately-broken `app.md` — confirm the diagnostics let it converge to clean.
+- [ ] **E2E:** covered in Phase 5 (full generate→serve).
+
+**Learn:** 4 prompts.
+
+#### Phase 4 (M1) — The PII / data-export access-approval reference app (~1 session)
+
+> **Goal at end:** a locally-runnable fixture (synthetic-PII SQLite + requests store + audit log + optional fixture git repo) against which the generated console renders a pending-requests queue and Approve/Deny work end-to-end.
+
+**Design refs:**
+- § The reference demo (the full console spec: queue fields, Approve/Deny outputs, intake, local-runnable E2E) · **§ Appendix B — the target `tinkerdown.yaml` + golden `app.md` this phase authors**
+- `internal/source/{sqlite.go,markdown.go}` (queue + audit sources), `config.Action` `confirm:` + typed params (`config.go:296`), `execargs` typed-form primitive (`execargs_e2e_test.go`), `WritableSource`/`SQLExecutor` (`internal/source/source.go`)
+- `auto_tables.go` (queue table + Add form inference), `styling.site_css` (house style)
+
+**Audit:**
+- [ ] **Design-ref completeness check.**
+- [ ] Build the fixtures: a synthetic-PII SQLite (harmless fake rows), a seeded requests-queue store (a few pending requests with all fields), an audit-log writable store, and — if the optional grant-PR path is in scope — a fixture git repo + confirm `gh` is authenticated.
+- [ ] Confirm the scoped-export action is genuinely *bounded* (parameterized query with a row cap) — the whole point is the approver grants *scoped*, not blanket, access.
+- [ ] Confirm the request-intake path (self-serve form vs webhook) — pick the simplest that's demoable (likely the app's own Request form via a writable source).
+
+**Implementation:**
+- [ ] Fixture data + the demo `tinkerdown.yaml` manifest (approved: requests source, scoped-export action, audit-append, deny action, optional grant-PR action; house style).
+- [ ] The reference `app.md` (this is the *golden* generated artifact — hand-authored here as the target the skill should be able to produce): queue table with all decision-context fields + a scoped-query preview; Approve/Deny `confirm:` actions; a Request-access form.
+- [ ] Approve action → runs the scoped export against fixture PII DB + appends an audit record (approver/time/scope/reason/TTL); optional → opens a real grant PR via `gh`.
+- [ ] Deny action → status→denied + reason + audit record.
+
+**Acceptance criteria:**
+- [ ] **Simplify:** `/simplify` the diff.
+- [ ] **Unit:** action handlers — scoped export respects the row cap + filter; audit append is durable + complete; deny records reason.
+- [ ] **Integration:** run the reference app.md via `serve`; drive Approve/Deny against fixtures; assert audit rows + (optional) a real PR via `gh pr list`.
+- [ ] **E2E (chromedp, four-channel):** load the served console; render the queue; click Approve (through the `confirm:` dialog); assert the export ran + audit row appended + UI reflects new state (server-authoritative, no drift); click Deny; capture console + server stderr + WS frames + HTML + screenshot.
+
+**Learn:** 4 prompts.
+
+#### Phase 5 (M1) — End-to-end acceptance: generate → review → live in ~30s (~1 session)
+
+> **Goal at end:** `/tinkerdown "a console to approve PII / data-export access requests"` produces a validated console, surfaces the operation summary, and serves a live UI within ~30s — the whole-plan acceptance test — with generation-reliability + latency recorded.
+
+**Design refs:**
+- § Verification (M1 acceptance) · all M1 phase Learn outputs · § Risks ("30s" is a generation-reliability target)
+
+**Audit:**
+- [ ] **Design-ref completeness check.**
+- [ ] Confirm every prior M1 phase is closed (manifest, lint+summary, skill, reference fixtures). Surface any incomplete Learn.
+- [ ] Define the measurement: LLM-generation wall-time vs. framework leg (validate + parse + first SSR + WS upgrade); framework leg target = low tens of ms.
+
+**Implementation:**
+- [ ] Run the full skill flow against the demo manifest; iterate the generation context (reference/corpus/manifest describes-metadata) until first-pass validity is reliably high — the generation-context assets are the lever (per § Risks).
+- [ ] Record: first-pass validate-clean rate across N runs; median generate→serving latency; framework-leg latency.
+- [ ] **Visual spec + conformance.** Author a one-screen visual spec for the console (a `mockups/pii-console.html` + screenshot — the *visual* target, per skeleton convention 11, scoped to this single generated screen; **created at execution time, not in plan mode**). Acceptance includes a visual-regression check of the served console against it, and a house-style-conformance check (the generated app used the manifest theme + `site_css` + preferred components — not off-brand free-form HTML).
+- [ ] Capture a demo transcript/screencast of the acceptance test for the README reframe.
+
+**Acceptance criteria:**
+- [ ] **Simplify:** N/A (integration) — but fold any skill-asset cleanups.
+- [ ] **Unit/Integration:** the reliability + latency harness runs and reports.
+- [ ] **E2E (chromedp, four-channel):** the whole-plan test — generate → review → live console; Approve runs export+audit (+ optional PR); verify server-authoritative state; framework leg within target; **visual-regression + house-style conformance** vs. the one-screen spec; screenshot.
+
+**Learn:** what surprised us / plan drift / feed-forward to M2's Audit (does the generation loop need the upstream `Validate()` API's richer diagnostics — quantify where the real parser's feedback was insufficient) / new-or-changed risks.
+
+#### Phase 6 (M1) — Capture the PII workflow as a reusable skill + the `/tinkerdown:save` capability (~1 session)
+
+> **Goal at end:** (a) the PII / data-export approval workflow re-runs from a durable **`skills/pii-access-approval/`** skill in seconds (not by re-generating); and (b) the namespaced **`/tinkerdown:save`** sub-skill exists — **invoked on the user's request to persist** an ephemeral UI (opt-in; not automatic) — distilling that session into a well-formed skill, operationalizing convention 13.
+
+**Design refs:**
+- § Skills delivered · LLM session guide convention 13 · Phase 3–5 Learn (the generate skill + golden `app.md` + fixtures)
+- `skills/tinkerdown/{SKILL.md,reference.md,examples/,scripts/validate.sh}` (the Anthropic skill shape to mirror), `skill_examples_test.go` (the structural contract: frontmatter, `lvt` block, "How It Works", "Prompt to Generate This")
+- Anthropic Claude skill-authoring best practices: progressive disclosure (concise `SKILL.md` + deep `reference.md`), explicit `name`/`description`/`triggers`, bundled examples + scripts, clear when-to-use, a validation step
+
+**Audit:**
+- [ ] **Design-ref completeness check.**
+- [ ] Decide the boundary between the *generic* `/tinkerdown` and the *specific* `skills/pii-access-approval/`: the latter bundles the manifest + golden `app.md` + fixtures + serve steps so re-running is near-instant and needs no LLM generation at all. Confirm it degrades cleanly if a team's data differs (parameterize the dataset/queue names).
+- [ ] `/tinkerdown:save` is a **namespaced sub-skill** (naming decided — see § Skills delivered + Appendix A). Define what it extracts from a conversation (the final `app.md`, the manifest deltas, the approve/deny wiring, the validate loop) and how it maps to `SKILL.md` + `reference.md` + `examples/`.
+- [ ] Confirm the generated skills pass the existing `skill_examples_test.go`-style structural contract (or an adapted one).
+
+**Implementation:**
+- [ ] `skills/pii-access-approval/` — `SKILL.md` (triggers: PII access, data-export approval, access request queue) + `reference.md` + `examples/` (the golden console) + the manifest + fixtures + a one-command serve. Re-running it stands up the working console in seconds.
+- [ ] `/tinkerdown:save` (namespaced sub-skill): given a completed generation session the user chose to persist, emit a well-formed skill (progressive disclosure, frontmatter, bundled example + validate step) following the Anthropic shape. Dogfood it by using it to (re)produce `skills/pii-access-approval/` from the Phase-4/5 session.
+- [ ] A short authoring guide (or extend `docs/guides/ai-generation.md`) documenting "ephemeral by default; persist on request by capturing the session as a skill via `/tinkerdown:save`" — the convention-13 doc.
+
+**Acceptance criteria:**
+- [ ] **Simplify:** `/simplify` + skill-asset pass.
+- [ ] **Unit/structural:** the two new skills pass the structural contract (frontmatter, required sections, referenced assets exist); a captured skill is well-formed.
+- [ ] **Integration:** run `skills/pii-access-approval/` end-to-end → working console in seconds; run skill-capture against the Phase-5 session → a valid skill that itself reproduces the console.
+- [ ] **E2E (chromedp, four-channel):** the re-run-from-skill path serves the console live; Approve/Deny work; screenshot.
+
+**Learn:** what surprised us / plan drift / feed-forward to M5's Audit (the "save if the need recurs" gallery in M5 should store *skills*, not just `app.md` — connect the capture capability to the gallery) / new-or-changed risks.
+
+---
+
+### M2–M5 phases — outline only (expanded at milestone kickoff per convention 9)
+
+The *what* + *why* of each is in § Roadmap; here is only each milestone's **kickoff design checklist** — the sections to write into full phase blocks when that milestone starts (per convention 9):
+
+- **M2** (upstream `livetemplate` + tinkerdown): the `Validate(templateText)` API surface; the attribute-allowlist source-of-truth; how the skill's loop consumes richer diagnostics.
+- **M3** (upstream `livetemplate`): the `WithActionPolicy` hook signature; the introspection surface; how the manifest maps to runtime policy.
+- **M4** (upstream `lvt/components` + tinkerdown): the component list + options; how the skill's reference advertises them; the design-token/enforced-component style-guide schema.
+- **M5** (tinkerdown + `client`): the persistence model (stores captured *skills*, not just `app.md`); gallery UX; the external-embed handshake protocol; **substrate extensibility** — writable WASM sources (#216) + custom Go+WASM source types (#222), and how a team-authored source enters the *approved* set.
+
+---
+
+## Tech stack & version pins
+
+The plan hinges on pins (M0 is a version bump); this is the canonical table. **Targets are "latest tagged at execution time"** — the version numbers below are the plan-authoring floor; upstream keeps releasing, so M0 Phase 0's Audit re-checks and bumps to the current latest (not these).
+
+| Piece | Current | Target (latest at execution; floor shown) | Where |
+|---|---|---|---|
+| `github.com/livetemplate/livetemplate` | **v0.10.0** | latest tag (≥ **v0.16**) | `go.mod:11` — M0 Phase 0 |
+| `@livetemplate/client` | old (≈0.11.x) | latest tag (≥ **0.16**) | embedded/pinned client asset — M0 Phase 0 |
+| `github.com/livetemplate/lvt/components` | pseudo `2026-02-28` | latest tag | `go.mod:12` — M0 Phase 0 |
+| Go | 1.26.x | unchanged | `go.mod` |
+| Data sources | sqlite (`modernc.org/sqlite`), pg, rest, graphql, file, csv/json, markdown, exec, wasm, computed | unchanged | `internal/source` |
+| E2E | chromedp (headless Chrome, four-channel capture) | unchanged | `*_e2e_test.go` |
+| Demo externals | `gh` CLI (grant PR), fixture git repo, synthetic-PII SQLite | — | M1 Phase 4 fixtures |
+| Generator | **Claude Code** (the skill; no LLM in the Go binary) | — | `skills/tinkerdown` |
+
+---
+
+## Plan-skeleton deltas (conscious deviations from the CLAUDE.md "Writing plan files" skeleton)
+
+This plan follows the skeleton's load-bearing parts (LLM session guide, per-phase Audit/Implementation/Acceptance/Learn, progress tracker, delivery protocol, risks, decisions log) and **consciously deviates** where the skeleton's shape (designed for a 10-milestone SaaS) would be cargo-culting for a thin generation-tool reframe:
+
+- **No multi-screen "Product flow & UI requirements" section.** The deliverable is *one generated console*, not a product with many screens. Its visual spec is a single hand-authored golden `app.md` (Phase 4) + a one-screen mockup + visual-regression check (Phase 5) — the applicable slice of **skeleton** convention 11 (end-state UI mockups).
+- **`## Mn design` sections folded into the phases.** For milestones this small, a separate design section per milestone duplicates the phase blocks. M2–M5 keep the skeleton's outline-only convention (expanded at kickoff, convention 9); M1's design lives in § The reference demo + the phase blocks.
+- **No Deployment section.** Tinkerdown is a CLI/library, not a deployed service; there is no `fly.toml` analog. Release mechanics (tagged upstream releases per **session-guide** convention 11) are the only "deploy" and live in the session guide.
+
+---
+
+## Verification
+
+**Per-phase:** `go test ./...`; `go test -tags=browser ./...`; `tinkerdown validate` on any changed example/doc snippet; the four-channel e2e capture.
+
+**M1 acceptance (the whole-plan test):**
+1. In a repo with the demo workspace manifest, run the Claude Code skill `/tinkerdown "a console to approve PII / data-export access requests"`.
+2. Confirm the **operation summary** lists exactly the operations the UI will run (reads the requests store, runs the *scoped* export query against the fixture PII DB, appends audit records, and — if in scope — `gh pr create`), with risk flags.
+3. Since the console is privileged, OK the operation summary → the UI is serving live within ~30s (measure: LLM gen time vs. framework leg; framework leg must be low tens of ms).
+4. In the browser: pending requests render with full decision context (requester, dataset, scope/query-preview, justification, TTL); **Approve** runs the scoped export + appends a durable audit record (verify the audit row; and a real PR via `gh pr list` if the grant-PR path is on); **Deny** records a reason; state is server-authoritative (no drift).
+5. Record generation first-pass validity rate across N runs (the real "30s" target is generation reliability, since the framework leg is near-instant).
+6. **Re-run from the captured skill:** invoke `skills/pii-access-approval/` and confirm the same working console stands up in **seconds** with no LLM generation — the "save it, the need recurs" path (convention 13 / M1 Phase 6).
+
+---
+
+## Risks & open questions
+
+- **[M1] Reference app locked = PII / data-export access-approval console** (§ The reference demo). Rejected alternatives (K8s access-grant-via-PR, feature-flag approval) + why in Appendix A.
+- **[M1] Scoped-export must be genuinely bounded.** The demo's whole point is *scoped* access (row cap + filter), not blanket — a scoped-export action that quietly returns everything defeats the friction-removal story. Phase 4 Audit gates this.
+- **[M0] Multi-minor upstream bump may ripple.** Six+ minors at plan-authoring time and still growing — Phase 0 targets the *latest* tag at execution, so the change surface is wider than the plan-time numbers. Kebab action routing, comment stripping, and verbatim dynamic content can break parser/golden tests; treat Phase 0 as a gated phase, not a preamble.
+- **[M1] "30 seconds" is a generation-reliability target, not a framework-latency target.** The framework leg is tens of ms; the budget is spent on the LLM. M1 must treat the generation-context assets (manifest + style guide + attribute reference + few-shot corpus) as first-class — that's what makes generation one-shot.
+- **[M1] Generated-app safety in M1 rests on the manifest + policy lint + proportional operation review + `confirm:` + `--allow-exec`, not yet on runtime `WithActionPolicy` (M3).** Acceptable for the demo with a human approver in the loop; M3 hardens it. State this explicitly so M1 isn't mistaken for production-grade authz.
+- **[cross-repo] Upstream-first milestones (M2–M4) require tagged releases before tinkerdown can pin them** — adds release overhead per **session-guide** convention 11.
+
+---
+
+## Appendix A — Decisions log `[skip on phase execution]`
+
+- **Demo-first over upstream-first** (operator decision): M1 ships on existing primitives; upstream hardening (Validate API, WithActionPolicy, introspection, components) sequenced as M2–M4. Rejected upstream-first because it pushes the acceptance test several milestones out and front-loads 3-repo cross-cutting work.
+- **Claude Code skill over a CLI-embedded LLM** (operator decision): the generator is Claude Code itself; tinkerdown stays a pure Go validate/serve tool with no API-key/network dependency. A standalone `tinkerdown generate` CLI is a possible later addition, not M1.
+- **Skill command name — DECIDED (operator, in prereview): the generator is the primary default skill `/tinkerdown`.** Generation is what you get by default (`/tinkerdown "<intent>"`); the existing `skills/tinkerdown/` skill is *extended* so generation is its default action (not a separate `/tinkerdown-generate`). Every other tinkerdown capability is **namespaced** `/tinkerdown:<verb>` (e.g. `/tinkerdown:save` for persist/capture). Captured workflow skills (e.g. `skills/pii-access-approval/`) are their own standalone skills. A future standalone `tinkerdown generate` CLI remains a possible later addition, not M1. *(Rejected: a separate `/tinkerdown-generate` skill — it splits the primary action off the default namespace.)*
+- **Manifest = extend `tinkerdown.yaml`, not a new file** (recommended): reuse the existing project-config surface (`SourceConfig`, `AuthConfig`, `Action`, `StylingConfig`) rather than introduce a parallel policy file. To be confirmed in M1 Phase 1 Audit.
+- **Reference-demo alternatives rejected** (operator picked PII / data-export approval; research-grounded):
+  - *Break-glass K8s JIT access → PR* — **rejected.** Research finding: real JIT tools (Sym, Teleport, Indent, ConductorOne) deliberately **bypass git** and provision directly with auto-expiry because incident-time speed beats a merge cycle. "JIT→PR" is the niche/awkward case (searches came back empty — the absence *is* the finding).
+  - *Durable K8s access-grant → PR (GitOps)* — real and mainstream, but narrower than PII-export friction and less universal; kept as the optional grant-PR variant of the Approve action, not the headline.
+  - *Feature-flag / config change approval → PR* — the research's *tightest* "approval→git" fit with no speed tension; strong runner-up, but less tied to the high-stakes compliance friction the operator prioritized.
+  - **PII / data-export access approval — CHOSEN**: highest-stakes real friction (analyst/support needs PII/prod-DB access; today = Slack-ping + hand-run query + weak audit + compliance exposure). Approval output is a durable, auditable, scoped grant + audit record (git-native grant PR optional). Exercises the full reframe.
+
+---
+
+## Appendix B — Expected output (worked example) `[skip on phase execution]`
+
+The two concrete artifacts of the M1 demo. **(1)** is authored once by the team (the workspace manifest); **(2)** is what `/tinkerdown` *generates and serves* for the PII console — the golden `app.md` (M1 Phase 4). Linked from § Deliverables + § The reference demo. Syntax is illustrative (final keys settle in M1 Phase 1–2 Audit); the `generation:` block + `describes:`/`row_cap` are the plan's proposed manifest extensions, marked inline.
+
+### (1) `tinkerdown.yaml` — the workspace manifest (authored once)
+
+```yaml
+# Approved data sources + named actions an LLM may wire up. Everything else is off-limits.
+sources:
+  access_requests:                 # the pending/approved/denied queue
+    type: sqlite
+    db: ./data/access.db
+    table: access_requests
+    readonly: false
+  audit_log:                       # append-only decision trail
+    type: sqlite
+    db: ./data/access.db
+    table: audit_log
+    readonly: false
+  datasets:                        # the catalog of requestable datasets (read-only)
+    type: sqlite
+    db: ./data/access.db
+    table: datasets
+    readonly: true
+
+generation:                        # ← proposed extension (Phase 1): the approved-for-generation surface
+  approved_sources: [access_requests, audit_log, datasets]
+  approved_actions: [approve_export, deny_request]
+
+actions:                           # named, confirm:-gated actions (existing config.Action surface)
+  approve_export:
+    type: sql
+    confirm: "Approve {{.requester}}'s access to {{.dataset}} — run a bounded export ({{.row_cap}} rows) + write audit?"
+    describes: "Runs a bounded SELECT on the approved dataset, writes the export artifact, appends an audit row, marks the request approved."   # ← proposed (Phase 2): feeds the operation summary
+    params: [request_id, requester, dataset, row_cap, reason, approver, ttl]
+    sql: |
+      INSERT INTO audit_log (ts, approver, requester, dataset, decision, scope, reason, ttl)
+        VALUES (datetime('now'), :approver, :requester, :dataset, 'approved',
+                :dataset || ' LIMIT ' || :row_cap, :reason, :ttl);
+      UPDATE access_requests SET status = 'approved', approver = :approver
+        WHERE id = :request_id;
+      -- the bounded export itself runs as a scoped, row-capped SELECT (Phase 4)
+  deny_request:
+    type: sql
+    confirm: "Deny {{.requester}}'s request for {{.dataset}}?"
+    describes: "Marks the request denied with a reason and appends an audit row. No data access granted."
+    params: [request_id, approver, deny_reason]
+    sql: |
+      UPDATE access_requests SET status = 'denied', approver = :approver
+        WHERE id = :request_id;
+      INSERT INTO audit_log (ts, approver, requester, dataset, decision, reason)
+        SELECT datetime('now'), :approver, requester, dataset, 'denied', :deny_reason
+        FROM access_requests WHERE id = :request_id;
+
+styling:                           # optional — omit for sane PicoCSS/theme defaults
+  theme: clean
+  site_css: /assets/house.css
+```
+
+### (2) The generated `app.md` — what `/tinkerdown` emits + serves (the golden artifact)
+
+````markdown
+---
+title: PII / Data-Export Access Approval
+# sources + actions are the APPROVED ones from tinkerdown.yaml, referenced by name.
+---
+
+# PII / Data-Export Access Approval
+
+Pending requests for access to sensitive data. Review the **scope** before you act:
+**Approve** runs a bounded export + writes a durable audit record; **Deny** records a reason.
+
+## Pending requests {#pending}
+
+```lvt
+<table lvt-source="access_requests"
+       lvt-columns="requester:Requester,dataset:Dataset,scope:Scope,reason:Justification,ttl:TTL,ticket:Ticket"
+       lvt-filter
+       lvt-actions="Approve,Deny"
+       lvt-empty="No pending requests 🎉">
+</table>
+```
+
+<!-- Approve/Deny are wired to the approved `approve_export` / `deny_request` actions;
+     each pops the manifest's confirm: dialog before running. -->
+
+## Request access {#request}
+
+```lvt
+<form name="RequestAccess" lvt-source="access_requests">
+  <input name="requester" placeholder="you@company.com" required>
+  <select name="dataset" lvt-source="datasets" lvt-value="id" lvt-label="name"></select>
+  <input name="reason" placeholder="Business justification" required>
+  <input name="ttl" placeholder="e.g. 24h" value="24h">
+  <input name="ticket" placeholder="TICKET-123">
+  <button type="submit">Request access</button>
+</form>
+```
+
+## Recent decisions (audit) {#audit}
+
+```lvt
+<table lvt-source="audit_log"
+       lvt-columns="ts:When,approver:Approver,requester:Requester,dataset:Dataset,decision:Decision,scope:Scope"
+       lvt-empty="No decisions yet">
+</table>
+```
+````
+
+**Operation summary the operator OKs before this serves** (privileged → surfaced; from `tinkerdown validate --summary`):
+`access_requests` (read+write), `audit_log` (write), `datasets` (read), action `approve_export` → **runs a bounded SQL export + writes audit** (privileged), action `deny_request` → writes audit. No `exec`/network unless the optional grant-PR variant adds `gh pr create`.
+
+---
+
+## Appendix C — Competitive landscape `[skip on phase execution]`
+
+*(Data-backed support for § Context "Where existing tools fall short". Capabilities as of 2025–2026; many tools added AI features recently — re-verify pricing/features at execution. Sources at the end.)*
+
+**The whitespace, precisely.** No single tool does all four of **{LLM-generates-bespoke-UI · governed/approved data sources · ephemeral/disposable · editable non-opaque source}**. The two closest near-misses and the axis each fails:
+- **Superblocks Clark — 2/4** (strongest governance in market): LLM-generation *with* governance (design system, permissions, SSO, audit auto-applied), but output is a **persistent** production app in **freeform React** → fails *ephemeral* + *constrained-vocabulary*. Tinkerdown's line vs Clark is ephemerality + the single-file constrained vocabulary, **not** governance.
+- **Anthropic generative UI / Claude Cowork + MCP — 3/4**: generation + ephemeral + (since Apr 2026) live data via MCP, but **no approved-sources policy gate** (MCP connects to whatever is wired) + emits **opaque HTML/JS** you re-prompt. Fails *governance gate* + *editable non-opaque source*.
+
+Tinkerdown's genuinely unique combination: the **constrained `lvt-*` single-file vocabulary**, **live server-authoritative WebSocket data**, and **the governance gate + ephemeral-by-default** together.
+
+**① Internal-tool builders (low-code) — premise: build & *maintain* one durable app.**
+
+| Tool | AI capability | OSS / price | Gap vs the thesis |
+|---|---|---|---|
+| **Retool** | Retool AI + hourly-billed AI Agents bolted on | Commercial; Team $10, Business $50 /user/mo | Maintains one persistent big app; AI assists editing, not throwaway governed UIs |
+| **Superblocks (Clark)** | Clark: "first AI agent to build internal enterprise apps" w/ auto governance | Commercial ($60M funded) | **Closest on governance (2/4)** but persistent app + freeform React — not ephemeral, not constrained-vocabulary |
+| **Appsmith** | Limited AI code assist | Apache-2.0 self-host; Business $15/user/mo | Human-built catch-all app; no generate-and-discard, no per-generation policy |
+| **ToolJet** | NL → full app (PRD+UI+DB+CRUD) | AGPL self-host; paid $19/builder/mo | Generation targets a *kept* app; no ephemeral/governed-per-generation model; freeform JS |
+| **Budibase / Windmill / UI Bakery** | Agents / code-gen / NL app generator | OSS self-host + paid tiers | Durable maintained apps; AI assists authoring, not disposable governed UIs |
+| **Airplane** | — | **Acquired by Airtable Dec 2023; sunset Mar 2024** | Defunct — historical data point, not a live competitor |
+
+**② AI UI/app generators (prompt → code) — premise: emit code from a prompt.**
+
+| Tool | What it emits | OSS / price | Gap vs the thesis |
+|---|---|---|---|
+| **v0 (Vercel)** | Production React (Next/Tailwind/shadcn) | Commercial; free $5, Pro $20/mo | Opaque React (re-prompt to change); no live binding to *your* sources; no governance; no constrained vocab |
+| **bolt.new / Lovable / Replit Agent** | Full-stack app in freeform code | Commercial; ~$20–25/mo+ | Opaque code, re-prompt workflow; no approved-source policy; persistent, not governed-ephemeral |
+| **Val Town** | Editable "vals" (code); save≈deploy ~100ms; MCP | Commercial; free tier, Pro $100/yr | Emits *editable code* but ungoverned/freeform; no approved-source policy, no constrained declarative vocab |
+| **Claude Artifacts** | Interactive HTML/JS in a side panel | Consumer/Pro sub | Sandbox **blocks external API/DB calls** (no live data to your sources); opaque code; no policy gate |
+| **ChatGPT Canvas** | Code in a side editor (doesn't run the app) | Consumer/Pro sub | No live data, no governance, no constrained vocabulary |
+
+**③ Declarative data-app frameworks (lighter code) — premise: human writes & maintains it.**
+
+| Tool | How it works | OSS | Gap vs the thesis |
+|---|---|---|---|
+| **Streamlit / Gradio** | Python script / function → data app | Apache-2.0 | Human-authored & maintained; not LLM-emitted-and-discarded; no generate-on-demand governance |
+| **Reflex / Marimo / Anvil** | Pure-Python full-stack / reactive notebook | OSS | Developer-maintained app; not disposable, not LLM-authored-per-use |
+| **Evidence.dev / Observable / Datasette / Quarto** | SQL-in-markdown / JS data site / SQLite UI / polyglot docs | OSS | Human-maintained; not ephemeral or LLM-emitted; no per-generation policy |
+
+**④ The malleable / disposable / on-demand-software lineage (the conceptual frontier tinkerdown productizes).**
+
+| Work | What it argues | Where it stops short |
+|---|---|---|
+| **Ink & Switch — *Malleable Software*** (2025) | Reshape tools at point of use; "tools not apps"; AI coding promising but not sufficient alone | Vision + prototypes, not a governed live-data product; no policy gate |
+| **Geoffrey Litt — malleable software in the age of LLMs** | LLMs enable personal, adaptable software | Conceptual lineage; no constrained-vocabulary governed-data implementation |
+| **Thariq Shihipar — *Unreasonable Effectiveness of HTML*** (2026) | HTML > Markdown as agent output: interactive, shareable artifacts | Argues the *format*; no live server-authoritative data, no approved-sources policy, no constrained vocab |
+| **Anthropic generative UI / Cowork + MCP** (2026) | Living HTML+JS widgets, live via MCP | **3/4** — but no approved-sources policy gate + opaque emitted source |
+
+**Sources** (re-verify at execution): Retool [pricing](https://retool.com/pricing); Superblocks Clark [announcement](https://www.superblocks.com/blog/announcing-clark-ai), [launch (BusinessWire)](https://www.businesswire.com/news/home/20250520713435/en/); Appsmith [pricing](https://www.appsmith.com/pricing); ToolJet [comparison](https://blog.tooljet.com/appsmith-vs-budibase-vs-tooljet/); Windmill [pricing](https://www.windmill.dev/pricing); UI Bakery [pricing](https://uibakery.io/pricing); Airplane [sunset (Failory)](https://newsletter.failory.com/p/airplanes-last-flight); v0/Bolt/Lovable [comparison](https://www.digitalapplied.com/blog/v0-lovable-bolt-ai-app-builder-comparison); Replit [effort-based pricing](https://replit.com/blog/effort-based-pricing); [Val Town](https://www.val.town/pricing); Claude generative UI vs Canvas vs Artifacts [(MindStudio)](https://www.mindstudio.ai/blog/what-is-claude-generative-ui-vs-canvas-artifacts), [live dashboards (VentureBeat)](https://venturebeat.com/data/anthropics-claude-code-artifacts-update-brings-live-shared-dashboards-and-interactive-workspaces-to-enterprises); [Streamlit vs Gradio](https://www.modern-datatools.com/compare/streamlit-vs-gradio); [Evidence](https://docs.evidence.dev/); Ink & Switch [Malleable Software](https://www.inkandswitch.com/essay/malleable-software/); Geoffrey Litt [LLM end-user programming](https://www.geoffreylitt.com/2023/03/25/llm-end-user-programming.html); Simon Willison on [the HTML piece](https://simonwillison.net/2026/May/8/unreasonable-effectiveness-of-html/).
