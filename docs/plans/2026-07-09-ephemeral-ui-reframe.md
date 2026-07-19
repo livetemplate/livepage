@@ -529,13 +529,21 @@ The *what* + *why* of each is in § Roadmap; here is only each milestone's **kic
 - **M4** (upstream `lvt/components` + tinkerdown): the component list + options; how the skill's reference advertises them; the design-token/enforced-component style-guide schema.
 - **M5** (tinkerdown + `client`): the persistence model (stores captured *skills*, not just `app.md`); gallery UX; the external-embed handshake protocol; **substrate extensibility** — writable WASM sources (#216) + custom Go+WASM source types (#222), and how a team-authored source enters the *approved* set.
 
-#### Standing Audit item for every upstream-bumping milestone (M2–M5) — artifact provenance
+#### Standing Audit item for milestones that bump `@livetemplate/client` (M2, M3, M5) — artifact provenance
 
 **M0 Phase 0 closed the #295 mechanism, not the class** (see its Learn + § Risks). `make build` now runs `npm ci`, so the committed bundle can no longer be built from stale `node_modules`. What no install-time check can catch is a bundle that is correct-by-construction yet **behaviorally** regressive — a genuine upstream client regression, or a server↔client wire mismatch (livetemplate exports `ClientVersion` precisely because there is no runtime handshake). Only running the live UI catches that, and **CI does not run the live UI**: it excludes the e2e suite twice over (`-tags=ci` *and* `-skip='E2E|e2e'`).
 
-So each of M2–M5 pins a new upstream release (convention 11) and therefore regenerates this artifact — **M5 certainly**, since it ships a client-side feature (the embed handshake). M1 does not; it builds on existing primitives, which is the breathing room that makes deferring this reasonable rather than negligent.
+**The trigger is a bump to `@livetemplate/client` in `client/package.json`, not "an upstream bump" generally** — the two are easy to conflate and only one regenerates the bundle:
 
-Before pinning a new upstream release, the executing session must:
+| Milestone | Upstream it bumps | Regenerates the client bundle? |
+|---|---|---|
+| **M1** (the demo) | none — builds on existing primitives | **No.** This is the breathing room that makes deferring [#297](https://github.com/livetemplate/tinkerdown/issues/297) reasonable rather than negligent. |
+| **M2** `Validate()` API | Go `livetemplate` | **Yes, transitively** — `ClientVersion` is a wire contract with no runtime handshake, so a server bump obliges matching the client (exactly what M0 Phase 0 did: server v0.19.1 → client 0.18.2). |
+| **M3** `WithActionPolicy` | Go `livetemplate` | **Yes, transitively** — same wire-contract reasoning. |
+| **M4** component vocabulary | Go `lvt/components` | **No.** `github.com/livetemplate/lvt/components` is a server-side Go module consumed by `internal/server/websocket.go` and `internal/runtime/state.go`; it appears nowhere in `client/src` or `client/package.json`. Skip this checklist unless M4 also bumps `@livetemplate/client` for some client-side affordance a new component needs. |
+| **M5** embed handshake | `client` | **Certainly** — it ships a client-side feature. |
+
+When the table says yes, the executing session must:
 - [ ] Re-read § Risks → *Committed-artifact provenance* and M0 Phase 0's Learn before touching `client/package.json` or `go.mod`.
 - [ ] Verify the regenerated bundle **directionally**, not just that it differs from HEAD — a downgrade differs too. Pick a marker tied to a known changelog entry in the target version and confirm it appeared. (M0 Phase 0 used `ctrlKey` 1→5 for a v0.18.2 keydown fix; note this is a *proxy* for one fix, not whole-diff verification — diff against a clean `npm ci` build when in doubt.)
 - [ ] Match the client to livetemplate's declared `ClientVersion`, **not** to whatever npm calls `latest`.
