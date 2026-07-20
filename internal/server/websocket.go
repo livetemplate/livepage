@@ -321,7 +321,7 @@ func (h *WebSocketHandler) initializeSourceBlocks() {
 // approved name mean one thing regardless of what the page says.
 func (h *WebSocketHandler) getEffectiveSource(name string) (config.SourceConfig, bool) {
 	// Tier 1: an approved source is pinned to its manifest definition.
-	if h.config.IsManifest() && h.config.ApprovedSource(name) {
+	if h.config.ApprovedSource(name) {
 		if src, ok := h.config.Sources[name]; ok {
 			if h.page != nil && h.page.Config.Sources != nil {
 				if _, shadowed := h.page.Config.Sources[name]; shadowed {
