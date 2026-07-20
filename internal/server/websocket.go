@@ -304,9 +304,37 @@ func (h *WebSocketHandler) initializeSourceBlocks() {
 	}
 }
 
-// getEffectiveSource looks up a source by name, checking page-level sources first
-// (from frontmatter), then falling back to site-level sources (from tinkerdown.yaml).
+// getEffectiveSource looks up a source by name.
+//
+// Precedence, highest first:
+//
+//  1. A site-level source named in the project's `generation.sources` approved set.
+//     Approved definitions are *pinned*: a page cannot redefine them.
+//  2. Page-level sources (from frontmatter).
+//  3. Site-level sources (from tinkerdown.yaml).
+//
+// Tiers 2 and 3 are the long-standing rule and are unchanged. Tier 1 exists only when
+// the project declares a `generation:` block, and it closes a hole that block would
+// otherwise have: because frontmatter can declare its own sources, a generated page
+// could reference an approved name while defining that name as something the operator
+// never approved — passing any check that reasons about names alone. Pinning makes an
+// approved name mean one thing regardless of what the page says.
 func (h *WebSocketHandler) getEffectiveSource(name string) (config.SourceConfig, bool) {
+	// Tier 1: an approved source is pinned to its manifest definition.
+	if h.config.ApprovedSource(name) {
+		if src, ok := h.config.Sources[name]; ok {
+			if h.page != nil && h.page.Config.Sources != nil {
+				if _, shadowed := h.page.Config.Sources[name]; shadowed {
+					// Surfaced rather than silently dropped: a generating agent that
+					// tries this needs to see why its definition had no effect.
+					log.Printf("[WS] source %q is approved in tinkerdown.yaml and cannot be "+
+						"redefined by page frontmatter; using the approved definition", name)
+				}
+			}
+			return src, true
+		}
+	}
+
 	// Check page-level sources first (from frontmatter)
 	if h.page != nil && h.page.Config.Sources != nil {
 		if src, ok := h.page.Config.Sources[name]; ok {
@@ -1204,11 +1232,32 @@ func (h *WebSocketHandler) TracksSourceFile(filePath string) bool {
 	return false
 }
 
-// getPageActions converts page-level actions from parser types to config types.
-// Returns nil if no actions are defined.
+// getPageActions builds the action set a page may invoke, converting page-level
+// actions from parser types to config types. Returns nil if the page can invoke none.
+//
+// Precedence mirrors getEffectiveSource:
+//
+//  1. Site-level actions named in `generation.actions` — pinned, so a page cannot
+//     redefine an approved action to do something else.
+//  2. Page-level actions (from frontmatter).
+//
+// Tier 1 is also what makes approved actions *reachable*. Actions have never had the
+// site-config fallback sources have: a page could only invoke actions it declared in
+// its own frontmatter. That left `generation.actions` inert — it named a surface a
+// generated page had no way to use, forcing it to declare those actions itself, which
+// is precisely what approval exists to prevent.
+//
+// The fallback is deliberately limited to *approved* actions rather than every action
+// in tinkerdown.yaml. Exposing all of them to every page would make actions written for
+// schedules or webhooks callable from any page — a broad change nobody asked for.
+// Projects with no generation block are unaffected in either respect.
 func (h *WebSocketHandler) getPageActions() map[string]*config.Action {
-	if h.page == nil || h.page.Config.Actions == nil {
+	approved := h.approvedSiteActions()
+	if (h.page == nil || h.page.Config.Actions == nil) && len(approved) == 0 {
 		return nil
+	}
+	if h.page == nil || h.page.Config.Actions == nil {
+		return approved
 	}
 
 	result := make(map[string]*config.Action)
@@ -1234,6 +1283,41 @@ func (h *WebSocketHandler) getPageActions() map[string]*config.Action {
 			Params:    params,
 			Confirm:   action.Confirm,
 		}
+	}
+
+	// Tier 1 last so it wins: an approved action is pinned to its manifest
+	// definition, overwriting any same-named page action. Logged rather than
+	// silently dropped so a generating agent sees why its definition had no effect.
+	for name, action := range approved {
+		if _, shadowed := result[name]; shadowed {
+			log.Printf("[WS] action %q is approved in tinkerdown.yaml and cannot be "+
+				"redefined by page frontmatter; using the approved definition", name)
+		}
+		result[name] = action
+	}
+	return result
+}
+
+// approvedSiteActions returns the site-level actions this project has approved for
+// generated apps, or nil when the project declares no generation block.
+//
+// An approved name that the project never defined is skipped rather than synthesised —
+// the same rule getEffectiveSource follows, so approving a typo yields "unknown action"
+// rather than a confusing partial object.
+func (h *WebSocketHandler) approvedSiteActions() map[string]*config.Action {
+	if !h.config.IsManifest() || h.config.Actions == nil {
+		return nil
+	}
+	var result map[string]*config.Action
+	for _, name := range h.config.Generation.Actions {
+		action, ok := h.config.Actions[name]
+		if !ok || action == nil {
+			continue
+		}
+		if result == nil {
+			result = make(map[string]*config.Action)
+		}
+		result[name] = action
 	}
 	return result
 }

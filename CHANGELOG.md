@@ -11,6 +11,40 @@ Earlier releases (v0.1.x) are documented in the
 
 ## [Unreleased]
 
+### Added — `generation:` block: an approved surface for LLM-generated apps
+
+A `tinkerdown.yaml` may now declare which of its sources and actions an LLM is allowed
+to wire up when generating an app against the project:
+
+```yaml
+generation:
+  sources: [requests]
+  actions: [approve-request]
+  style_guide: ./style-guide.md   # optional
+```
+
+Sources and actions also accept a `describes:` note — no runtime behavior, purely the
+human-readable summary an operator reads when reviewing what a generated app does.
+
+Approval is enforced as a **precedence tier**, not a prohibition. The documented
+frontmatter-wins-over-config rule gains a top tier: an approved name is *pinned*, so a
+page cannot redefine it. This is necessary because a page's frontmatter can declare its
+own sources and actions — without pinning, a generated page could reference an approved
+name while defining that name as something the operator never approved, defeating any
+check that reasons about names alone. Attempts are logged rather than silently dropped.
+
+Approval also makes site-level **actions reachable**. Previously a page could only
+invoke actions declared in its own frontmatter, so an approved-actions list would have
+named a surface no generated page could use. The fallback is limited to *approved*
+actions: actions written for schedules or webhooks stay unreachable from pages.
+
+An approved name that refers to nothing is rejected at config load. Such an entry would
+otherwise be silently inert — and since approval is what pins a name, a typo in
+`generation.sources` would *remove* a protection while appearing to add one.
+
+**Projects without a `generation:` block are unaffected.**
+
+
 ### Changed — Upstream bump: livetemplate v0.10.0 → v0.19.1
 
 Tinkerdown had been pinned to `livetemplate v0.10.0` while upstream shipped
