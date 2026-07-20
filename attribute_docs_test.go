@@ -170,6 +170,11 @@ func normalizeAttribute(raw string) string {
 		switch ns {
 		case "lvt-el", "lvt-fx", "lvt-mod", "lvt-form", "lvt-nav", "lvt-on":
 			// Check the namespace is real; members are dispatched at runtime.
+			//
+			// lvt-on: is grouped here deliberately but differs in kind: its member is
+			// an arbitrary DOM event name, not an entry in a fixed dispatch table the
+			// way lvt-el:{method} is. Checking only the namespace is therefore not a
+			// simplification for lvt-on: — there is no enumerable member set to check.
 			return ns + ":"
 		}
 	}
