@@ -42,6 +42,25 @@ func TestPageRefs(t *testing.T) {
 			want: DocRefs{Actions: []string{"create"}},
 		},
 		{
+			// The tier for controls that are not buttons. Tinkerdown generates these
+			// itself (auto_tasks.go emits lvt-on:click="Toggle"), so missing it left
+			// actions invisible to policy in documents the tool wrote.
+			name: "lvt-on:{event} invokes an action",
+			page: &Page{ServerBlocks: map[string]*ServerBlock{
+				"b1": {Content: `<input type="checkbox" lvt-on:click="Toggle"><select lvt-on:change="Filter"></select>`},
+			}},
+			want: DocRefs{Actions: []string{"Filter", "Toggle"}},
+		},
+		{
+			// First in the client's form action-resolution order, ahead of submitter
+			// name and form name.
+			name: "lvt-form:action routes explicitly",
+			page: &Page{ServerBlocks: map[string]*ServerBlock{
+				"b1": {Content: `<form lvt-form:action="Explicit" name="Fallback"></form>`},
+			}},
+			want: DocRefs{Actions: []string{"Explicit", "Fallback"}},
+		},
+		{
 			name: "lvt-source in markup is picked up alongside block metadata",
 			page: &Page{ServerBlocks: map[string]*ServerBlock{
 				"b1": {

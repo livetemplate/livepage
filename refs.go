@@ -27,8 +27,16 @@ type DocRefs struct {
 // Source bindings are read from block metadata, which the parser already records.
 // Action invocations are not recorded anywhere: an action name reaches the server from
 // the *client* when a control is used (GenericState.HandleAction), so nothing in the
-// parse pipeline ever enumerates them. They are recovered here by parsing block markup
-// for the `name` attribute on <button> and <form>, which is how an action is bound.
+// parse pipeline ever enumerates them. They are recovered here by parsing block markup.
+//
+// An action can be bound three ways, all of which must be recognised — a missed tier is
+// an action invisible to policy, not merely an incomplete summary:
+//
+//   - lvt-on:{event}="Action" — the tier for non-button controls (checkboxes, rows).
+//     Tinkerdown generates these itself, e.g. auto_tasks.go emits lvt-on:click="Toggle".
+//   - lvt-form:action="Action" — explicit form routing; first in the client's
+//     resolution order, ahead of submitter name and form name.
+//   - name="Action" on <button>/<form> — the submitter-name and form-name tiers.
 //
 // Parsing rather than pattern-matching matters: `name` is a legitimate attribute on
 // <input> and <select> (where it is a form field, not an action), so a regex over the
@@ -90,12 +98,30 @@ func collectRefs(markup string, sources, actions map[string]bool) {
 	walk = func(n *html.Node) {
 		if n.Type == html.ElementNode {
 			for _, attr := range n.Attr {
-				switch attr.Key {
-				case "lvt-source":
+				switch {
+				case attr.Key == "lvt-source":
 					if attr.Val != "" {
 						sources[attr.Val] = true
 					}
-				case "name":
+
+				// lvt-on:{event}="Action" is a first-class dispatch tier, used for
+				// controls that are not buttons — a checkbox, a table row. Tinkerdown
+				// generates it itself (auto_tasks.go emits lvt-on:click="Toggle"), so
+				// missing it would leave actions invisible to policy in documents the
+				// tool wrote.
+				case strings.HasPrefix(attr.Key, "lvt-on:"):
+					if attr.Val != "" {
+						actions[attr.Val] = true
+					}
+
+				// Explicit form routing, first in the client's resolution order:
+				// lvt-form:action, then submitter name, then form name.
+				case attr.Key == "lvt-form:action":
+					if attr.Val != "" {
+						actions[attr.Val] = true
+					}
+
+				case attr.Key == "name":
 					// Only on the elements that bind an action. On <input> and
 					// <select>, `name` is a form field.
 					if n.Data == "button" || n.Data == "form" {
