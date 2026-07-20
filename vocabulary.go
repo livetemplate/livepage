@@ -120,6 +120,9 @@ func (p *Page) UnknownAttributes() []UnknownAttribute {
 			scan(block.Content)
 		}
 	}
+	// Static HTML is markup outside any lvt block. Attributes there are inert: the
+	// page renders, nothing binds, and no error is raised anywhere — see
+	// InertAttributes, which reports that separately.
 	scan(p.StaticHTML)
 
 	names := make([]string, 0, len(found))
@@ -167,4 +170,52 @@ func suggestAttribute(name string) string {
 		return "lvt-value-* is not implemented; pass extra values as data-* attributes or a form field"
 	}
 	return ""
+}
+
+// InertAttributes reports lvt-* attributes that sit outside any ```lvt block.
+//
+// Such markup is real HTML and renders fine, but nothing binds to it: no source is
+// read, no action fires, and no error appears in the server log or the browser console.
+// The page simply sits there looking correct.
+//
+// This is the third distinct way a document can pass validation and still not work —
+// after unknown attributes and unapproved names — and the hardest to notice, because
+// every signal available says success. It is easy to produce: putting a table in the
+// markdown body rather than in a fence is the natural thing to write.
+func (p *Page) InertAttributes() []string {
+	if p == nil || strings.TrimSpace(p.StaticHTML) == "" {
+		return nil
+	}
+	doc, err := html.Parse(strings.NewReader(p.StaticHTML))
+	if err != nil {
+		return nil
+	}
+
+	found := map[string]bool{}
+	var walk func(*html.Node)
+	walk = func(n *html.Node) {
+		if n.Type == html.ElementNode {
+			for _, attr := range n.Attr {
+				// data-lvt-* are client-side hints that are meaningful on ordinary
+				// markup; only the binding vocabulary is inert out here.
+				if strings.HasPrefix(attr.Key, "lvt-") {
+					found[attr.Key] = true
+				}
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			walk(c)
+		}
+	}
+	walk(doc)
+
+	if len(found) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(found))
+	for name := range found {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }

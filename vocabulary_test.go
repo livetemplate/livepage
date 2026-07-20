@@ -146,3 +146,62 @@ func isNameChar(r rune) bool {
 	return r == '-' || r == ':' || r == '_' ||
 		(r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')
 }
+
+// TestInertAttributes covers the failure I produced by following this project's own
+// skill instructions: a table in the markdown body rather than in an ```lvt fence.
+//
+// It validated clean, summarised as privileged, served without error, and rendered
+// nothing — no source read, no console error, no server-log warning. Every available
+// signal said success. That makes it the hardest of the three "clean but broken" cases
+// to notice, and the easiest to write, since putting markup in the body is the natural
+// thing to do.
+func TestInertAttributes(t *testing.T) {
+	tests := []struct {
+		name   string
+		static string
+		want   []string
+	}{
+		{
+			name:   "binding markup in the body is inert",
+			static: `<table lvt-source="requests" lvt-columns="id"></table>`,
+			want:   []string{"lvt-columns", "lvt-source"},
+		},
+		{
+			name:   "an action binding in the body is inert",
+			static: `<div lvt-on:click="Approve"></div>`,
+			want:   []string{"lvt-on:click"},
+		},
+		{
+			// data-lvt-* are client-side hints that mean something on ordinary
+			// markup, so they are not inert out here.
+			name:   "data-lvt-* is meaningful outside a block",
+			static: `<input data-lvt-force-update>`,
+		},
+		{name: "plain HTML is untouched", static: `<div class="x"><input name="q"></div>`},
+		{name: "empty static HTML", static: ""},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := (&Page{StaticHTML: tc.static}).InertAttributes()
+			if len(got) != len(tc.want) {
+				t.Fatalf("got %v, want %v", got, tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Errorf("got %v, want %v", got, tc.want)
+					break
+				}
+			}
+		})
+	}
+
+	t.Run("markup inside a block is not inert", func(t *testing.T) {
+		page := &Page{ServerBlocks: map[string]*ServerBlock{
+			"b": {Content: `<table lvt-source="requests"></table>`},
+		}}
+		if got := page.InertAttributes(); len(got) != 0 {
+			t.Errorf("attributes inside an lvt block bind correctly; got %v", got)
+		}
+	})
+}
