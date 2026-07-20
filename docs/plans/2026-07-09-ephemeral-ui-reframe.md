@@ -513,7 +513,12 @@ Sections marked `[skip on phase execution]` (Appendix A) are historical context 
 
 **Audit:**
 - [ ] **Design-ref completeness check.**
-- [ ] Confirm `validate` can extract every source ref (`lvt-source`, `lvt-persist`) + action ref (`name=` on button/form, named actions) from a parsed doc — reuse the parser's existing extraction, don't re-regex.
+- [x] **Confirm `validate` can extract every source ref + action ref — partly, and the missing half is real work.**
+  - **Source refs: available.** `ServerBlock.Metadata["lvt-source"]` already carries them; no new extraction needed.
+  - **Action refs: no existing extraction to reuse.** Action names reach the server *from the client* at click time (`GenericState.HandleAction(action string, …)`); nothing ever enumerates the actions a document references. The plan's "reuse the parser's existing extraction, don't re-regex" cannot be followed because there is nothing to reuse — this must be built. `golang.org/x/net` is already a dependency (`go.mod:18`), so it can be a real HTML parse rather than a regex over markup.
+  - **`lvt-persist` does not exist.** `page.go:585`: *"NOTE: lvt-persist has been removed. Use lvt-source with type: sqlite instead."* The Audit item named a dead attribute — the fourth time a plan block has asserted something that isn't there.
+- [x] **(added) `validate` does not load `tinkerdown.yaml` at all** — it calls `ParseFileInSite` and discards the result (`_, err =`). It therefore has no access to the approved set, and no access to the parsed `Page` either. Both are prerequisites for the lint, and neither is mentioned in the plan. This is the same shape as Phase 1's finding that `parseFile` never loads site config: **the parse layer is deliberately config-free**, so anything policy-aware has to load config itself.
+- [x] **(added) Declarations are directly available.** `Page.Config.Sources` / `Page.Config.Actions` hold what the doc declared in frontmatter, so linting *declarations* — the check the plan originally missed — needs no new extraction at all. It is the cheaper half of the lint, and the more important one.
 - [ ] Decide the operation-summary output format (JSON on a `--summary` flag?) so the Phase-3 skill can consume it deterministically, and decide the **proportionality rule** (what counts as "privileged" → surfaced; read-only → skipped).
 - [ ] Confirm policy failures surface as `ParseError`-quality diagnostics (line + hint: "source `X` is not approved in tinkerdown.yaml; approved: [...]") so the skill's validate loop can self-correct.
 

@@ -13,6 +13,7 @@ import (
 
 	"github.com/chromedp/chromedp"
 	"github.com/livetemplate/tinkerdown"
+	"github.com/livetemplate/tinkerdown/internal/config"
 )
 
 // ValidateCommand implements the validate command.
@@ -35,6 +36,19 @@ func ValidateCommand(args []string) error {
 	}
 
 	fmt.Printf("🔍 Validating tinkerdown files in: %s\n\n", absDir)
+
+	// Load the project config so policy can be checked. The parse layer is
+	// deliberately config-free — ParseFileInSite never reads tinkerdown.yaml — so
+	// anything policy-aware has to load it here. A project without one, or with one
+	// that declares no generation block, simply has no approved set and lints clean.
+	manifest, manifestErr := config.LoadFromDir(configDir(absDir))
+	if manifestErr != nil {
+		// A malformed config is the config's own problem and is reported by serve;
+		// validate should still check every document's syntax rather than refusing
+		// to run. Policy checks are skipped for this run.
+		fmt.Printf("⚠️  Could not load project config for policy checks: %v\n\n", manifestErr)
+		manifest = nil
+	}
 
 	// Discover and validate all markdown files
 	var totalFiles int
@@ -78,7 +92,7 @@ func ValidateCommand(args []string) error {
 		totalFiles++
 
 		// Site root = absDir so cross-page includes validate as serve sees them.
-		_, err = tinkerdown.ParseFileInSite(path, absDir)
+		page, err := tinkerdown.ParseFileInSite(path, absDir)
 		if err != nil {
 			// Collect error
 			fileErrors = append(fileErrors, fileValidationError{
@@ -87,6 +101,16 @@ func ValidateCommand(args []string) error {
 			})
 			totalErrors++
 		} else {
+			// Policy: does this document stay inside the project's approved surface?
+			violations := manifest.CheckPolicy(pageRefs(page))
+			for _, v := range violations {
+				fileErrors = append(fileErrors, fileValidationError{
+					file:  relPath,
+					error: v.Error(),
+				})
+				totalErrors++
+			}
+
 			// Also validate Mermaid diagrams
 			mermaidErrors, err := validateMermaidDiagrams(path)
 			if err != nil {
@@ -102,7 +126,7 @@ func ValidateCommand(args []string) error {
 					error: fmt.Sprintf("Mermaid errors:\n  %s", errorMsg),
 				})
 				totalErrors += len(mermaidErrors)
-			} else {
+			} else if len(violations) == 0 {
 				validFiles++
 				fmt.Printf("✓ %s\n", relPath)
 			}
@@ -397,4 +421,26 @@ func isTransientChromedpError(err error) bool {
 	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "websocket") || strings.Contains(msg, "timeout")
+}
+
+// pageRefs bridges the parser's view of what a document reaches for to the shape the
+// policy check consumes. The two are declared separately so internal/config, which
+// owns the approved set, need not import the root package.
+func pageRefs(page *tinkerdown.Page) config.DocumentRefs {
+	refs := page.Refs()
+	return config.DocumentRefs{
+		Sources:         refs.Sources,
+		Actions:         refs.Actions,
+		DeclaredSources: refs.DeclaredSources,
+		DeclaredActions: refs.DeclaredActions,
+	}
+}
+
+// configDir returns the directory to look for tinkerdown.yaml in. When validate is
+// pointed at a single file, that is the file's directory rather than the file itself.
+func configDir(target string) string {
+	if info, err := os.Stat(target); err == nil && !info.IsDir() {
+		return filepath.Dir(target)
+	}
+	return target
 }
