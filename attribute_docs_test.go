@@ -25,6 +25,15 @@ import (
 //
 // Checked against the *vendored* bundle rather than a sibling client checkout, so this
 // runs anywhere the repo does (CI included) and tests the client that actually ships.
+//
+// Known limit — namespaced attributes are checked at lower fidelity than bare ones.
+// A token like lvt-el:addClass:on:success collapses to its namespace ("lvt-el:") and
+// only the namespace is verified, so a documented but nonexistent *member*
+// (lvt-el:bogus:on:success) passes. Members are dispatched at runtime rather than
+// existing as literals in the bundle, and lvt-on: takes arbitrary DOM event names with
+// no enumerable set at all. Catching bogus members would mean hard-coding each
+// namespace's member list here and keeping it in sync with the client — a second
+// invariant to rot. Documented rather than silently assumed.
 func TestDocumentedAttributesExist(t *testing.T) {
 	const bundlePath = "internal/assets/client/tinkerdown-client.browser.js"
 
@@ -128,10 +137,14 @@ var documentedAsRemoved = map[string]bool{
 	"lvt-disable-with": true, // -> lvt-form:disable-with
 	"lvt-preserve":     true, // -> lvt-ignore or lvt-form:preserve
 	"lvt-click-away":   true, // removed; survives only as an lvt-el: lifecycle state
-	"lvt-window":       true, // lvt-window-{event}, removed
-	"lvt-modal-open":   true, // removed; use native <dialog>
-	"lvt-modal-close":  true, // removed; use native <dialog>
-	"lvt-value-name":   true, // instance of the fabricated lvt-value-* family, below
+	"lvt-window":       true, // lvt-window-{event}, removed. NOT dead weight: the
+	// extraction regex stops at "{", so the doc's
+	// "lvt-window-{event}" yields the token "lvt-window-",
+	// which trims to "lvt-window" with no brace left to
+	// filter on. Removing this entry fails the guard.
+	"lvt-modal-open":  true, // removed; use native <dialog>
+	"lvt-modal-close": true, // removed; use native <dialog>
+	"lvt-value-name":  true, // instance of the fabricated lvt-value-* family, below
 }
 
 // neverImplemented are attributes the docs once taught that no implementation ever had.
@@ -254,6 +267,13 @@ func TestNormalizeAttribute(t *testing.T) {
 		{"superseded name skipped", "lvt-scroll", ""},
 		{"removed name skipped", "lvt-modal-open", ""},
 		{"fabricated attribute skipped", "lvt-filter", ""},
+
+		// The extraction regex stops at "{", so the doc's "lvt-window-{event}" reaches
+		// this function as "lvt-window-" -- with no brace left for the placeholder
+		// check to catch. Probing with the full "lvt-window-{event}" string suggests
+		// the map entry is unreachable dead weight; it is not, and deleting it fails
+		// TestDocumentedAttributesExist. Pinned so that reasoning is not repeated.
+		{"placeholder truncated by the regex still resolves", "lvt-window-", ""},
 
 		// The regression the bot caught. "lvt-value-" must be skipped as a fabricated
 		// family and must NOT collapse onto the real "lvt-value", which is a distinct,
