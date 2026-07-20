@@ -369,17 +369,24 @@ Tailwind CSS is included automatically. Use utility classes:
 
 ### Datatable
 
-Use the `lvt-columns` attribute for smart table generation:
+Use the `lvt-columns` attribute to define columns (omit it to auto-discover them):
 
 ```html
 <table lvt-source="users" lvt-columns="name:Name,email:Email,role:Role">
 </table>
 ```
 
-Features:
-- Sortable columns (click headers)
-- Pagination (auto-enabled)
-- Filtering (add `lvt-filter` attribute)
+This generates a **simple** table — plain `<thead>`/`<tbody>`, no sorting or pagination.
+
+For sortable columns and pagination, opt in with `lvt-datatable`:
+
+```html
+<table lvt-source="users" lvt-columns="name:Name,email:Email,role:Role" lvt-datatable>
+</table>
+```
+
+There is no filtering attribute. Filter at the source instead — e.g. a SQL `query` on a
+sqlite/postgres source, or a `computed` source derived from another.
 
 ### Select Dropdown
 
