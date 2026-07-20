@@ -162,3 +162,57 @@ sources:
 		t.Error("a document declaring an unapproved source must fail validation")
 	}
 }
+
+// TestSummaryFailsClosedOnBrokenConfig covers the direction a policy gate must never
+// fail in.
+//
+// With a config that cannot load, the manifest is nil, and a nil manifest summarises
+// to {"privileged": false, "operations": []} — byte-identical to "this project
+// declares no approved surface, nothing to review". The consumer decides whether to
+// interrupt its operator from that bit, so reporting "safe" when the truth is
+// "couldn't tell" hands an unreviewed app straight through. The warning goes to
+// stderr, which a consumer parsing stdout never sees.
+//
+// This matters doubly because ValidateGeneration turns a typo in generation.actions
+// into exactly this load error: failing open here would mute the alarm it exists to
+// raise.
+func TestSummaryFailsClosedOnBrokenConfig(t *testing.T) {
+	t.Run("malformed yaml is fatal in summary mode", func(t *testing.T) {
+		dir := writeSite(t, map[string]string{
+			"tinkerdown.yaml": "sources:\n  broken: [this is not\n    valid yaml\n",
+			"index.md":        "---\ntitle: X\n---\n# X\n",
+		})
+		out, err := captureStdout(t, func() error { return ValidateCommand([]string{"--summary", dir}) })
+		if err == nil {
+			t.Fatalf("a policy gate must not report success when it could not read the policy; stdout was:\n%s", out)
+		}
+		if strings.Contains(out, `"privileged": false`) {
+			t.Error(`emitted "privileged": false for a config it could not read — indistinguishable from "nothing to review"`)
+		}
+	})
+
+	// An approved name that refers to nothing fails ValidateGeneration at load. That
+	// is deliberate: approval is what pins a name, so an inert approval leaves it
+	// shadowable. Summary mode must surface that, not swallow it.
+	t.Run("an approval typo is fatal in summary mode", func(t *testing.T) {
+		dir := writeSite(t, map[string]string{
+			"tinkerdown.yaml": "sources:\n  requests:\n    type: sqlite\n    db: ./r.db\n    table: requests\ngeneration:\n  sources: [requets]\n",
+			"index.md":        "---\ntitle: X\n---\n# X\n",
+		})
+		if _, err := captureStdout(t, func() error { return ValidateCommand([]string{"--summary", dir}) }); err == nil {
+			t.Error("a typo in generation.sources must not summarise as 'nothing privileged'")
+		}
+	})
+
+	// Outside summary mode the old behavior stands: report the problem and keep
+	// checking document syntax, which is still useful.
+	t.Run("plain validate still checks syntax when the config is broken", func(t *testing.T) {
+		dir := writeSite(t, map[string]string{
+			"tinkerdown.yaml": "sources:\n  broken: [this is not\n    valid yaml\n",
+			"index.md":        "---\ntitle: X\n---\n# X\n",
+		})
+		if _, err := captureStdout(t, func() error { return ValidateCommand([]string{dir}) }); err != nil {
+			t.Errorf("plain validate should still check documents: %v", err)
+		}
+	})
+}

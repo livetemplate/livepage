@@ -58,9 +58,21 @@ func ValidateCommand(args []string) error {
 	// that declares no generation block, simply has no approved set and lints clean.
 	manifest, manifestErr := config.LoadFromDir(configDir(absDir))
 	if manifestErr != nil {
-		// A malformed config is the config's own problem and is reported by serve;
-		// validate should still check every document's syntax rather than refusing
-		// to run. Policy checks are skipped for this run.
+		// In summary mode this must be fatal. The consumer is a program deciding
+		// whether to interrupt its operator, and a nil manifest summarises to
+		// {"privileged": false, "operations": []} — indistinguishable from "this
+		// project has no approved surface". That is a policy gate failing open:
+		// "couldn't tell" would be reported as "safe", and the warning goes to
+		// stderr, which a consumer parsing stdout never sees.
+		//
+		// It matters more because ValidateGeneration turns an approval typo into
+		// exactly this load error. Failing open here would mute the alarm it exists
+		// to raise.
+		if summaryOnly {
+			return fmt.Errorf("cannot summarise operations: project config failed to load: %w", manifestErr)
+		}
+		// Outside summary mode, keep checking document syntax rather than refusing
+		// to run; serve reports config problems separately.
 		fmt.Fprintf(os.Stderr, "⚠️  Could not load project config for policy checks: %v\n", manifestErr)
 		manifest = nil
 	}
@@ -82,17 +94,8 @@ func ValidateCommand(args []string) error {
 
 		// Skip directories
 		if d.IsDir() {
-			name := d.Name()
-			// Skip hidden directories (starting with . or _)
-			if strings.HasPrefix(name, "_") || strings.HasPrefix(name, ".") {
+			if skipWalkDir(d.Name()) {
 				return filepath.SkipDir
-			}
-			// Skip common non-documentation directories
-			skipDirs := []string{"node_modules", "vendor", "dist", "build", "target", ".git"}
-			for _, skip := range skipDirs {
-				if name == skip {
-					return filepath.SkipDir
-				}
 			}
 			return nil
 		}
