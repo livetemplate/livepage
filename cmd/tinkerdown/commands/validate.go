@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -13,14 +14,25 @@ import (
 
 	"github.com/chromedp/chromedp"
 	"github.com/livetemplate/tinkerdown"
+	"github.com/livetemplate/tinkerdown/internal/config"
 )
 
 // ValidateCommand implements the validate command.
 func ValidateCommand(args []string) error {
 	// Parse arguments
 	dir := "."
-	if len(args) > 0 {
-		dir = args[0]
+	summaryOnly := false
+	for _, arg := range args {
+		if arg == "--summary" {
+			summaryOnly = true
+			continue
+		}
+		if strings.HasPrefix(arg, "-") {
+			// Fail loudly. A script expecting JSON from a mistyped --sumary would
+			// otherwise silently receive human-readable output instead.
+			return fmt.Errorf("unknown flag %q (supported: --summary)", arg)
+		}
+		dir = arg
 	}
 
 	// Check if directory exists
@@ -34,7 +46,40 @@ func ValidateCommand(args []string) error {
 		return fmt.Errorf("failed to get absolute path: %w", err)
 	}
 
-	fmt.Printf("🔍 Validating tinkerdown files in: %s\n\n", absDir)
+	// Nothing but JSON may reach stdout in summary mode: the consumer is a program
+	// parsing this output, not a human reading a terminal.
+	if !summaryOnly {
+		fmt.Printf("🔍 Validating tinkerdown files in: %s\n\n", absDir)
+	}
+
+	// Load the project config so policy can be checked. The parse layer is
+	// deliberately config-free — ParseFileInSite never reads tinkerdown.yaml — so
+	// anything policy-aware has to load it here. A project without one, or with one
+	// that declares no generation block, simply has no approved set and lints clean.
+	manifest, manifestErr := config.LoadFromDir(configDir(absDir))
+	if manifestErr != nil {
+		// In summary mode this must be fatal. The consumer is a program deciding
+		// whether to interrupt its operator, and a nil manifest summarises to
+		// {"privileged": false, "operations": []} — indistinguishable from "this
+		// project has no approved surface". That is a policy gate failing open:
+		// "couldn't tell" would be reported as "safe", and the warning goes to
+		// stderr, which a consumer parsing stdout never sees.
+		//
+		// It matters more because ValidateGeneration turns an approval typo into
+		// exactly this load error. Failing open here would mute the alarm it exists
+		// to raise.
+		if summaryOnly {
+			return fmt.Errorf("cannot summarise operations: project config failed to load: %w", manifestErr)
+		}
+		// Outside summary mode, keep checking document syntax rather than refusing
+		// to run; serve reports config problems separately.
+		fmt.Fprintf(os.Stderr, "⚠️  Could not load project config for policy checks: %v\n", manifestErr)
+		manifest = nil
+	}
+
+	if summaryOnly {
+		return printOperationSummary(absDir, manifest)
+	}
 
 	// Discover and validate all markdown files
 	var totalFiles int
@@ -49,17 +94,8 @@ func ValidateCommand(args []string) error {
 
 		// Skip directories
 		if d.IsDir() {
-			name := d.Name()
-			// Skip hidden directories (starting with . or _)
-			if strings.HasPrefix(name, "_") || strings.HasPrefix(name, ".") {
+			if skipWalkDir(d.Name()) {
 				return filepath.SkipDir
-			}
-			// Skip common non-documentation directories
-			skipDirs := []string{"node_modules", "vendor", "dist", "build", "target", ".git"}
-			for _, skip := range skipDirs {
-				if name == skip {
-					return filepath.SkipDir
-				}
 			}
 			return nil
 		}
@@ -78,7 +114,7 @@ func ValidateCommand(args []string) error {
 		totalFiles++
 
 		// Site root = absDir so cross-page includes validate as serve sees them.
-		_, err = tinkerdown.ParseFileInSite(path, absDir)
+		page, err := tinkerdown.ParseFileInSite(path, absDir)
 		if err != nil {
 			// Collect error
 			fileErrors = append(fileErrors, fileValidationError{
@@ -87,6 +123,16 @@ func ValidateCommand(args []string) error {
 			})
 			totalErrors++
 		} else {
+			// Policy: does this document stay inside the project's approved surface?
+			violations := manifest.CheckPolicy(pageRefs(page))
+			for _, v := range violations {
+				fileErrors = append(fileErrors, fileValidationError{
+					file:  relPath,
+					error: v.Error(),
+				})
+				totalErrors++
+			}
+
 			// Also validate Mermaid diagrams
 			mermaidErrors, err := validateMermaidDiagrams(path)
 			if err != nil {
@@ -102,7 +148,7 @@ func ValidateCommand(args []string) error {
 					error: fmt.Sprintf("Mermaid errors:\n  %s", errorMsg),
 				})
 				totalErrors += len(mermaidErrors)
-			} else {
+			} else if len(violations) == 0 {
 				validFiles++
 				fmt.Printf("✓ %s\n", relPath)
 			}
@@ -397,4 +443,108 @@ func isTransientChromedpError(err error) bool {
 	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "websocket") || strings.Contains(msg, "timeout")
+}
+
+// pageRefs bridges the parser's view of what a document reaches for to the shape the
+// policy check consumes. The two are declared separately so internal/config, which
+// owns the approved set, need not import the root package.
+func pageRefs(page *tinkerdown.Page) config.DocumentRefs {
+	refs := page.Refs()
+	return config.DocumentRefs{
+		Sources:         refs.Sources,
+		Actions:         refs.Actions,
+		DeclaredSources: refs.DeclaredSources,
+		DeclaredActions: refs.DeclaredActions,
+	}
+}
+
+// configDir returns the directory to look for tinkerdown.yaml in. When validate is
+// pointed at a single file, that is the file's directory rather than the file itself.
+func configDir(target string) string {
+	if info, err := os.Stat(target); err == nil && !info.IsDir() {
+		return filepath.Dir(target)
+	}
+	return target
+}
+
+// printOperationSummary emits, as JSON, what the documents under dir do with the
+// project's approved surface.
+//
+// JSON because the consumer is a generating agent deciding whether to interrupt its
+// operator, not a human reading a terminal. The `privileged` bit carries that decision:
+// a console that only reads is not worth a prompt, and a prompt shown for every
+// generated page is a prompt nobody reads.
+func printOperationSummary(absDir string, manifest *config.Config) error {
+	combined := config.DocumentRefs{}
+	seen := map[string]bool{}
+	add := func(dst *[]string, names []string, kind string) {
+		for _, n := range names {
+			key := kind + ":" + n
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			*dst = append(*dst, n)
+		}
+	}
+
+	err := filepath.WalkDir(absDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if skipWalkDir(d.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if filepath.Ext(path) != ".md" {
+			return nil
+		}
+		page, perr := tinkerdown.ParseFileInSite(path, absDir)
+		if perr != nil {
+			// A document that does not parse cannot be described. It has already
+			// failed plain `validate`, which is where that is reported.
+			return nil
+		}
+		refs := page.Refs()
+		add(&combined.Sources, refs.Sources, "src")
+		add(&combined.Actions, refs.Actions, "act")
+		add(&combined.DeclaredSources, refs.DeclaredSources, "dsrc")
+		add(&combined.DeclaredActions, refs.DeclaredActions, "dact")
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("failed to walk directory: %w", err)
+	}
+
+	summary := manifest.Summarize(combined)
+	if summary == nil {
+		// No generation block: no approved surface, so nothing to review.
+		summary = &config.OperationSummary{Operations: []config.Operation{}}
+	}
+	if summary.Operations == nil {
+		summary.Operations = []config.Operation{}
+	}
+
+	out, err := json.MarshalIndent(summary, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to encode summary: %w", err)
+	}
+	fmt.Println(string(out))
+	return nil
+}
+
+// skipWalkDir reports whether a directory is not worth descending into. Shared so the
+// summary walk and the validation walk cannot drift apart on what they consider part
+// of the site.
+func skipWalkDir(name string) bool {
+	if strings.HasPrefix(name, "_") || strings.HasPrefix(name, ".") {
+		return true
+	}
+	switch name {
+	case "node_modules", "vendor", "dist", "build", "target":
+		return true
+	}
+	return false
 }
