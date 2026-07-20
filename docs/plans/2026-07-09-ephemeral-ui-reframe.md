@@ -535,7 +535,28 @@ Sections marked `[skip on phase execution]` (Appendix A) are historical context 
 - [ ] **Integration:** run `validate` + `validate --summary` against the demo app.md fixture.
 - [ ] **E2E:** N/A (CLI) — exercised in Phase 5.
 
-**Learn:** 4 prompts.
+**Learn:**
+
+*What surprised us.*
+1. **The phase was three pieces, and two were prerequisites the plan never mentions.** "Add a lint to `validate`" presumed `validate` had the approved set and the parsed page. It had neither — it called `ParseFileInSite` and discarded the result, and never loaded `tinkerdown.yaml` at all. Same shape as Phase 1's finding: **the parse layer is deliberately config-free**, so anything policy-aware must load config itself. Treat that as a standing property of this codebase rather than a fact rediscovered per phase.
+2. **The plan's "reuse the parser's existing extraction, don't re-regex" could not be followed, because nothing extracts action references.** An action name reaches the server *from the client* when a control is used (`GenericState.HandleAction`), so the parse pipeline never enumerates them — and policy runs before anything is served, which is far too early for a click to have happened. `Page.Refs()` is new machinery, not reuse.
+3. **The cheap half of the lint is the important half.** Declarations sit right there on `Page.Config`, needing no extraction at all — and declarations are what close the shadowing hole. The expensive half (action-reference extraction) guards the *less* dangerous case. Worth remembering when a security check looks costly: check which half actually carries the risk.
+4. **An HTML parse, not a pattern match.** `name` is a legitimate attribute on `<input>` and `<select>`, where it is a form field. A regex over markup would report every form field as an action reference — noise that would train an operator to ignore the diagnostics. `golang.org/x/net` was already a dependency, so the correct approach cost nothing.
+
+*PLAN.md drift fixed in this commit.*
+- The Audit item naming `lvt-persist` — **removed from the codebase** (`page.go:585`), the fourth plan block asserting something absent.
+- "Reuse the parser's existing extraction" corrected: there is nothing to reuse for actions.
+- Recorded that `validate` was not config-aware, which the phase had to fix first.
+- **`Manifest` accessor: struck, not deferred again.** Phase 2 produced its two real consumers — `CheckPolicy` and `Summarize` — and neither needed anything beyond `Generation` plus `ApprovedSource`/`ApprovedAction`. A bundling struct would be a parallel representation of data the config already exposes, kept in sync for no consumer. If Phase 3's skill turns out to need a different shape, build it then against that need.
+
+*Feed-forward to **Phase 3**'s Audit.*
+- `validate --summary` emits **only JSON on stdout** (warnings go to stderr) precisely so the skill can parse it. That property is load-bearing and easy to break — a stray `fmt.Printf` in the validate path would silently corrupt it. If Phase 3 adds output there, re-verify by piping through a parser, not by eye.
+- **The `privileged` bit is the proportionality rule.** Surface the summary to the operator when it is true; skip straight through when false. A prompt on every generated page is a prompt nobody reads.
+- Policy diagnostics carry a `Hint` naming the approved alternatives, which is what the skill's self-correction loop consumes. If a new violation kind is added without a hint, the loop has nothing to act on.
+- **Still open from M0 Phase 2, and now urgent:** `validate` does not check attribute *names*. Phase 3's loop is specified as "self-correct until validate is clean", and clean still does not mean the attributes exist. Decide there: accept the gap explicitly, or pull forward M2's allowlist.
+
+*New / changed risks.*
+- **New (low):** the summary marks every action as a write, because an action exists to change something and parsing SQL to guess would be confidently wrong on the cases that matter. A genuinely read-only `sql` action would therefore over-report as privileged. Over-reporting is the safe direction, but if M4 adds read-only actions this deserves revisiting rather than tuning by guesswork.
 
 #### Phase 3 (M1) — The `/tinkerdown` Claude Code skill (~1 session)
 

@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -20,8 +21,15 @@ import (
 func ValidateCommand(args []string) error {
 	// Parse arguments
 	dir := "."
-	if len(args) > 0 {
-		dir = args[0]
+	summaryOnly := false
+	for _, arg := range args {
+		if arg == "--summary" {
+			summaryOnly = true
+			continue
+		}
+		if !strings.HasPrefix(arg, "-") {
+			dir = arg
+		}
 	}
 
 	// Check if directory exists
@@ -35,7 +43,11 @@ func ValidateCommand(args []string) error {
 		return fmt.Errorf("failed to get absolute path: %w", err)
 	}
 
-	fmt.Printf("🔍 Validating tinkerdown files in: %s\n\n", absDir)
+	// Nothing but JSON may reach stdout in summary mode: the consumer is a program
+	// parsing this output, not a human reading a terminal.
+	if !summaryOnly {
+		fmt.Printf("🔍 Validating tinkerdown files in: %s\n\n", absDir)
+	}
 
 	// Load the project config so policy can be checked. The parse layer is
 	// deliberately config-free — ParseFileInSite never reads tinkerdown.yaml — so
@@ -46,8 +58,12 @@ func ValidateCommand(args []string) error {
 		// A malformed config is the config's own problem and is reported by serve;
 		// validate should still check every document's syntax rather than refusing
 		// to run. Policy checks are skipped for this run.
-		fmt.Printf("⚠️  Could not load project config for policy checks: %v\n\n", manifestErr)
+		fmt.Fprintf(os.Stderr, "⚠️  Could not load project config for policy checks: %v\n", manifestErr)
 		manifest = nil
+	}
+
+	if summaryOnly {
+		return printOperationSummary(absDir, manifest)
 	}
 
 	// Discover and validate all markdown files
@@ -443,4 +459,73 @@ func configDir(target string) string {
 		return filepath.Dir(target)
 	}
 	return target
+}
+
+// printOperationSummary emits, as JSON, what the documents under dir do with the
+// project's approved surface.
+//
+// JSON because the consumer is a generating agent deciding whether to interrupt its
+// operator, not a human reading a terminal. The `privileged` bit carries that decision:
+// a console that only reads is not worth a prompt, and a prompt shown for every
+// generated page is a prompt nobody reads.
+func printOperationSummary(absDir string, manifest *config.Config) error {
+	combined := config.DocumentRefs{}
+	seen := map[string]bool{}
+	add := func(dst *[]string, names []string, kind string) {
+		for _, n := range names {
+			key := kind + ":" + n
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			*dst = append(*dst, n)
+		}
+	}
+
+	err := filepath.WalkDir(absDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			name := d.Name()
+			if strings.HasPrefix(name, "_") || strings.HasPrefix(name, ".") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if filepath.Ext(path) != ".md" {
+			return nil
+		}
+		page, perr := tinkerdown.ParseFileInSite(path, absDir)
+		if perr != nil {
+			// A document that does not parse cannot be described. It has already
+			// failed plain `validate`, which is where that is reported.
+			return nil
+		}
+		refs := page.Refs()
+		add(&combined.Sources, refs.Sources, "src")
+		add(&combined.Actions, refs.Actions, "act")
+		add(&combined.DeclaredSources, refs.DeclaredSources, "dsrc")
+		add(&combined.DeclaredActions, refs.DeclaredActions, "dact")
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("failed to walk directory: %w", err)
+	}
+
+	summary := manifest.Summarize(combined)
+	if summary == nil {
+		// No generation block: no approved surface, so nothing to review.
+		summary = &config.OperationSummary{Operations: []config.Operation{}}
+	}
+	if summary.Operations == nil {
+		summary.Operations = []config.Operation{}
+	}
+
+	out, err := json.MarshalIndent(summary, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to encode summary: %w", err)
+	}
+	fmt.Println(string(out))
+	return nil
 }
