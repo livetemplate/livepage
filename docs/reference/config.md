@@ -403,6 +403,58 @@ When the same source is defined in both places:
 1. **Frontmatter wins** for that page
 2. Config file provides defaults
 
+### With a `generation:` block
+
+A project that declares a [generation block](#generation-approved-surface-for-llm-generated-apps) gains a third, highest tier:
+
+1. **Approved definitions are pinned** — a page cannot redefine a source or action named in `generation.sources` / `generation.actions`
+2. Frontmatter
+3. Config file defaults
+
+This exists because a page's frontmatter can declare its own sources and actions. Without pinning, a generated page could *reference* an approved name while *defining* that name as something else — passing any check that reasons about names alone. Pinning makes an approved name mean one thing regardless of what the page says. An attempted redefinition is ignored and logged, so it is visible rather than silent.
+
+Approval also makes site-level **actions** reachable. Ordinarily a page can only invoke actions declared in its own frontmatter; naming an action in `generation.actions` opts it in. Actions written for schedules or webhooks stay unreachable from pages unless approved.
+
+Projects without a `generation:` block are unaffected — the two-tier rule above applies exactly as before.
+
+## `generation:` — approved surface for LLM-generated apps
+
+Declares which of this project's sources and actions an LLM may wire up when generating an app against it. Its presence is what turns a `tinkerdown.yaml` into a *manifest*.
+
+```yaml
+sources:
+  requests:
+    describes: "Pending PII access requests awaiting approval"
+    type: sqlite
+    db: ./requests.db
+    table: requests
+
+actions:
+  approve-request:
+    describes: "Grants scoped, time-boxed access and writes an audit record"
+    kind: sql
+    source: requests
+    statement: "UPDATE requests SET status = 'approved' WHERE id = :id"
+    confirm: "Approve this access request?"
+    params:
+      id:
+        type: number
+        required: true
+
+generation:
+  sources: [requests]
+  actions: [approve-request]
+  style_guide: ./style-guide.md   # optional
+```
+
+| Field | Purpose |
+|---|---|
+| `sources` | Source names a generated app may bind to. Each must exist in `sources:`. |
+| `actions` | Action names a generated app may invoke. Each must exist in `actions:`. |
+| `style_guide` | Optional path to a markdown file describing house style — tone, layout, preferred components. Without it, generation falls back to the project theme and PicoCSS defaults. |
+
+The `describes:` field on a source or action carries no runtime behavior. It is the human-readable summary an operator reads when reviewing what a generated app actually does — "the pending PII access requests queue" rather than a table name.
+
 ## Next Steps
 
 - [Frontmatter Reference](frontmatter.md) - Recommended configuration approach

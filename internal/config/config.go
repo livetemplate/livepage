@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -30,6 +31,12 @@ type Config struct {
 	Webhooks    map[string]*Webhook     `yaml:"webhooks,omitempty"`
 	Outputs     map[string]*OutputConfig `yaml:"outputs,omitempty"`
 	Security    SecurityConfig          `yaml:"security,omitempty"`
+
+	// Generation, when present, declares which of this project's sources and actions
+	// an LLM is allowed to wire up when generating an app. Its presence is what makes
+	// a tinkerdown.yaml a *manifest*; without it nothing here changes and the project
+	// behaves exactly as before.
+	Generation *GenerationConfig `yaml:"generation,omitempty"`
 
 	// VersionPrefix, when non-empty, becomes a URL path segment that is
 	// stripped from incoming requests before route resolution. Routes serve
@@ -140,8 +147,71 @@ func (c *Config) ValidateOutputs() error {
 	return nil
 }
 
+// GenerationConfig declares the surface an LLM may wire up when generating an app
+// against this project — the "approved set".
+//
+// Approval is enforced in two places, doing two different jobs:
+//
+//   - At runtime, by precedence: an approved name is pinned, so a generated page's
+//     frontmatter cannot redefine it to mean something else. Frontmatter can declare
+//     sources and actions freely (page.go MergeFromFrontmatter), which would otherwise
+//     let a generated doc shadow an approved name — reference `requests`, but define
+//     `requests` as something the operator never approved.
+//   - At generation time, by `tinkerdown validate`, which reports references to and
+//     declarations of names outside this set so a generating agent can self-correct.
+//
+// Precedence is the guarantee; the lint is the feedback. Neither substitutes for the
+// other, and the lint deliberately does not re-implement the pin.
+//
+// Absent this block, precedence is the long-standing two-tier rule (frontmatter wins,
+// config provides defaults) and no lint runs.
+type GenerationConfig struct {
+	// Sources names the sources a generated app may bind to. Each must exist in
+	// Config.Sources; naming an undefined source is a config error, not a silent skip.
+	Sources []string `yaml:"sources,omitempty"`
+
+	// Actions names the actions a generated app may invoke. Each must exist in
+	// Config.Actions.
+	Actions []string `yaml:"actions,omitempty"`
+
+	// StyleGuide optionally points at a markdown file describing house style — tone,
+	// layout conventions, which components to prefer, what to avoid — injected into
+	// the generation context so output conforms by construction. Optional: without it
+	// generation falls back to the project theme and PicoCSS semantic defaults.
+	StyleGuide string `yaml:"style_guide,omitempty"`
+}
+
+// ApprovedSource reports whether name is an approved source. Always false when the
+// project declares no generation block, so callers need no presence check of their own.
+func (c *Config) ApprovedSource(name string) bool {
+	if c == nil || c.Generation == nil {
+		return false
+	}
+	return slices.Contains(c.Generation.Sources, name)
+}
+
+// ApprovedAction reports whether name is an approved action.
+func (c *Config) ApprovedAction(name string) bool {
+	if c == nil || c.Generation == nil {
+		return false
+	}
+	return slices.Contains(c.Generation.Actions, name)
+}
+
+// IsManifest reports whether this config declares a generation surface — i.e. whether
+// approval semantics apply at all.
+func (c *Config) IsManifest() bool {
+	return c != nil && c.Generation != nil
+}
+
 // SourceConfig defines a data source for lvt-source blocks
 type SourceConfig struct {
+	// Describes is a human-readable note about what this source touches — the
+	// dataset, its scope, its sensitivity. It carries no runtime behavior; it exists
+	// so an operator reviewing what a generated app does sees "the pending PII access
+	// requests queue" rather than a table name. See Config.Generation.
+	Describes string `yaml:"describes,omitempty"`
+
 	Type        string                 `yaml:"type"`                   // "exec", "pg", "rest", "csv", "json", "markdown", "sqlite", "wasm", "graphql"
 	Cmd         string                 `yaml:"cmd,omitempty"`          // For exec: command to run
 	Query       string                 `yaml:"query,omitempty"`        // For pg: SQL query
@@ -295,6 +365,11 @@ func (c SourceConfig) GetCacheMaxBytes() int {
 
 // Action defines a custom action that can be triggered via lvt-click
 type Action struct {
+	// Describes is a human-readable note about what running this action does. Same
+	// role as SourceConfig.Describes: it is what an operator reads when reviewing the
+	// privileged operations a generated app performs. See Config.Generation.
+	Describes string `yaml:"describes,omitempty"`
+
 	Kind      string              `yaml:"kind"`                // Action kind: "sql", "http", "exec"
 	Source    string              `yaml:"source,omitempty"`    // For sql: source name to execute against
 	Statement string              `yaml:"statement,omitempty"` // For sql: SQL statement with :param placeholders
