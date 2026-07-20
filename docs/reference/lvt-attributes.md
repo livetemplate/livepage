@@ -200,9 +200,20 @@ Auto-focus on visibility.
 <input lvt-autofocus>
 ```
 
-> **Removed.** `lvt-focus-trap` and `lvt-modal-open` / `lvt-modal-close` were documented
-> here but are not implemented by `@livetemplate/client`. Use a native `<dialog>` element
-> for modals — it provides focus trapping and open/close semantics in the platform.
+### lvt-focus-trap
+
+Trap focus within an element — Tab and Shift-Tab cycle inside it rather than escaping
+to the rest of the page. Useful for modal-like regions.
+
+```html
+<div class="modal" lvt-focus-trap>
+  Modal content
+</div>
+```
+
+> **Removed.** `lvt-modal-open` / `lvt-modal-close` were documented here but are not
+> implemented by `@livetemplate/client`. Use a native `<dialog>` element for open/close
+> semantics; pair it with `lvt-focus-trap` above if you need focus containment.
 
 ---
 
@@ -271,6 +282,16 @@ Debounce event handling.
 
 ```html
 <input lvt-on:change="Search" lvt-mod:debounce="300">
+```
+
+### lvt-debounce
+
+Distinct from `lvt-mod:debounce`, and still current: overrides the debounce interval
+(ms) the client applies to an **auto-wired change binding**, rather than to an explicit
+`lvt-on:` handler.
+
+```html
+<input name="title" lvt-debounce="500">
 ```
 
 ---

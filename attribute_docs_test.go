@@ -125,12 +125,10 @@ var documentedAsRemoved = map[string]bool{
 	"lvt-highlight":    true, // -> lvt-fx:highlight
 	"lvt-animate":      true, // -> lvt-fx:animate
 	"lvt-throttle":     true, // -> lvt-mod:throttle
-	"lvt-debounce":     true, // -> lvt-mod:debounce
 	"lvt-disable-with": true, // -> lvt-form:disable-with
 	"lvt-preserve":     true, // -> lvt-ignore or lvt-form:preserve
 	"lvt-click-away":   true, // removed; survives only as an lvt-el: lifecycle state
 	"lvt-window":       true, // lvt-window-{event}, removed
-	"lvt-focus-trap":   true, // removed; use native <dialog>
 	"lvt-modal-open":   true, // removed; use native <dialog>
 	"lvt-modal-close":  true, // removed; use native <dialog>
 	"lvt-value-name":   true, // instance of the fabricated lvt-value-* family, below
@@ -296,4 +294,55 @@ func TestImplementedMatchesWholeNames(t *testing.T) {
 			t.Errorf("implemented(%q) = %v, want %v", tc.attr, got, tc.want)
 		}
 	}
+}
+
+// TestRemovedAttributesAreReallyGone closes the hole that let a real attribute be
+// documented as deleted.
+//
+// TestDocumentedAttributesExist skips every name in documentedAsRemoved and
+// neverImplemented — that is what those maps are for. But it made them unfalsifiable:
+// an entry added by mistake is never checked against anything, so "this attribute is
+// gone" was the one claim in the whole guard that nothing verified. Two entries were
+// wrong for exactly that reason (lvt-focus-trap, lvt-debounce), both real and both
+// found by review rather than by this suite.
+//
+// The classification error was in hand-grepping for quoted literals ("lvt-focus-trap")
+// while the client uses the attribute in a selector (querySelectorAll("[lvt-focus-trap]")).
+// implemented() handles that correctly — brackets are not attribute characters — so
+// simply running the removed-list through the same matcher catches the mistake that
+// manual searching made.
+func TestRemovedAttributesAreReallyGone(t *testing.T) {
+	const bundlePath = "internal/assets/client/tinkerdown-client.browser.js"
+	bundle, err := os.ReadFile(bundlePath)
+	if err != nil {
+		t.Fatalf("read client bundle: %v", err)
+	}
+	goSources := readGoSources(t)
+
+	check := func(list map[string]bool, claim string) {
+		names := make([]string, 0, len(list))
+		for name := range list {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+
+		for _, name := range names {
+			// Family/prefix entries ("lvt-value-") deliberately match a range of
+			// names; asserting absence of a prefix would be checking the wrong thing.
+			if strings.HasSuffix(name, "-") || strings.HasSuffix(name, ":") {
+				continue
+			}
+			if implemented(name, bundle) {
+				t.Errorf("%q is listed as %s, but it IS implemented in %s — "+
+					"the docs are telling users a working attribute is gone", name, claim, bundlePath)
+			}
+			if implemented(name, goSources) {
+				t.Errorf("%q is listed as %s, but it IS implemented in Go — "+
+					"the docs are telling users a working attribute is gone", name, claim)
+			}
+		}
+	}
+
+	check(documentedAsRemoved, "superseded/removed")
+	check(neverImplemented, "never implemented")
 }
