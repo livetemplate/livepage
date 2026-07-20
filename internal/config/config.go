@@ -198,6 +198,31 @@ func (c *Config) ApprovedAction(name string) bool {
 	return slices.Contains(c.Generation.Actions, name)
 }
 
+// ValidateGeneration checks that every approved name refers to something this project
+// actually declares.
+//
+// This is not tidiness. Approval is what pins a source or action against redefinition
+// by page frontmatter, so an approved name with no definition behind it does not fail
+// loudly — it simply never pins anything, leaving that name shadowable. A typo in
+// `generation.sources` would therefore *remove* a protection while looking like it
+// added one. Failing at load makes that impossible.
+func (c *Config) ValidateGeneration() error {
+	if c == nil || c.Generation == nil {
+		return nil
+	}
+	for _, name := range c.Generation.Sources {
+		if _, ok := c.Sources[name]; !ok {
+			return fmt.Errorf("generation.sources: %q is approved but no such source is defined", name)
+		}
+	}
+	for _, name := range c.Generation.Actions {
+		if action, ok := c.Actions[name]; !ok || action == nil {
+			return fmt.Errorf("generation.actions: %q is approved but no such action is defined", name)
+		}
+	}
+	return nil
+}
+
 // IsManifest reports whether this config declares a generation surface — i.e. whether
 // approval semantics apply at all.
 func (c *Config) IsManifest() bool {
@@ -849,6 +874,14 @@ func Load(configPath string) (*Config, error) {
 	// any handler ever sees a request. A silently-broken CSP is much
 	// worse than a clear startup failure.
 	if err := config.Security.Validate(); err != nil {
+		return nil, err
+	}
+
+	// An approved name that names nothing is worse than useless: the approval is
+	// inert, so the source or action it was meant to pin stays overridable by page
+	// frontmatter. A typo in generation.sources silently removes protection, which is
+	// exactly the failure that must not be quiet.
+	if err := config.ValidateGeneration(); err != nil {
 		return nil, err
 	}
 

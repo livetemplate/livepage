@@ -405,7 +405,7 @@ When the same source is defined in both places:
 
 ### With a `generation:` block
 
-A project that declares a [generation block](#generation-approved-surface-for-llm-generated-apps) gains a third, highest tier:
+A project that declares a [`generation:` block](#the-generation-block) gains a third, highest tier:
 
 1. **Approved definitions are pinned** — a page cannot redefine a source or action named in `generation.sources` / `generation.actions`
 2. Frontmatter
@@ -417,7 +417,7 @@ Approval also makes site-level **actions** reachable. Ordinarily a page can only
 
 Projects without a `generation:` block are unaffected — the two-tier rule above applies exactly as before.
 
-## `generation:` — approved surface for LLM-generated apps
+## The `generation:` block
 
 Declares which of this project's sources and actions an LLM may wire up when generating an app against it. Its presence is what turns a `tinkerdown.yaml` into a *manifest*.
 
