@@ -57,8 +57,10 @@ func (c *Config) Summarize(refs DocumentRefs) *OperationSummary {
 			Execs:     src.Type == "exec",
 			Network:   sourceReachesNetwork(src.Type),
 			// A source that is not read-only can be written through the table and
-			// form affordances Tinkerdown generates from it.
-			Writes: src.Readonly != nil && !*src.Readonly,
+			// form affordances Tinkerdown generates from it. IsReadonly owns the
+			// "nil means read-only" default; re-deriving it here would drift if that
+			// default ever changed.
+			Writes: !src.IsReadonly(),
 		}
 		summary.Operations = append(summary.Operations, op)
 	}
@@ -77,7 +79,10 @@ func (c *Config) Summarize(refs DocumentRefs) *OperationSummary {
 			Type:      action.Kind,
 			Describes: action.Describes,
 			Execs:     action.Kind == "exec",
-			Network:   action.Kind == "http",
+			// http reaches the network directly; a sql action inherits the reach of
+			// the source it runs against, so one pointed at pg/rest/graphql is
+			// talking off-host even though the action itself is "just SQL".
+			Network: action.Kind == "http" || c.actionReachesNetwork(action),
 			// Every action exists to change something; that is what distinguishes
 			// one from a source. Treating them all as writes avoids guessing at SQL.
 			Writes: true,
@@ -98,6 +103,15 @@ func (c *Config) Summarize(refs DocumentRefs) *OperationSummary {
 		}
 	}
 	return summary
+}
+
+// actionReachesNetwork reports whether an action's backing source leaves the host.
+func (c *Config) actionReachesNetwork(action *Action) bool {
+	if action.Source == "" {
+		return false
+	}
+	src, ok := c.Sources[action.Source]
+	return ok && sourceReachesNetwork(src.Type)
 }
 
 func sourceReachesNetwork(sourceType string) bool {

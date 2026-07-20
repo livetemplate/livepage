@@ -27,9 +27,12 @@ func ValidateCommand(args []string) error {
 			summaryOnly = true
 			continue
 		}
-		if !strings.HasPrefix(arg, "-") {
-			dir = arg
+		if strings.HasPrefix(arg, "-") {
+			// Fail loudly. A script expecting JSON from a mistyped --sumary would
+			// otherwise silently receive human-readable output instead.
+			return fmt.Errorf("unknown flag %q (supported: --summary)", arg)
 		}
+		dir = arg
 	}
 
 	// Check if directory exists
@@ -487,8 +490,7 @@ func printOperationSummary(absDir string, manifest *config.Config) error {
 			return err
 		}
 		if d.IsDir() {
-			name := d.Name()
-			if strings.HasPrefix(name, "_") || strings.HasPrefix(name, ".") {
+			if skipWalkDir(d.Name()) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -528,4 +530,18 @@ func printOperationSummary(absDir string, manifest *config.Config) error {
 	}
 	fmt.Println(string(out))
 	return nil
+}
+
+// skipWalkDir reports whether a directory is not worth descending into. Shared so the
+// summary walk and the validation walk cannot drift apart on what they consider part
+// of the site.
+func skipWalkDir(name string) bool {
+	if strings.HasPrefix(name, "_") || strings.HasPrefix(name, ".") {
+		return true
+	}
+	switch name {
+	case "node_modules", "vendor", "dist", "build", "target":
+		return true
+	}
+	return false
 }
