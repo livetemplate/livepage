@@ -127,7 +127,9 @@ func ValidateCommand(args []string) error {
 			// binds to nothing, and reports no error anywhere — the hardest of the
 			// three "validates clean but does nothing" cases to notice, because
 			// every available signal says success.
-			if inert := page.InertAttributes(); len(inert) > 0 {
+			inert := page.InertAttributes()
+			unknown := page.UnknownAttributes()
+			if len(inert) > 0 {
 				fileErrors = append(fileErrors, fileValidationError{
 					file: relPath,
 					error: fmt.Sprintf("%s used outside an ```lvt block — this markup renders but nothing binds to it; move it inside a ```lvt fence",
@@ -140,10 +142,10 @@ func ValidateCommand(args []string) error {
 			// proves the document parses, and an unknown attribute is emitted as
 			// inert HTML — so a generated page could satisfy "validate is clean"
 			// while doing nothing.
-			for _, unknown := range page.UnknownAttributes() {
-				msg := fmt.Sprintf("unknown attribute %q", unknown.Name)
-				if unknown.Hint != "" {
-					msg += " (" + unknown.Hint + ")"
+			for _, u := range unknown {
+				msg := fmt.Sprintf("unknown attribute %q", u.Name)
+				if u.Hint != "" {
+					msg += " (" + u.Hint + ")"
 				}
 				fileErrors = append(fileErrors, fileValidationError{file: relPath, error: msg})
 				totalErrors++
@@ -174,7 +176,7 @@ func ValidateCommand(args []string) error {
 					error: fmt.Sprintf("Mermaid errors:\n  %s", errorMsg),
 				})
 				totalErrors += len(mermaidErrors)
-			} else if len(violations) == 0 && len(page.UnknownAttributes()) == 0 && len(page.InertAttributes()) == 0 {
+			} else if len(violations) == 0 && len(unknown) == 0 && len(inert) == 0 {
 				validFiles++
 				fmt.Printf("✓ %s\n", relPath)
 			}

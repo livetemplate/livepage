@@ -23,8 +23,11 @@ func TestKnownAttributesAreReal(t *testing.T) {
 	}
 	goSrc := readProductionGo(t)
 
-	names := make([]string, 0, len(knownAttributes))
+	names := make([]string, 0, len(knownAttributes)+len(knownDataAttributes))
 	for name := range knownAttributes {
+		names = append(names, name)
+	}
+	for name := range knownDataAttributes {
 		names = append(names, name)
 	}
 	sort.Strings(names)
@@ -66,7 +69,15 @@ func TestUnknownAttributes(t *testing.T) {
 		{name: "a real attribute passes", markup: `<table lvt-source="x" lvt-columns="a"></table>`},
 		{name: "a namespaced member passes", markup: `<form lvt-el:reset:on:success></form>`},
 		{name: "an arbitrary lvt-on event passes", markup: `<div lvt-on:mouseenter="Hover"></div>`},
-		{name: "data-lvt-* passes", markup: `<input data-lvt-force-update>`},
+		{name: "a real data-lvt-* passes", markup: `<input data-lvt-force-update>`},
+		{
+			// data-lvt-* is a closed set, so an invented one must be caught like any
+			// other. Allowing the bare prefix would have let this through — the same
+			// hole this file exists to close, one namespace over.
+			name:     "an invented data-lvt-* is reported",
+			markup:   `<table data-lvt-sortable></table>`,
+			wantName: "data-lvt-sortable",
+		},
 		{name: "plain HTML is untouched", markup: `<div class="x" data-id="1"><input name="q"></div>`},
 	}
 
@@ -110,7 +121,15 @@ func readProductionGo(t *testing.T) []byte {
 					continue
 				}
 				walk(path)
-			case strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, "_test.go"):
+			// vocabulary.go must be excluded, for the same reason collectGo excludes
+			// it in attribute_docs_test.go: a substring scan cannot tell mentioning an
+			// attribute from implementing one. Without this the guard is circular —
+			// knownAttributes' own map keys live in this file, so every entry matches
+			// itself and the test can never fail. Adding "lvt-totally-made-up" to the
+			// allowlist passed cleanly until this line existed.
+			case strings.HasSuffix(name, ".go") &&
+				!strings.HasSuffix(name, "_test.go") &&
+				name != "vocabulary.go":
 				if b, err := os.ReadFile(path); err == nil {
 					all = append(all, b...)
 				}

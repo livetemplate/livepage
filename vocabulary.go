@@ -63,7 +63,35 @@ var knownPrefixes = []string{
 	"lvt-mod:",
 	"lvt-form:",
 	"lvt-nav:",
-	"data-lvt-", // data-lvt-force-update, data-lvt-target, and friends
+}
+
+// knownDataAttributes is the data-lvt-* set. Unlike the namespaces above it is closed
+// and enumerable, so it is checked exactly rather than by prefix. Allowing the whole
+// prefix would have let data-lvt-sortable validate clean — the same hole this file
+// exists to close, one namespace over.
+var knownDataAttributes = map[string]bool{
+	"data-lvt-force-update":        true,
+	"data-lvt-target":              true,
+	"data-lvt-id":                  true,
+	"data-lvt-id-pending":          true,
+	"data-lvt-key":                 true,
+	"data-lvt-redact":              true,
+	"data-lvt-autofocused":         true,
+	"data-lvt-heartbeat-ms":        true,
+	"data-lvt-iv-done":             true,
+	"data-lvt-loading":             true,
+	"data-lvt-loading-debounce-ms": true,
+	"data-lvt-scroll-sticky":       true,
+	"data-lvt-targeted-applied":    true,
+	"data-lvt-targeted-skip":       true,
+	"data-lvt-text-caret":          true,
+	"data-lvt-text-select-button":  true,
+	"data-lvt-toast-content":       true,
+	"data-lvt-toast-item":          true,
+	"data-lvt-toast-stack":         true,
+	"data-lvt-upload-preview":      true,
+	"data-lvt-url-hash":            true,
+	"data-lvt-viewport-items":      true,
 }
 
 // UnknownAttribute is an lvt-* attribute a document uses that nothing implements.
@@ -97,7 +125,7 @@ func (p *Page) UnknownAttributes() []UnknownAttribute {
 					if !strings.HasPrefix(attr.Key, "lvt-") && !strings.HasPrefix(attr.Key, "data-lvt-") {
 						continue
 					}
-					if knownAttributes[attr.Key] || hasKnownPrefix(attr.Key) {
+					if knownAttributes[attr.Key] || knownDataAttributes[attr.Key] || hasKnownPrefix(attr.Key) {
 						continue
 					}
 					found[attr.Key] = true
