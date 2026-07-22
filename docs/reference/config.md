@@ -455,6 +455,22 @@ generation:
 
 The `describes:` field on a source or action carries no runtime behavior. It is the human-readable summary an operator reads when reviewing what a generated app actually does — "the pending PII access requests queue" rather than a table name.
 
+### Atomic multi-statement actions (`statements:`)
+
+A `kind: sql` action normally carries a single `statement:`. When an action must do several things that have to succeed or fail together — change state **and** append an audit record, say — use a `statements:` list instead; they run in one transaction (all commit, or the first error rolls all of them back):
+
+```yaml
+approve-export:
+  kind: sql
+  source: access_requests
+  statements:
+    - "INSERT INTO exports (...) SELECT ... FROM orders_pii LIMIT (SELECT row_cap FROM access_requests WHERE id = :id)"
+    - "INSERT INTO audit_log (...) SELECT ... FROM access_requests WHERE id = :id"
+    - "UPDATE access_requests SET status = 'approved' WHERE id = :id"
+```
+
+An action must set exactly one of `statement`/`statements` — both, or neither, is a config error caught at load. Keep values the client controls out of the batch where they matter: reading a row cap from the row (`LIMIT (SELECT row_cap FROM …)`) rather than from a button parameter keeps a scoped operation scoped even against a tampered client.
+
 ## Next Steps
 
 - [Frontmatter Reference](frontmatter.md) - Recommended configuration approach

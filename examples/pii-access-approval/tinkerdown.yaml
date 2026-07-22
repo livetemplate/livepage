@@ -1,0 +1,75 @@
+# Workspace manifest for the PII / data-export access-approval console.
+#
+# A team authors this once. The `generation:` block is the approved surface an
+# LLM may wire up when generating an app against this project — everything else
+# is off-limits. `describes:` on each source and action is what an operator reads
+# in the operation summary before serving; it must name what is actually touched
+# (see approve-export, which reads synthetic PII).
+
+sources:
+  access_requests:
+    describes: "The pending / approved / denied queue of PII data-export access requests."
+    type: sqlite
+    db: ./data/access.db
+    table: access_requests
+    readonly: false
+
+  audit_log:
+    describes: "Append-only trail of every approve/deny decision (approver, time, scope, reason, TTL)."
+    type: sqlite
+    db: ./data/access.db
+    table: audit_log
+    readonly: false
+
+  datasets:
+    describes: "Catalog of requestable datasets and their sensitivity tags (read-only)."
+    type: sqlite
+    db: ./data/access.db
+    table: datasets
+    readonly: true
+
+actions:
+  approve-export:
+    describes: "Runs a bounded SELECT of up to the request's row cap from orders_pii (synthetic PII: names + emails) into the exports table, appends an audit row (approver, time, scope, reason, TTL), and marks the request approved — all atomically."
+    kind: sql
+    source: access_requests
+    confirm: "Approve this request and run the bounded PII export?"
+    params:
+      id:
+        type: number
+        required: true
+    # The three statements commit or roll back together (ExecTx). The row cap and
+    # dataset are read from the request row via subqueries, not passed by the
+    # client, so the export is bounded server-side — a tampered button cannot
+    # widen it. `:id` is the request id (from the button's data-id); `:operator`
+    # is the approver identity, injected from --operator.
+    statements:
+      - "INSERT INTO exports (request_id, exported_at, name, email)
+           SELECT :id, datetime('now'), name, email FROM orders_pii
+           LIMIT (SELECT row_cap FROM access_requests WHERE id = :id)"
+      - "INSERT INTO audit_log (ts, approver, requester, dataset, decision, scope, reason, ttl)
+           SELECT datetime('now'), :operator, requester, dataset, 'approved', scope, reason, ttl
+           FROM access_requests WHERE id = :id"
+      - "UPDATE access_requests SET status = 'approved', approver = :operator WHERE id = :id"
+
+  deny-request:
+    describes: "Marks the request denied and appends an audit row. No data access is granted; no export runs."
+    kind: sql
+    source: access_requests
+    confirm: "Deny this request?"
+    params:
+      id:
+        type: number
+        required: true
+    statements:
+      - "INSERT INTO audit_log (ts, approver, requester, dataset, decision, scope, reason, ttl)
+           SELECT datetime('now'), :operator, requester, dataset, 'denied', scope, reason, ttl
+           FROM access_requests WHERE id = :id"
+      - "UPDATE access_requests SET status = 'denied', approver = :operator WHERE id = :id"
+
+generation:
+  sources: [access_requests, audit_log, datasets]
+  actions: [approve-export, deny-request]
+
+styling:
+  theme: clean

@@ -42,14 +42,25 @@ func TestPageRefs(t *testing.T) {
 			want: DocRefs{Actions: []string{"create"}},
 		},
 		{
-			// The tier for controls that are not buttons. Tinkerdown generates these
-			// itself (auto_tasks.go emits lvt-on:click="Toggle"), so missing it left
-			// actions invisible to policy in documents the tool wrote.
-			name: "lvt-on:{event} invokes an action",
+			// The tier for controls that are not buttons — a custom action bound to a
+			// checkbox or select, which the name= tiers cannot express.
+			name: "lvt-on:{event} invokes a custom action",
 			page: &Page{ServerBlocks: map[string]*ServerBlock{
-				"b1": {Content: `<input type="checkbox" lvt-on:click="Toggle"><select lvt-on:change="Filter"></select>`},
+				"b1": {Content: `<input type="checkbox" lvt-on:click="Escalate"><select lvt-on:change="Reassign"></select>`},
 			}},
-			want: DocRefs{Actions: []string{"Filter", "Toggle"}},
+			want: DocRefs{Actions: []string{"Escalate", "Reassign"}},
+		},
+		{
+			// Built-in action names (add/delete/toggle/refresh/…) are source
+			// affordances the runtime handles for any writable source, not custom
+			// governed actions. Collecting them would make an approved writable
+			// source's own Add or Delete control fail the policy lint — and
+			// auto_tasks.go emits lvt-on:click="Toggle" on every generated task list.
+			name: "built-in action names are not collected as references",
+			page: &Page{ServerBlocks: map[string]*ServerBlock{
+				"b1": {Content: `<input lvt-on:click="Toggle"><select lvt-on:change="Filter"></select><button name="Delete"></button><button name="Refresh"></button><form name="Add"></form>`},
+			}},
+			want: DocRefs{},
 		},
 		{
 			// First in the client's form action-resolution order, ahead of submitter

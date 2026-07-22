@@ -322,18 +322,37 @@ func (s *GenericState) executeSQLAction(action *config.Action, data map[string]i
 		data["operator"] = s.getOperator()
 	}
 
-	// Substitute parameters in SQL statement
+	// Execute with a timeout to avoid hanging indefinitely.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// A statements batch runs atomically: substitute each, then hand the whole
+	// set to ExecTx so a state change and its audit record commit or roll back
+	// together. Config validation guarantees exactly one of Statement/Statements.
+	if len(action.Statements) > 0 {
+		stmts := make([]source.SQLStatement, 0, len(action.Statements))
+		for _, raw := range action.Statements {
+			query, args, err := substituteParams(raw, data)
+			if err != nil {
+				s.Error = err.Error()
+				return err
+			}
+			stmts = append(stmts, source.SQLStatement{Query: query, Args: args})
+		}
+		if err := executor.ExecTx(ctx, stmts); err != nil {
+			s.Error = err.Error()
+			return err
+		}
+		return s.refresh()
+	}
+
+	// Substitute parameters in the single SQL statement.
 	query, args, err := substituteParams(action.Statement, data)
 	if err != nil {
 		s.Error = err.Error()
 		return err
 	}
-
-	// Execute the query with timeout to avoid hanging indefinitely
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	_, err = executor.Exec(ctx, query, args...)
-	if err != nil {
+	if _, err := executor.Exec(ctx, query, args...); err != nil {
 		s.Error = err.Error()
 		return err
 	}

@@ -164,6 +164,42 @@ func (s *SQLiteSource) Exec(ctx context.Context, query string, args ...interface
 	return rowsAffected, nil
 }
 
+// ExecTx runs the given statements in a single transaction. Either every
+// statement commits, or the first error rolls all of them back — so an action
+// that must change state and append an audit record does both or neither. The
+// source's write mutex is held for the whole transaction, matching Exec's
+// single-writer discipline against SQLite's one-writer lock.
+func (s *SQLiteSource) ExecTx(ctx context.Context, stmts []SQLStatement) error {
+	if s.readonly {
+		return fmt.Errorf("sqlite source %q is read-only", s.name)
+	}
+	if len(stmts) == 0 {
+		return nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("sqlite source %q: begin transaction: %w", s.name, err)
+	}
+
+	for i, stmt := range stmts {
+		if _, err := tx.ExecContext(ctx, stmt.Query, stmt.Args...); err != nil {
+			if rbErr := tx.Rollback(); rbErr != nil {
+				return fmt.Errorf("sqlite source %q: statement %d failed (%w); rollback also failed: %v", s.name, i+1, err, rbErr)
+			}
+			return fmt.Errorf("sqlite source %q: statement %d failed, transaction rolled back: %w", s.name, i+1, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("sqlite source %q: commit transaction: %w", s.name, err)
+	}
+	return nil
+}
+
 // WriteItem performs write operations (add, update, delete)
 func (s *SQLiteSource) WriteItem(ctx context.Context, action string, data map[string]interface{}) error {
 	if s.readonly {

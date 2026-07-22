@@ -251,6 +251,36 @@ func createSource(name string, cfg config.SourceConfig, siteDir, currentFile str
 
 // HandleAction dispatches an action to the appropriate handler.
 // This replaces the reflection-based dispatch used in generated plugins.
+// builtinActions are action names the runtime handles intrinsically for any
+// source, independent of the manifest — source affordances (refresh a view,
+// add/delete a row) rather than custom, governed actions. The policy lint must
+// not treat them as unapproved: they are governed by whether the source itself
+// is approved and writable. Kept in sync with the HandleAction switch below.
+var builtinActions = map[string]bool{
+	"refresh": true, "run": true, "filter": true, "edit": true, "canceledit": true,
+	"add": true, "toggle": true, "delete": true, "update": true,
+}
+
+// builtinActionPrefixes are the datatable action families (Sort_X, NextPage_X,
+// PrevPage_X). Shared between IsBuiltinAction and HandleAction's dispatch.
+var builtinActionPrefixes = []string{"sort", "nextpage", "prevpage"}
+
+// IsBuiltinAction reports whether name is a runtime built-in (case-insensitive)
+// rather than a custom manifest action. It exists so callers outside the runtime
+// — notably the policy lint — can tell a source affordance from a governed action.
+func IsBuiltinAction(name string) bool {
+	n := strings.ToLower(name)
+	if builtinActions[n] {
+		return true
+	}
+	for _, p := range builtinActionPrefixes {
+		if strings.HasPrefix(n, p) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *GenericState) HandleAction(action string, data map[string]interface{}) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -282,10 +312,10 @@ func (s *GenericState) HandleAction(action string, data map[string]interface{}) 
 		return err
 	default:
 		// Check for datatable actions (Sort_X, NextPage_X, PrevPage_X)
-		if strings.HasPrefix(actionLower, "sort") ||
-			strings.HasPrefix(actionLower, "nextpage") ||
-			strings.HasPrefix(actionLower, "prevpage") {
-			return s.handleDatatableAction(action, data)
+		for _, p := range builtinActionPrefixes {
+			if strings.HasPrefix(actionLower, p) {
+				return s.handleDatatableAction(action, data)
+			}
 		}
 
 		// Check for custom declared actions

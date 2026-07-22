@@ -223,6 +223,31 @@ func (c *Config) ValidateGeneration() error {
 	return nil
 }
 
+// ValidateActions checks that every sql action is executable as written. A sql
+// action carries either a single `statement` or a `statements` batch (run
+// atomically in one transaction), never both and never neither: both is
+// ambiguous, neither is a no-op that would fail silently at click time rather
+// than loudly at load.
+func (c *Config) ValidateActions() error {
+	if c == nil {
+		return nil
+	}
+	for name, action := range c.Actions {
+		if action == nil || action.Kind != "sql" {
+			continue
+		}
+		hasOne := action.Statement != ""
+		hasMany := len(action.Statements) > 0
+		switch {
+		case hasOne && hasMany:
+			return fmt.Errorf("action %q: set either statement or statements, not both", name)
+		case !hasOne && !hasMany:
+			return fmt.Errorf("action %q: sql action needs a statement or statements", name)
+		}
+	}
+	return nil
+}
+
 // IsManifest reports whether this config declares a generation surface — i.e. whether
 // approval semantics apply at all.
 func (c *Config) IsManifest() bool {
@@ -395,15 +420,16 @@ type Action struct {
 	// privileged operations a generated app performs. See Config.Generation.
 	Describes string `yaml:"describes,omitempty"`
 
-	Kind      string              `yaml:"kind"`                // Action kind: "sql", "http", "exec"
-	Source    string              `yaml:"source,omitempty"`    // For sql: source name to execute against
-	Statement string              `yaml:"statement,omitempty"` // For sql: SQL statement with :param placeholders
-	URL       string              `yaml:"url,omitempty"`       // For http: request URL (supports template expressions)
-	Method    string              `yaml:"method,omitempty"`    // For http: HTTP method (default: POST)
-	Body      string              `yaml:"body,omitempty"`      // For http: request body template
-	Cmd       string              `yaml:"cmd,omitempty"`       // For exec: command to run
-	Params    map[string]ParamDef `yaml:"params,omitempty"`    // Parameter definitions
-	Confirm   string              `yaml:"confirm,omitempty"`   // Confirmation message (triggers dialog)
+	Kind       string              `yaml:"kind"`                 // Action kind: "sql", "http", "exec"
+	Source     string              `yaml:"source,omitempty"`     // For sql: source name to execute against
+	Statement  string              `yaml:"statement,omitempty"`  // For sql: a single SQL statement with :param placeholders
+	Statements []string            `yaml:"statements,omitempty"` // For sql: several statements run atomically in one transaction (mutually exclusive with statement)
+	URL        string              `yaml:"url,omitempty"`        // For http: request URL (supports template expressions)
+	Method     string              `yaml:"method,omitempty"`     // For http: HTTP method (default: POST)
+	Body       string              `yaml:"body,omitempty"`       // For http: request body template
+	Cmd        string              `yaml:"cmd,omitempty"`        // For exec: command to run
+	Params     map[string]ParamDef `yaml:"params,omitempty"`     // Parameter definitions
+	Confirm    string              `yaml:"confirm,omitempty"`    // Confirmation message (triggers dialog)
 }
 
 // ParamDef defines a parameter for an action
@@ -882,6 +908,12 @@ func Load(configPath string) (*Config, error) {
 	// frontmatter. A typo in generation.sources silently removes protection, which is
 	// exactly the failure that must not be quiet.
 	if err := config.ValidateGeneration(); err != nil {
+		return nil, err
+	}
+
+	// A sql action with both statement and statements, or neither, is a
+	// misconfiguration that would otherwise surface only when a user clicks it.
+	if err := config.ValidateActions(); err != nil {
 		return nil, err
 	}
 

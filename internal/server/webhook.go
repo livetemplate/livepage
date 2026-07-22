@@ -555,16 +555,30 @@ func (e *webhookActionExecutor) executeSQLAction(action *config.Action, data map
 		return fmt.Errorf("source %q does not support SQL execution", action.Source)
 	}
 
-	// Substitute parameters in SQL statement
+	// Execute with a timeout.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// A statements batch runs atomically via ExecTx, matching the UI action
+	// path — otherwise a webhook-triggered action that uses `statements` would
+	// run an empty `statement` and silently no-op.
+	if len(action.Statements) > 0 {
+		stmts := make([]source.SQLStatement, 0, len(action.Statements))
+		for _, raw := range action.Statements {
+			query, args, err := e.substituteParams(raw, data)
+			if err != nil {
+				return err
+			}
+			stmts = append(stmts, source.SQLStatement{Query: query, Args: args})
+		}
+		return executor.ExecTx(ctx, stmts)
+	}
+
+	// Substitute parameters in the single SQL statement.
 	query, args, err := e.substituteParams(action.Statement, data)
 	if err != nil {
 		return err
 	}
-
-	// Execute the query with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
 	_, err = executor.Exec(ctx, query, args...)
 	return err
 }
