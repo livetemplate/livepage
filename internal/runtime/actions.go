@@ -313,122 +313,20 @@ func (s *GenericState) executeSQLAction(action *config.Action, data map[string]i
 		return fmt.Errorf("source %q does not support SQL execution", action.Source)
 	}
 
-	// Inject operator into data for :operator parameter substitution
-	// This enables SQL actions like "WHERE assigned_to = :operator" to work
-	if data == nil {
-		data = make(map[string]interface{})
-	}
-	if _, exists := data["operator"]; !exists {
-		data["operator"] = s.getOperator()
-	}
-
-	// Execute with a timeout to avoid hanging indefinitely.
+	// Execute with a timeout to avoid hanging indefinitely. source.RunSQLAction is
+	// the shared execute step — operator injection, param substitution, and the
+	// atomic statements/single-statement branch — used by the webhook path too so
+	// the two cannot drift.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// A statements batch runs atomically: substitute each, then hand the whole
-	// set to ExecTx so a state change and its audit record commit or roll back
-	// together. Config validation guarantees exactly one of Statement/Statements.
-	if len(action.Statements) > 0 {
-		stmts := make([]source.SQLStatement, 0, len(action.Statements))
-		for _, raw := range action.Statements {
-			query, args, err := substituteParams(raw, data)
-			if err != nil {
-				s.Error = err.Error()
-				return err
-			}
-			stmts = append(stmts, source.SQLStatement{Query: query, Args: args})
-		}
-		if err := executor.ExecTx(ctx, stmts); err != nil {
-			s.Error = err.Error()
-			return err
-		}
-		return s.refresh()
-	}
-
-	// Substitute parameters in the single SQL statement.
-	query, args, err := substituteParams(action.Statement, data)
-	if err != nil {
-		s.Error = err.Error()
-		return err
-	}
-	if _, err := executor.Exec(ctx, query, args...); err != nil {
+	if err := source.RunSQLAction(ctx, executor, action, data); err != nil {
 		s.Error = err.Error()
 		return err
 	}
 
 	// Refresh data after mutation
 	return s.refresh()
-}
-
-// substituteParams converts :name placeholders to positional args.
-// Input:  "DELETE FROM tasks WHERE id = :id", {"id": "123"}
-// Output: "DELETE FROM tasks WHERE id = ?", ["123"]
-// Returns an error if a parameter in the statement is not found in data.
-//
-// Parameter names must start with a letter (a-z, A-Z) and can contain
-// letters, digits, and underscores. This avoids false matches on:
-// - Time literals like '12:30:00' (digits after colon)
-// - Postgres casts like value::text (double colon)
-func substituteParams(stmt string, data map[string]interface{}) (string, []interface{}, error) {
-	var args []interface{}
-	result := stmt
-
-	// Find all :name patterns and replace with ?
-	// Process in a way that handles overlapping names correctly
-	for {
-		// Find the next :name pattern
-		idx := strings.Index(result, ":")
-		if idx == -1 {
-			break
-		}
-
-		// Skip double colons (postgres cast syntax like ::text)
-		if idx+1 < len(result) && result[idx+1] == ':' {
-			result = result[:idx] + "\x00DOUBLECOLON\x00" + result[idx+2:]
-			continue
-		}
-
-		// Check if next character is a letter (parameter names must start with letter)
-		if idx+1 >= len(result) {
-			// Colon at end of string, not a parameter
-			result = result[:idx] + "\x00COLON\x00" + result[idx+1:]
-			continue
-		}
-
-		firstChar := result[idx+1]
-		if !((firstChar >= 'a' && firstChar <= 'z') || (firstChar >= 'A' && firstChar <= 'Z')) {
-			// Not a valid parameter (starts with digit, symbol, etc.)
-			// This handles time literals like '12:30:00'
-			result = result[:idx] + "\x00COLON\x00" + result[idx+1:]
-			continue
-		}
-
-		// Extract the parameter name (alphanumeric and underscore)
-		endIdx := idx + 1
-		for endIdx < len(result) {
-			c := result[endIdx]
-			if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' {
-				endIdx++
-			} else {
-				break
-			}
-		}
-
-		paramName := result[idx+1 : endIdx]
-		paramValue, exists := data[paramName]
-		if !exists {
-			return "", nil, fmt.Errorf("undefined parameter %q in SQL statement", paramName)
-		}
-		args = append(args, paramValue)
-		result = result[:idx] + "?" + result[endIdx:]
-	}
-
-	// Restore markers
-	result = strings.ReplaceAll(result, "\x00DOUBLECOLON\x00", "::")
-	result = strings.ReplaceAll(result, "\x00COLON\x00", ":")
-
-	return result, args, nil
 }
 
 // validateHTTPURL delegates to the shared security package.

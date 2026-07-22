@@ -38,19 +38,24 @@ actions:
       id:
         type: number
         required: true
-    # The three statements commit or roll back together (ExecTx). The row cap and
-    # dataset are read from the request row via subqueries, not passed by the
-    # client, so the export is bounded server-side — a tampered button cannot
-    # widen it. `:id` is the request id (from the button's data-id); `:operator`
-    # is the approver identity, injected from --operator.
+    # The three statements commit or roll back together (ExecTx). Every statement
+    # is guarded on `status = 'pending'`, so the action is idempotent: a replay,
+    # a double-click that beats the UI refresh, or a direct call with an
+    # already-decided id affects zero rows — no second export, no second audit.
+    # The row cap and dataset are read from the request row, not passed by the
+    # client, so the export is bounded server-side. COALESCE(..., 0) makes a
+    # non-matching / non-pending id export zero rows rather than relying on
+    # LIMIT NULL (which is undefined and, on some SQLite builds, unbounded).
+    # `:id` is the request id (from the button's data-id); `:operator` is the
+    # approver identity, injected from --operator.
     statements:
       - "INSERT INTO exports (request_id, exported_at, name, email)
            SELECT :id, datetime('now'), name, email FROM orders_pii
-           LIMIT (SELECT row_cap FROM access_requests WHERE id = :id)"
+           LIMIT COALESCE((SELECT row_cap FROM access_requests WHERE id = :id AND status = 'pending'), 0)"
       - "INSERT INTO audit_log (ts, approver, requester, dataset, decision, scope, reason, ttl)
            SELECT datetime('now'), :operator, requester, dataset, 'approved', scope, reason, ttl
-           FROM access_requests WHERE id = :id"
-      - "UPDATE access_requests SET status = 'approved', approver = :operator WHERE id = :id"
+           FROM access_requests WHERE id = :id AND status = 'pending'"
+      - "UPDATE access_requests SET status = 'approved', approver = :operator WHERE id = :id AND status = 'pending'"
 
   deny-request:
     describes: "Marks the request denied and appends an audit row. No data access is granted; no export runs."
@@ -61,11 +66,13 @@ actions:
       id:
         type: number
         required: true
+    # Guarded on status = 'pending' like approve-export, so denying an
+    # already-decided request is a no-op rather than a second audit row.
     statements:
       - "INSERT INTO audit_log (ts, approver, requester, dataset, decision, scope, reason, ttl)
            SELECT datetime('now'), :operator, requester, dataset, 'denied', scope, reason, ttl
-           FROM access_requests WHERE id = :id"
-      - "UPDATE access_requests SET status = 'denied', approver = :operator WHERE id = :id"
+           FROM access_requests WHERE id = :id AND status = 'pending'"
+      - "UPDATE access_requests SET status = 'denied', approver = :operator WHERE id = :id AND status = 'pending'"
 
 generation:
   sources: [access_requests, audit_log, datasets]

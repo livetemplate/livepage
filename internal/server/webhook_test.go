@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/livetemplate/tinkerdown/internal/config"
+	"github.com/livetemplate/tinkerdown/internal/source"
 )
 
 // mockActionHandler tracks action executions for testing
@@ -462,8 +463,6 @@ func TestWebhookActionExecutor_ValidateParams(t *testing.T) {
 }
 
 func TestWebhookActionExecutor_SubstituteParams(t *testing.T) {
-	executor := newWebhookActionExecutor(nil, "")
-
 	tests := []struct {
 		name        string
 		stmt        string
@@ -505,7 +504,7 @@ func TestWebhookActionExecutor_SubstituteParams(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, args, err := executor.substituteParams(tt.stmt, tt.data)
+			result, args, err := source.SubstituteParams(tt.stmt, tt.data)
 
 			if tt.expectError {
 				if err == nil {

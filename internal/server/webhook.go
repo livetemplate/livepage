@@ -555,87 +555,16 @@ func (e *webhookActionExecutor) executeSQLAction(action *config.Action, data map
 		return fmt.Errorf("source %q does not support SQL execution", action.Source)
 	}
 
-	// Execute with a timeout.
+	// Execute with a timeout. source.RunSQLAction is the shared execute step —
+	// operator injection, param substitution, and the atomic statements/single-
+	// statement branch — used by the UI action path too, so the two cannot drift.
+	// This path previously omitted the operator injection, so a webhook-triggered
+	// action referencing :operator failed until it was routed through the shared
+	// helper.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// A statements batch runs atomically via ExecTx, matching the UI action
-	// path — otherwise a webhook-triggered action that uses `statements` would
-	// run an empty `statement` and silently no-op.
-	if len(action.Statements) > 0 {
-		stmts := make([]source.SQLStatement, 0, len(action.Statements))
-		for _, raw := range action.Statements {
-			query, args, err := e.substituteParams(raw, data)
-			if err != nil {
-				return err
-			}
-			stmts = append(stmts, source.SQLStatement{Query: query, Args: args})
-		}
-		return executor.ExecTx(ctx, stmts)
-	}
-
-	// Substitute parameters in the single SQL statement.
-	query, args, err := e.substituteParams(action.Statement, data)
-	if err != nil {
-		return err
-	}
-	_, err = executor.Exec(ctx, query, args...)
-	return err
-}
-
-// substituteParams converts :name placeholders to positional args.
-func (e *webhookActionExecutor) substituteParams(stmt string, data map[string]interface{}) (string, []interface{}, error) {
-	var args []interface{}
-	result := stmt
-
-	for {
-		idx := strings.Index(result, ":")
-		if idx == -1 {
-			break
-		}
-
-		// Skip double colons (postgres cast syntax)
-		if idx+1 < len(result) && result[idx+1] == ':' {
-			result = result[:idx] + "\x00DOUBLECOLON\x00" + result[idx+2:]
-			continue
-		}
-
-		// Check if next character is a letter
-		if idx+1 >= len(result) {
-			result = result[:idx] + "\x00COLON\x00" + result[idx+1:]
-			continue
-		}
-
-		firstChar := result[idx+1]
-		if !((firstChar >= 'a' && firstChar <= 'z') || (firstChar >= 'A' && firstChar <= 'Z')) {
-			result = result[:idx] + "\x00COLON\x00" + result[idx+1:]
-			continue
-		}
-
-		// Extract the parameter name
-		endIdx := idx + 1
-		for endIdx < len(result) {
-			c := result[endIdx]
-			if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' {
-				endIdx++
-			} else {
-				break
-			}
-		}
-
-		paramName := result[idx+1 : endIdx]
-		paramValue, exists := data[paramName]
-		if !exists {
-			return "", nil, fmt.Errorf("undefined parameter %q in SQL statement", paramName)
-		}
-		args = append(args, paramValue)
-		result = result[:idx] + "?" + result[endIdx:]
-	}
-
-	result = strings.ReplaceAll(result, "\x00DOUBLECOLON\x00", "::")
-	result = strings.ReplaceAll(result, "\x00COLON\x00", ":")
-
-	return result, args, nil
+	return source.RunSQLAction(ctx, executor, action, data)
 }
 
 // executeHTTPAction executes an HTTP request.
