@@ -36,15 +36,106 @@ Use Tinkerdown for:
 - Apps requiring complex client-side state (use React/Vue)
 - Real-time multiplayer games
 
-## Generate, then validate
+## The generation workflow
 
 Interactivity comes from a **fixed vocabulary**, not freeform HTML — that constraint is
 what makes generated output reliable. Stay inside it (see `reference.md`) rather than
 reaching for custom JavaScript.
 
-Always run `tinkerdown validate <file>` on generated markdown before serving it. It
-parses with the real parser and reports errors with file, line, and a hint, so you can
-self-correct to a clean pass instead of discovering breakage in the browser.
+Follow these steps in order. They exist because each one catches something the next
+cannot.
+
+### 1. Read the approved surface, if there is one
+
+If the project has a `tinkerdown.yaml` with a `generation:` block, it declares the
+sources and actions you may use — and those are the **only** ones you may use:
+
+```bash
+cat tinkerdown.yaml
+```
+
+Each approved source and action may carry a `describes:` note saying what it touches.
+Use those names as given. **Do not declare your own `sources:` or `actions:` in the
+document's frontmatter** — a name outside the approved set fails validation, and
+redefining an approved name silently has no effect, because approved definitions are
+pinned and yours will be ignored.
+
+No `generation:` block means no approved surface: declare sources in frontmatter as
+normal.
+
+### 2. Write the document
+
+**Put `lvt-*` markup inside a ```lvt fence.** Outside one it is ordinary HTML: the page
+renders, nothing binds, and no error appears anywhere — not in the browser console, not
+in the server log. It simply sits there looking correct. This is the easiest mistake to
+make and the hardest to spot.
+
+````markdown
+```lvt
+<table lvt-source="requests" lvt-columns="id,requester,status"></table>
+<button name="approve" data-id="1">Approve</button>
+```
+````
+
+Use only attributes from `reference.md`. If you need a capability you cannot find
+there, check whether it exists before inventing an attribute for it — a plausible
+invention is the most common way generated pages fail.
+
+### 3. Validate, and fix what it reports
+
+```bash
+tinkerdown validate app.md
+```
+
+This is the gate, and it now checks three separate things:
+
+- **Syntax** — the document parses.
+- **Vocabulary** — every `lvt-*` attribute is one something actually implements.
+  `unknown attribute "lvt-sortable"` means you invented it; a hint names the
+  replacement when there is one.
+- **Policy** — every source and action is in the approved set, whether referenced or
+  declared.
+- **Placement** — no `lvt-*` markup sits outside a ```lvt fence, where it would be
+  inert.
+
+Fix and re-run until it passes. Each diagnostic carries a hint naming the approved
+alternatives or the correct attribute, so work from those rather than guessing.
+
+**Stop after about five rounds.** If it is still failing, the request likely needs a
+capability the vocabulary does not have. Say so rather than continuing to substitute
+attributes — a page that validates but does the wrong thing is worse than an honest
+"this needs something Tinkerdown does not do."
+
+### 4. Check what the app does, if it is privileged
+
+```bash
+tinkerdown validate --summary app-directory
+```
+
+Emits JSON on stdout. When `"privileged": true`, the app executes commands, writes
+data, or reaches the network — **show the operator the `operations` list and get their
+OK before serving.** Each entry carries the manifest's `describes:` note, which is what
+makes the list reviewable.
+
+When `privileged` is false the app only reads. Serve it without interrupting anyone; a
+prompt on every generated page is a prompt nobody reads.
+
+This command fails if the project config cannot be read. That is deliberate — a policy
+gate that cannot see the policy must not report "nothing to review."
+
+### 5. Serve it
+
+```bash
+tinkerdown serve <directory>
+```
+
+Write the document to a scratch directory and serve that. Ephemeral means nothing is
+persisted and the directory is deleted afterwards — not that nothing touches disk. A
+directory the operator can re-run and inspect is more useful than one they cannot, and
+if the UI turns out to be worth keeping, it already is a file.
+
+Exec sources and actions additionally require `--allow-exec`; that decision belongs to
+whoever runs the server, not to the document.
 
 ## Quick Start
 

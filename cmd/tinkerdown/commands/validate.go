@@ -123,6 +123,34 @@ func ValidateCommand(args []string) error {
 			})
 			totalErrors++
 		} else {
+			// Placement: lvt-* markup outside an ```lvt block is inert. It renders,
+			// binds to nothing, and reports no error anywhere — the hardest of the
+			// three "validates clean but does nothing" cases to notice, because
+			// every available signal says success.
+			inert := page.InertAttributes()
+			unknown := page.UnknownAttributes()
+			if len(inert) > 0 {
+				fileErrors = append(fileErrors, fileValidationError{
+					file: relPath,
+					error: fmt.Sprintf("%s used outside an ```lvt block — this markup renders but nothing binds to it; move it inside a ```lvt fence",
+						strings.Join(inert, ", ")),
+				})
+				totalErrors++
+			}
+
+			// Vocabulary: does every lvt-* attribute exist? validate otherwise only
+			// proves the document parses, and an unknown attribute is emitted as
+			// inert HTML — so a generated page could satisfy "validate is clean"
+			// while doing nothing.
+			for _, u := range unknown {
+				msg := fmt.Sprintf("unknown attribute %q", u.Name)
+				if u.Hint != "" {
+					msg += " (" + u.Hint + ")"
+				}
+				fileErrors = append(fileErrors, fileValidationError{file: relPath, error: msg})
+				totalErrors++
+			}
+
 			// Policy: does this document stay inside the project's approved surface?
 			violations := manifest.CheckPolicy(pageRefs(page))
 			for _, v := range violations {
@@ -148,7 +176,7 @@ func ValidateCommand(args []string) error {
 					error: fmt.Sprintf("Mermaid errors:\n  %s", errorMsg),
 				})
 				totalErrors += len(mermaidErrors)
-			} else if len(violations) == 0 {
+			} else if len(violations) == 0 && len(unknown) == 0 && len(inert) == 0 {
 				validFiles++
 				fmt.Printf("✓ %s\n", relPath)
 			}

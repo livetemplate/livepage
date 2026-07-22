@@ -229,7 +229,16 @@ func collectGo(t *testing.T, dir string, out *[]byte) {
 		// attribute exists: a fixture using a made-up attribute would vouch for the
 		// docs that invented it — and this very file names lvt-filter in its comments,
 		// which silently defeated the check until _test.go was excluded.
-		case strings.HasSuffix(e.Name(), ".go") && !strings.HasSuffix(e.Name(), "_test.go"):
+		//
+		// vocabulary.go is excluded for the same reason in production form: its
+		// migration table names dead attributes precisely in order to suggest
+		// replacements ("lvt-animate" -> "lvt-fx:animate"), and a substring scan
+		// cannot tell mentioning an attribute from implementing one. That exclusion
+		// would be a blind spot on its own, so TestMigrationHintsAgreeWithRemovedLists
+		// covers the same ground by a different route.
+		case strings.HasSuffix(e.Name(), ".go") &&
+			!strings.HasSuffix(e.Name(), "_test.go") &&
+			e.Name() != "vocabulary.go":
 			b, err := os.ReadFile(path)
 			if err != nil {
 				continue
@@ -370,4 +379,42 @@ func TestRemovedAttributesAreReallyGone(t *testing.T) {
 
 	check(documentedAsRemoved, "superseded/removed")
 	check(neverImplemented, "never implemented")
+}
+
+// TestMigrationHintsAgreeWithRemovedLists keeps vocabulary.go's migration table and
+// this file's removed/never-implemented lists from drifting apart.
+//
+// vocabulary.go is excluded from the Go scan above, because naming a dead attribute in
+// order to suggest its replacement is indistinguishable, to a substring search, from
+// implementing it. That exclusion would be a blind spot on its own — so rather than
+// trusting the file, this asserts the two agree: every attribute vocabulary.go offers a
+// migration away from must be one this file also records as dead, and must genuinely be
+// absent from the shipped client.
+//
+// Revive an attribute and both must be updated; add a migration hint for something
+// still live and this fails.
+func TestMigrationHintsAgreeWithRemovedLists(t *testing.T) {
+	migrated := []string{
+		"lvt-scroll", "lvt-highlight", "lvt-animate", "lvt-throttle",
+		"lvt-disable-with", "lvt-preserve", "lvt-click-away",
+		"lvt-modal-open", "lvt-modal-close", "lvt-filter",
+	}
+
+	for _, name := range migrated {
+		if !documentedAsRemoved[name] && !neverImplemented[name] {
+			t.Errorf("vocabulary.go offers a migration for %q, but neither documentedAsRemoved "+
+				"nor neverImplemented records it as dead — one of the two is wrong", name)
+		}
+	}
+
+	bundle, err := os.ReadFile("internal/assets/client/tinkerdown-client.browser.js")
+	if err != nil {
+		t.Fatalf("read client bundle: %v", err)
+	}
+	for _, name := range migrated {
+		if implemented(name, bundle) {
+			t.Errorf("vocabulary.go tells users to migrate away from %q, but it IS implemented "+
+				"in the shipped client — the hint would send them away from working code", name)
+		}
+	}
 }
