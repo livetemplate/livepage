@@ -63,6 +63,17 @@ func TestPageRefs(t *testing.T) {
 			want: DocRefs{},
 		},
 		{
+			// A custom governed action whose name merely starts with a datatable
+			// dispatch prefix (sort/nextpage/prevpage) must still be collected, or
+			// it would bypass the approved-action policy check by naming coincidence.
+			// Only exact built-in affordance names are excluded.
+			name: "custom action starting with a dispatch prefix is still collected",
+			page: &Page{ServerBlocks: map[string]*ServerBlock{
+				"b1": {Content: `<button name="sort-by-priority"></button>`},
+			}},
+			want: DocRefs{Actions: []string{"sort-by-priority"}},
+		},
+		{
 			// First in the client's form action-resolution order, ahead of submitter
 			// name and form name.
 			name: "lvt-form:action routes explicitly",

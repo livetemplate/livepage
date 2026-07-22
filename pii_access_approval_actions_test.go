@@ -86,7 +86,9 @@ func TestPIIActionsAreBoundedAndIdempotent(t *testing.T) {
 	if cap1 >= totalPII {
 		t.Fatalf("fixture invalid: cap %d must be < %d PII rows so the LIMIT bites", cap1, totalPII)
 	}
-	if err := source.RunSQLAction(ctx, src, approve, map[string]interface{}{"id": 1}); err != nil {
+	// The payload smuggles an "operator" key — a client cannot spoof the audit
+	// approver, because operator is reserved and server-set (from --operator).
+	if err := source.RunSQLAction(ctx, src, approve, map[string]interface{}{"id": 1, "operator": "attacker@evil.example"}); err != nil {
 		t.Fatalf("approve (pending): %v", err)
 	}
 	if e := count("SELECT COUNT(*) FROM exports WHERE request_id = 1"); e != cap1 {
@@ -97,6 +99,13 @@ func TestPIIActionsAreBoundedAndIdempotent(t *testing.T) {
 	}
 	if status(1) != "approved" {
 		t.Errorf("status after approve = %q, want approved", status(1))
+	}
+	var approver string
+	if err := db.QueryRow("SELECT approver FROM audit_log WHERE decision = 'approved'").Scan(&approver); err != nil {
+		t.Fatal(err)
+	}
+	if approver != "approver@corp.example" {
+		t.Errorf("audit approver = %q, want the server operator — a client-supplied operator spoofed the audit trail", approver)
 	}
 
 	// Replay the same approve: idempotent — no second export, no second audit.

@@ -23,13 +23,16 @@ import (
 // The caller owns everything around execution — source lookup, timeouts, and any
 // post-mutation refresh — this is only the execute step.
 func RunSQLAction(ctx context.Context, executor SQLExecutor, action *config.Action, data map[string]interface{}) error {
-	// Inject the operator for :operator substitution (e.g. "WHERE approver = :operator").
+	// Set the operator for :operator substitution (e.g. "WHERE approver = :operator").
+	// This ALWAYS overwrites any incoming value: data is the client's action
+	// payload, and validateParams does not strip undeclared keys, so a client
+	// that sends "operator" in the payload could otherwise attribute an action —
+	// an approval written to an audit trail — to an identity it does not own.
+	// operator is a reserved, server-set param; a client cannot spoof it.
 	if data == nil {
 		data = make(map[string]interface{})
 	}
-	if _, ok := data["operator"]; !ok {
-		data["operator"] = config.GetOperator()
-	}
+	data["operator"] = config.GetOperator()
 
 	if len(action.Statements) > 0 {
 		stmts := make([]SQLStatement, 0, len(action.Statements))

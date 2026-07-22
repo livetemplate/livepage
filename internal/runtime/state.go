@@ -262,23 +262,21 @@ var builtinActions = map[string]bool{
 }
 
 // builtinActionPrefixes are the datatable action families (Sort_X, NextPage_X,
-// PrevPage_X). Shared between IsBuiltinAction and HandleAction's dispatch.
+// PrevPage_X). Used only by HandleAction's dispatch to route framework-generated
+// datatable actions — deliberately NOT part of IsBuiltinAction (see below).
 var builtinActionPrefixes = []string{"sort", "nextpage", "prevpage"}
 
-// IsBuiltinAction reports whether name is a runtime built-in (case-insensitive)
-// rather than a custom manifest action. It exists so callers outside the runtime
-// — notably the policy lint — can tell a source affordance from a governed action.
+// IsBuiltinAction reports whether name is one of the runtime's built-in source
+// affordances (add/delete/toggle/refresh/…) that every writable source handles,
+// as opposed to a custom, governed action. Exact-match, case-insensitive.
+//
+// It feeds the policy lint (refs.go), so the datatable dispatch prefixes
+// (sort/nextpage/prevpage) are intentionally excluded: those actions are
+// framework-generated and never appear in authored markup, and a prefix match
+// would classify a custom governed action like "sort-by-priority" as built-in
+// and silently drop it from the approved-action check — a governance hole.
 func IsBuiltinAction(name string) bool {
-	n := strings.ToLower(name)
-	if builtinActions[n] {
-		return true
-	}
-	for _, p := range builtinActionPrefixes {
-		if strings.HasPrefix(n, p) {
-			return true
-		}
-	}
-	return false
+	return builtinActions[strings.ToLower(name)]
 }
 
 func (s *GenericState) HandleAction(action string, data map[string]interface{}) error {
