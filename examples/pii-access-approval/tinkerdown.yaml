@@ -48,11 +48,20 @@ actions:
     describes: "Files a new access request. The status is server-set to 'pending' and no approver is recorded — a requester cannot self-approve or forge a decision; only approve-export / deny-request (below) change a status."
     kind: sql
     source: access_store
+    # Every field the statement references is declared, so this is the complete
+    # input contract: a caller must supply all of them (the intake form does).
+    # required:true is enforced; the rest may be empty but must still be present,
+    # because :name substitution errors on a key that is absent from the payload.
     params:
-      requester: { required: true }
-      dataset: { required: true }
-      row_cap: { type: number, required: true }
-      reason: { required: true }
+      requester:   { required: true }
+      dataset:     { required: true }
+      row_cap:     { type: number, required: true }
+      reason:      { required: true }
+      team:        {}
+      scope:       {}
+      ticket:      {}
+      ttl:         {}
+      sensitivity: {}
     # status is hard-coded in the INSERT — it is not a parameter, so a client
     # cannot submit status='approved' (the forgery the built-in Add allowed).
     # approver is left NULL; only a governed decision sets it.

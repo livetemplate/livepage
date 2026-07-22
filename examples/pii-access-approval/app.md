@@ -72,7 +72,9 @@ decision. No access is granted without a trail, and no request is decided twice.
       <form name="request-access" lvt-el:reset:on:success>
         <input name="requester" placeholder="you@company.com" required>
         <input name="team" placeholder="Team">
-        <input name="dataset" value="orders_pii" required>
+        <!-- Fixed: orders_pii is the only dataset this reference wires to an
+             export, so the requested dataset can't diverge from what's exported. -->
+        <label>Dataset <input name="dataset" value="orders_pii" readonly></label>
         <label>Row cap <input name="row_cap" type="number" value="500" min="1" required></label>
         <input name="scope" placeholder="SELECT name,email FROM orders_pii LIMIT 500" required>
         <input name="reason" placeholder="Business justification" required>

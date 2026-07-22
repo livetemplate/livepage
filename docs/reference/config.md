@@ -471,6 +471,8 @@ approve-export:
 
 An action must set exactly one of `statement`/`statements` — both, or neither, is a config error caught at load. Keep values the client controls out of the batch where they matter: reading a row cap from the row (`LIMIT (SELECT row_cap FROM …)`) rather than from a button parameter keeps a scoped operation scoped even against a tampered client.
 
+**`:operator` is reserved and server-set.** Every `kind: sql` action can reference `:operator`; it is always the server-side operator identity (from `--operator`), and any `operator` value in the client's action payload is ignored. This is deliberate — it lets a statement like `… SET approver = :operator` write a trustworthy identity to an audit trail that a client cannot spoof. Do not use `operator` as a client-supplied parameter name.
+
 ## Next Steps
 
 - [Frontmatter Reference](frontmatter.md) - Recommended configuration approach

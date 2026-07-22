@@ -40,6 +40,12 @@ Then open the served URL, review a pending request's scope, and click **Approve*
 or **Deny**. Watch the request leave the *Pending* tab and a row appear in the
 audit trail (refresh the audit section to see it).
 
+**Scope of this reference:** the `datasets` catalog is illustrative, but only
+`orders_pii` is wired to a real bounded export — so the intake form fixes the
+requested dataset to `orders_pii`, keeping what an approver sees identical to what
+an approval exports. A fuller implementation would parameterize the export per
+dataset.
+
 ## Files
 
 - `tinkerdown.yaml` — the workspace manifest (approved surface + actions).
