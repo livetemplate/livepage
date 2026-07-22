@@ -487,6 +487,27 @@ func TestExecuteSQLAction_SourceNotFound(t *testing.T) {
 	}
 }
 
+// TestHandleAction_CustomActionWinsOverDatatablePrefix pins the dispatch
+// precedence: a custom (governed) action whose name starts with a datatable
+// prefix (sort/nextpage/prevpage) must be dispatched as the custom action, not
+// routed to the datatable handler — otherwise an approved action the policy lint
+// allowed could never actually run. With a nil registry the sql action fails
+// distinctively ("source registry not configured"), proving it reached
+// executeCustomAction rather than handleDatatableAction.
+func TestHandleAction_CustomActionWinsOverDatatablePrefix(t *testing.T) {
+	state := &GenericState{
+		actions: map[string]*config.Action{
+			"sort-by-priority": {Kind: "sql", Source: "db", Statement: "UPDATE t SET x = 1"},
+		},
+		registry: nil,
+	}
+
+	err := state.HandleAction("sort-by-priority", nil)
+	if err == nil || err.Error() != "source registry not configured" {
+		t.Errorf("custom action with a datatable-prefix name was not dispatched as custom: got %v", err)
+	}
+}
+
 func TestExecuteHTTPAction(t *testing.T) {
 	// Bypass SSRF validation for mock server tests
 	security.SetTestBypassSSRF(true)

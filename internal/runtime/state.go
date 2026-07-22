@@ -309,16 +309,20 @@ func (s *GenericState) HandleAction(action string, data map[string]interface{}) 
 		}
 		return err
 	default:
-		// Check for datatable actions (Sort_X, NextPage_X, PrevPage_X)
+		// A custom (governed) action wins over the datatable-prefix fallback, so an
+		// approved action whose name starts with sort/nextpage/prevpage actually
+		// runs — keeping "the policy lint approved it" and "it executes" in sync.
+		// Framework-generated datatable actions (Sort_<col>, NextPage, PrevPage) are
+		// never manifest actions, so they still fall through to handleDatatableAction.
+		if customAction, ok := s.actions[action]; ok {
+			return s.executeCustomAction(customAction, data)
+		}
+
+		// Datatable actions (Sort_X, NextPage_X, PrevPage_X).
 		for _, p := range builtinActionPrefixes {
 			if strings.HasPrefix(actionLower, p) {
 				return s.handleDatatableAction(action, data)
 			}
-		}
-
-		// Check for custom declared actions
-		if customAction, ok := s.actions[action]; ok {
-			return s.executeCustomAction(customAction, data)
 		}
 
 		return fmt.Errorf("unknown action %q", action)
