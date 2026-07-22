@@ -7,19 +7,23 @@
 # (see approve-export, which reads synthetic PII).
 
 sources:
+  # The three sources a generated app may bind to are ALL read-only: the app
+  # only reads. Every write goes through a governed, audited action (below), so a
+  # client cannot bypass the workflow — a direct write to a readonly source is
+  # rejected, and nothing renders an editable control over these.
   access_requests:
-    describes: "The pending / approved / denied queue of PII data-export access requests."
+    describes: "The pending / approved / denied queue of PII data-export access requests (read-only)."
     type: sqlite
     db: ./data/access.db
     table: access_requests
-    readonly: false
+    readonly: true
 
   audit_log:
-    describes: "Append-only trail of every approve/deny decision (approver, time, scope, reason, TTL)."
+    describes: "Append-only trail of every approve/deny decision (approver, time, scope, reason, TTL) (read-only)."
     type: sqlite
     db: ./data/access.db
     table: audit_log
-    readonly: false
+    readonly: true
 
   datasets:
     describes: "Catalog of requestable datasets and their sensitivity tags (read-only)."
@@ -28,11 +32,37 @@ sources:
     table: datasets
     readonly: true
 
+  # The writable store the governed actions run against. Deliberately NOT in the
+  # generation.sources approved set, so a generated app cannot bind it directly
+  # (that would re-expose the built-in Add and let a requester forge a decision
+  # with a client-supplied status/approver). Only the named actions touch it.
+  access_store:
+    describes: "Writable backing store for the access database — used only by the governed request/approve/deny actions, never bound by the UI."
+    type: sqlite
+    db: ./data/access.db
+    table: access_requests
+    readonly: false
+
 actions:
+  request-access:
+    describes: "Files a new access request. The status is server-set to 'pending' and no approver is recorded — a requester cannot self-approve or forge a decision; only approve-export / deny-request (below) change a status."
+    kind: sql
+    source: access_store
+    params:
+      requester: { required: true }
+      dataset: { required: true }
+      row_cap: { type: number, required: true }
+      reason: { required: true }
+    # status is hard-coded in the INSERT — it is not a parameter, so a client
+    # cannot submit status='approved' (the forgery the built-in Add allowed).
+    # approver is left NULL; only a governed decision sets it.
+    statement: "INSERT INTO access_requests (requester, team, dataset, row_cap, scope, reason, ticket, ttl, sensitivity, status)
+                VALUES (:requester, :team, :dataset, :row_cap, :scope, :reason, :ticket, :ttl, :sensitivity, 'pending')"
+
   approve-export:
     describes: "Runs a bounded SELECT of up to the request's row cap from orders_pii (synthetic PII: names + emails) into the exports table, appends an audit row (approver, time, scope, reason, TTL), and marks the request approved — all atomically."
     kind: sql
-    source: access_requests
+    source: access_store
     confirm: "Approve this request and run the bounded PII export?"
     params:
       id:
@@ -60,7 +90,7 @@ actions:
   deny-request:
     describes: "Marks the request denied and appends an audit row. No data access is granted; no export runs."
     kind: sql
-    source: access_requests
+    source: access_store
     confirm: "Deny this request?"
     params:
       id:
@@ -76,7 +106,7 @@ actions:
 
 generation:
   sources: [access_requests, audit_log, datasets]
-  actions: [approve-export, deny-request]
+  actions: [request-access, approve-export, deny-request]
 
 styling:
   theme: clean

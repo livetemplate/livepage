@@ -18,6 +18,12 @@ Nothing touches production and no data is real — `orders_pii` is synthetic.
 - **Server-authoritative boundedness**: the button sends only the request `id`;
   the export's row cap and dataset are read from the request row via subqueries,
   so a tampered client cannot widen the export.
+- **Governed writes only**: the three sources the UI binds (`access_requests`,
+  `audit_log`, `datasets`) are **read-only**. Every mutation — filing a request,
+  approving, denying — goes through a named action that sets the sensitive fields
+  itself (intake hard-codes `status='pending'`; a decision sets `approver` from
+  `--operator`). A requester cannot file a pre-approved row or spoof the approver,
+  and no generated app can bind the writable store directly.
 
 ## Run it
 

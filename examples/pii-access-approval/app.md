@@ -66,7 +66,10 @@ decision. No access is granted without a trail, and no request is decided twice.
   <footer>
     <details>
       <summary>Request access</summary>
-      <form name="Add" lvt-el:reset:on:success>
+      <!-- Submits the governed request-access action, not the built-in Add: the
+           new request's status is server-set to pending, so a requester cannot
+           file a pre-approved row. -->
+      <form name="request-access" lvt-el:reset:on:success>
         <input name="requester" placeholder="you@company.com" required>
         <input name="team" placeholder="Team">
         <input name="dataset" value="orders_pii" required>
@@ -76,7 +79,6 @@ decision. No access is granted without a trail, and no request is decided twice.
         <input name="ttl" value="24h">
         <input name="ticket" placeholder="TICKET-123">
         <input name="sensitivity" value="PII">
-        <input type="hidden" name="status" value="pending">
         <button type="submit">Request access</button>
       </form>
     </details>

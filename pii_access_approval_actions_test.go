@@ -136,6 +136,38 @@ func TestPIIActionsAreBoundedAndIdempotent(t *testing.T) {
 	if e := count("SELECT COUNT(*) FROM exports WHERE request_id = 2"); e != 0 {
 		t.Errorf("deny exported %d rows, want 0 — deny must not grant access", e)
 	}
+
+	// Intake is governed: request-access hard-codes status = 'pending' and records
+	// no approver, so a requester cannot file a pre-approved row even if the
+	// payload smuggles status/approver (they are not statement params, so ignored).
+	requestAccess := cfg.Actions["request-access"]
+	if requestAccess == nil {
+		t.Fatal("manifest is missing request-access")
+	}
+	before := count("SELECT COUNT(*) FROM access_requests")
+	err = source.RunSQLAction(ctx, src, requestAccess, map[string]interface{}{
+		"requester": "eve@corp.example", "team": "Growth", "dataset": "orders_pii",
+		"row_cap": 2, "scope": "SELECT name,email FROM orders_pii LIMIT 2",
+		"reason": "test", "ticket": "GRW-1", "ttl": "24h", "sensitivity": "PII",
+		"status": "approved", "approver": "attacker@evil.example", // must be ignored
+	})
+	if err != nil {
+		t.Fatalf("request-access: %v", err)
+	}
+	if after := count("SELECT COUNT(*) FROM access_requests"); after != before+1 {
+		t.Errorf("request-access inserted %d rows, want 1", after-before)
+	}
+	var newStatus string
+	var newApprover sql.NullString
+	if err := db.QueryRow("SELECT status, approver FROM access_requests WHERE requester = 'eve@corp.example'").Scan(&newStatus, &newApprover); err != nil {
+		t.Fatal(err)
+	}
+	if newStatus != "pending" {
+		t.Errorf("filed request status = %q, want pending — a requester forged a decision via the intake", newStatus)
+	}
+	if newApprover.Valid {
+		t.Errorf("filed request approver = %q, want NULL — the intake must not set an approver", newApprover.String)
+	}
 }
 
 func seedPIIActionsDB(t *testing.T, dbPath string) {
