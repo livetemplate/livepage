@@ -568,23 +568,41 @@ Sections marked `[skip on phase execution]` (Appendix A) are historical context 
 - `internal/server/playground.go` (`ParseString`, `PlaygroundSession`, TTL) — the ephemeral serve substrate
 
 **Audit:**
-- [ ] **Design-ref completeness check.**
-- [ ] Decide the skill's generation context: reuse `docs/llm-system-prompt.md` + `reference.md` + the `examples/` corpus + the loaded manifest (approved sources/actions/style). Confirm the corpus's few-shot pairs are current post-M0.
-- [ ] Decide ephemeral serve mechanism: the existing `serve` (writes a temp file) vs. the disk-free `playground` render path. Prefer whichever is faster + cleaner for throwaway. Measure.
-- [ ] Define the validate loop's stop condition + max iterations (deterministic self-correction budget).
+- [x] **Design-ref completeness check.**
+- [x] Decide the skill's generation context: adopted `docs/llm-system-prompt.md` (seeded in M0 Phase 1) + the existing `skills/tinkerdown/reference.md` + `examples/` corpus + the loaded manifest. Corpus few-shot pairs confirmed current post-M0 (M0 Phase 2 already reconciled them against the client).
+- [x] Decide ephemeral serve mechanism — **chose `tinkerdown serve` on a scratch directory, *not* the playground's `ParseString` path.** The playground is not the disk-free win the plan assumed: it is an HTTP endpoint requiring a running server + a POST + a session id, and `websocket.go:495` still writes each block to `/tmp` regardless. A scratch directory the operator can re-run and inspect is more useful, and a UI worth keeping is already a file. (The genuine disk-free path is the `WithParseFS` refactor flagged in M0 Phase 0's Learn — deferred, not on Phase 3's critical path.)
+- [x] Define the validate loop's stop condition + max iterations — **~5 rounds.** A request still failing after five likely needs a capability the vocabulary lacks; saying so beats substituting attributes until something passes.
 
 **Implementation:**
-- [ ] `skills/tinkerdown/SKILL.md` — instructs Claude Code to: (1) load the manifest (approved sources/actions **+ the style guide: theme + `site_css` + `style-guide.md`**) + reference + corpus, (2) emit `app.md` using only approved sources/actions + the constrained `lvt-*` vocabulary, conforming to the house style, (3) run `tinkerdown validate` (policy lint enforced) and self-correct on diagnostics until clean, (4) run `validate --summary`; **if the app is privileged**, present the operation summary and get the operator's OK (read-only → skip straight through), (5) `serve` (ephemeral).
-- [ ] Bundle the generation context assets (reference + few-shot corpus) with the skill; keep them the single source of truth (don't fork `reference.md`).
-- [ ] Redirect the phantom `/new-app` etc. references (from M0 Phase 1) to this real skill.
+- [x] `skills/tinkerdown/SKILL.md` — the full generation workflow: read the approved surface → write the document (leading with the ```lvt fence requirement) → `tinkerdown validate` and self-correct (~5 rounds) → check the operation summary if privileged → serve on a scratch dir.
+- [x] Bundle the generation context assets — the existing `skills/tinkerdown/reference.md` is referenced, **not forked**; it stays the single source of truth.
+- [x] ~~Redirect the phantom `/new-app` etc. references.~~ **Moot — already removed in M0 Phase 1** (which deleted the five-command table and documented the real describe→validate→serve loop). Nothing left to redirect by Phase 3.
+- [x] **(added) `vocabulary.go` — validate now checks attribute *names*** (M2's allowlist pulled forward, per operator decision). A document using `lvt-filter`/`lvt-scroll`/a literal `lvt-totally-made-up` previously validated with zero errors — unknown `lvt-*` was emitted as inert HTML, so a hallucinated attribute survived every loop iteration. It now fails, with a migration hint only where a real one exists. `knownDataAttributes` is a closed 22-entry exact-match set (not a `data-lvt-` prefix, which let `data-lvt-sortable` through in review).
+- [x] **(added) `InertAttributes()` gate — the third silent-failure class, found by dogfooding.** Following the workflow produced a page that validated clean, summarised privileged, served without error, and rendered nothing: `lvt-*` only binds inside a ```lvt fence; in the markdown body it is inert HTML, with no console error and no server warning. `validate` now flags `lvt-*` markup outside a fence.
 
 **Acceptance criteria:**
-- [ ] **Simplify:** prose + asset pass.
-- [ ] **Unit/structural:** a test asserting the skill bundle is well-formed + the referenced assets exist (mirror `skill_examples_test.go`).
-- [ ] **Integration:** dry-run the skill's validate loop against a deliberately-broken `app.md` — confirm the diagnostics let it converge to clean.
-- [ ] **E2E:** covered in Phase 5 (full generate→serve).
+- [x] **Simplify:** prose + asset pass.
+- [x] **Unit/structural:** `vocabulary_test.go` (`TestKnownAttributesAreReal`, `TestUnknownAttributes`, `TestInertAttributes`) + the extended `attribute_docs_test.go`; the existing `skill_examples_test.go` continues to validate the skill bundle + assets. Both new guards verified to fail when their conditions are violated.
+- [x] **Integration:** `TestUnknownAttributes` is the dry-run — a deliberately-broken doc (`lvt-scroll`, `lvt-sortable`) produces line+hint diagnostics an agent converges on; a clean doc passes.
+- [x] **E2E:** covered in Phase 5 (full generate→serve).
 
-**Learn:** 4 prompts.
+**Learn:**
+
+*What surprised us.*
+1. **"Validate is clean" did not mean "the page works" — in three distinct ways, and only one was on the plan.** The plan scoped Phase 3 as a skill-authoring task; it became a validation-hardening task once dogfooding exposed that a document could pass `validate` and still do nothing. Three silent-failure classes, all closed at the gate: (a) **unknown/hallucinated attribute names** (`lvt-totally-made-up` validated clean) — the one the plan's Risk 755 predicted, fixed by pulling M2's allowlist forward; (b) **`data-lvt-` as a blanket-allowed prefix** let `data-lvt-sortable` through — fixed by enumerating the closed 22-name set; (c) **`lvt-*` markup outside a ```lvt fence is inert HTML** — no error anywhere, found only by *following my own SKILL.md instructions* and getting a blank page.
+2. **The self-certifying-test failure mode recurred a third time, and knowing the mode was not enough — only running the falsification test caught it.** `TestKnownAttributesAreReal` scanned `vocabulary.go`, which *contains* the allowlist keys, so every entry matched itself and `"lvt-totally-made-up": true` passed. I had fixed this exact pattern in `collectGo` in the same commit and still failed to apply it to the new scanner. Fixed by excluding `vocabulary.go`; the lesson is procedural, not conceptual — verify a guard can fail before trusting it.
+
+*PLAN.md drift fixed in this commit.*
+- **This whole block is the drift.** #303 merged the code without updating the tracker or writing this Learn; reconstructed here as its own commit (from the #303 diff + commit message), boxes ticked only against what the diff actually did.
+- The serve-mechanism decision diverged from the plan's two options (serve-temp-file vs. playground) — recorded with the reason (playground isn't disk-free) rather than silently picking one.
+- The "redirect phantom commands" item was already satisfied by M0 Phase 1; struck rather than re-done.
+
+*Feed-forward to **Phase 4**'s Audit.*
+- The golden `app.md` Phase 4 authors **must pass the now-stricter `validate`** — real attribute names only. Appendix B's illustrative golden uses `lvt-filter` and `lvt-value` (both non-existent per M0 Phase 2 / Phase 3's allowlist) and the wrong action schema (`type:`/`sql:` instead of `kind:`/`statement:`); do not copy it verbatim — author against the real vocabulary and let `validate` gate it. Model on `examples/team-tasks/app.md`.
+- The operation summary is what the operator reviews. Phase 4 must ensure the summary names the sensitive operations — see Phase 4's Audit finding on `orders_pii` being invisible to a name-only summary.
+
+*New / changed risks.*
+- **Retire Risk 755's "M1 must pull forward the allowlist or accept the gap"** — pulled forward and closed for exact-match attribute names. **Residual (still open, M2):** namespace *members* are unvalidated (`lvt-el:bogus:on:success` passes) — a deliberate limit, since `lvt-on:` takes arbitrary DOM events and hard-coding a member set would create a second list to rot.
 
 #### Phase 4 (M1) — The PII / data-export access-approval reference app (~1 session)
 
