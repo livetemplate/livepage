@@ -787,32 +787,54 @@ type Diagnostic struct {
 
 #### Phase 1 (M2, upstream `../livetemplate`) — the `Validate()` API + a tagged release (~1 session)
 
-> **Goal at end:** `livetemplate.Validate(templateText)` ships in a tagged `../livetemplate` release, returning structured line/col diagnostics for parse + reactive-AST errors (built on `internal/parse`, not `Execute`), so a downstream consumer can pin it.
+> **Goal at end:** `livetemplate.Validate(templateText)` ships in a tagged `../livetemplate` release (**`v0.21.0`**, 2026-07-23), returning structured line diagnostics for parse + composition errors — built on the serve-faithful `ParseFS`/`(*Template).Parse` path (which returns errors directly, unlike the swallowing `Execute`), so a downstream consumer can pin it.
 
 **Design refs:**
 - § M2 design (this section) — the API surface + the "build on internal primitives" finding
 - `../livetemplate`: `internal/parse/api.go:25` (`Parse`), `:62` (`BuildTree`), `internal/parse/errors.go:8` (`ParseError` — note `Pos` is a byte offset), `template.go:1662-1673` (the swallowing fallback to avoid), `template.go:1186` (`(*Template).Parse`), `client_assets.go:19` (`ClientVersion`), `scripts/release.sh` + `CHANGELOG.md` (release mechanics)
 
 **Audit (first task):**
-- [ ] **Design-ref completeness check.**
-- [ ] Confirm the exact internal entry points and their error contracts (`parse.Parse`, `parse.BuildTree`, `compat.ParseTemplateToTree`); decide which the API wraps. Verify empirically that a broken template (`{{range}}` unclosed; unknown func) surfaces a `ParseError` through them and is *swallowed* through `ExecuteUpdates` — the two must diverge, or the API adds nothing.
-- [ ] Pin the `Pos`→line/col conversion approach (byte-offset → line/col against `templateText`).
-- [ ] **Decide `WithSampleData` ship-vs-defer for M2.** It is the render-determinism half tinkerdown won't exercise; ship it only if the design confirms a faithful, non-flaky check is cheap, else defer to a follow-up and land the data-free core (which is what tinkerdown consumes).
-- [ ] Confirm `ClientVersion` is unchanged by this server-only API (the provenance table's M2 row: a `Validate()` release "may legitimately leave `ClientVersion` unchanged"). Read the constant; do **not** bump the client if it hasn't moved.
+- [x] **Design-ref completeness check.**
+- [x] Confirm the internal entry points and their error contracts — **superseded by a sharper empirical finding.** The swallow is real, but the API did **not** end up built on raw `internal/parse` (which the root package could import). It builds on `(*Template).Parse` via the `ParseFS` path — see Learn #2/#4. The divergence that matters was proven differently: `tinkerdown validate` passes an **unclosed `{{range}}` in a block as clean** (it never runs livetemplate's parser on block content), so serve degrades with no validate error. That empirical gap — not the `Execute`-swallow abstraction — is the justification.
+- [x] ~~Pin the `Pos`→line/col conversion approach.~~ **Moot for the shipped scope** — the data-free path reads the line from html/template's `template:NAME:LINE:` string, not `ParseError.Pos`. `Pos`→line/col returns with the deferred sample-data mode (which uses the reactive parser's byte offsets).
+- [x] **Decided `WithSampleData`: DEFERRED** (advisor). No consumer this cycle (tinkerdown has no data at validate-time), the render-determinism it would add already shipped engine-side (v0.20.0 #467), and it drags in `Pos`→line/col + the swallow-asymmetry for an unexercised path. `SeverityWarning` is reserved as its home. Shipped the data-free core alone.
+- [x] Confirmed `ClientVersion` unchanged (0.20.0) — server-only API; the release's client-pin guard reported "current". No bundle regeneration (provenance checklist = **No**).
 
 **Implementation:**
-- [ ] `Validate(templateText string, opts ...ValidateOption) ([]Diagnostic, error)` + `Diagnostic`/`Severity`/`ValidateOption` in the root package, built on `internal/parse`.
-- [ ] `WithComponentTemplates` support (component-referencing templates must resolve); `WithSampleData(any)` per the Audit decision.
-- [ ] Unit tests upstream: a clean template → no diagnostics; each error class (unclosed action, unknown function, malformed range, undefined variable) → a diagnostic with the right line; a component-using template resolves.
-- [ ] `CHANGELOG.md` entry (Keep-a-Changelog `### Added`); **cut a tagged release via `scripts/release.sh`** (verify `--dry-run` first; the script's client-pin guard should pass unchanged).
+- [x] `Validate(templateText string, opts ...ValidateOption) ([]Diagnostic, error)` + `Diagnostic`/`Severity`/`ValidateOption` in the root package — built on `New`+`WithParseFS`+`(*Template).Parse` (the serve-faithful `ParseFS` path), **not** raw `internal/parse` (Learn #4). `Diagnostic` shipped as `{Line, Severity, Message}` — `Col`/`Hint` dropped after review (Learn #3).
+- [x] `WithValidateComponents(...*TemplateSet)` support (fidelity-guarded: a component-using template validates clean). ~~`WithSampleData(any)`~~ deferred.
+- [x] Unit tests upstream (8): clean; component-resolves (fidelity guard); component-missing-set → diagnostic; unclosed range; unknown function; **framework-builtin-resolves (the unreachable-downstream proof)**; multi-line line number; broken component set → infra error.
+- [x] Curated `CHANGELOG.md` `[Unreleased]` → `### Added` (release model is *promote-curated*, not chglog-generated); **released `v0.21.0`** via `scripts/release.sh` (dry-run first; client-pin guard passed; full suite + build green; tag + GitHub release pushed).
 
 **Acceptance criteria:**
-- [ ] **Simplify:** `/simplify` against the `../livetemplate` diff.
-- [ ] **Unit:** the upstream table above, green in `../livetemplate`.
-- [ ] **Integration:** a throwaway consumer `go get`s the new tag and calls `Validate` on a known-bad template, asserting the diagnostic line.
-- [ ] **E2E:** N/A upstream (no UI) — the live-render path is unchanged; existing livetemplate e2e stays green.
+- [x] **Simplify:** `code-simplifier` on the diff — one improvement (collapsed the component-option loop into the variadic call), rest already clean.
+- [x] **Unit:** 8 tests green in `../livetemplate`; full 22-package suite + pre-commit hook (fmt + golangci-lint + `go test ./...`) green.
+- [x] **Integration:** de-risked against the **real** consumer before the tag — via a local `replace`, tinkerdown's actual `lvt/components` datatable set (with its own `mod`/`colID` funcs) parses clean through `Validate` and detection fires; tinkerdown compiles against the branch. CI's `Test Tinkerdown against Core Changes` also passed on the PR.
+- [x] **E2E:** N/A upstream — live-render path unchanged; existing livetemplate e2e green (incl. Redis/docker, run by the release).
 
-**Learn:** what surprised us / plan drift / feed-forward to Phase 2's Audit (the real `Diagnostic` shape + whether `WithSampleData` shipped) / new-or-changed risks.
+**Learn:**
+
+*What surprised us.*
+1. **`tinkerdown validate` is blind to template *syntax* errors in blocks — the sharper justification the plan's "Execute swallows" framing missed.** An unclosed `{{range}}` in a fence passes `validate` clean, because tinkerdown's parser never runs livetemplate's template parser on block content; it only fails at *serve* (log + skip → broken UI, no validate error). That empirical gap is what `Validate()` closes, and tinkerdown *cannot* close it downstream — the check needs livetemplate's own funcMap.
+2. **The `.Parse` method drops component defs; the `ParseFS`/`ParseFiles` path preserves them.** `parseSources` (used by `ParseFiles`/`ParseFS`) *clones* the component-bearing template (`template.go:1396`) so `{{template "ns:name"}}` resolves; the `.Parse` method builds a *fresh* base template (`:1200`) that would false-positive every component block. Serve uses `ParseFiles`, so validating via `New`+`WithParseFS`(in-memory) is serve-faithful. The advisor flagged this as the blocking risk; the first code action was the fidelity test that proved it both directions.
+3. **The Diagnostic shape was over-built. `html/template` parse errors carry NO column** (verified empirically — even lexer errors like "unterminated quoted string" report only a line), and no check had a hint to add, so `Col` and `Hint` were always empty. Both **dropped pre-release** (the PR review flagged them) → the honest `{Line, Severity, Message}`. A column and hint can be *appended back non-breakingly* when the deferred sample-data mode lands with real positional info — the field-trim and the deferral are the same sequencing decision.
+4. **Built on `.Parse`, not raw `internal/parse` — for fidelity, not access.** `internal/parse.Parse` is a lower layer; `.Parse` runs the *full* serve pipeline (comment-strip, composition-flatten, bracket-expand, wrapper) and returns the parse error directly (unlike `Execute`, which swallows). Validating through the exact path serve parses is worth more than the structured `ParseError` the lower layer would give — which anyway needs data (BuildTree) to be more than a plain parse error.
+
+*PLAN.md drift fixed in this commit.*
+- Goal/Implementation corrected: "structured line/**col** diagnostics … built on **`internal/parse`**" → line-only, built on the `ParseFS`/`.Parse` path. `Diagnostic` = `{Line, Severity, Message}`.
+- `Pos`→line/col conversion struck as moot for the shipped scope (returns with sample-data).
+- The CHANGELOG mechanism is *promote-curated `[Unreleased]`*, not chglog-generated (the plan said "`### Added` entry" — right section, but noting the promotion model).
+
+*Feed-forward to **Phase 2**'s Audit.*
+- **The shipped API is `livetemplate.Validate(content, livetemplate.WithValidateComponents(getComponentTemplates()...))`** — confirmed compiling + working against tinkerdown's real component set. Option name is `WithValidateComponents` (not `WithComponentTemplates`, which is the serve-time `Option`).
+- **`Diagnostic` = `{Line int, Severity Severity, Message string}`** — map onto `fileValidationError` (file + message; prefix the message with the line). No `Col`/`Hint` to thread.
+- **`WithSampleData` did NOT ship** — Phase 2 consumes the data-free syntax/composition diagnostics only (which is all tinkerdown has at validate-time anyway).
+- **Pin `v0.21.0`.** Provenance checklist = **No** (server-only; `ClientVersion` still 0.20.0). Phase 2's Audit re-confirms the constant didn't move.
+- The temp-file drop at `websocket.go:495` is a Phase 2 item — `(*Template).Parse`/`WithParseFS`-from-memory both parse from memory (no `/tmp`).
+
+*New / changed risks.*
+- **New (low): multi-line-HTML-comment line shift.** `StripHTMLComments` drops a comment's newlines before parsing, so a diagnostic below a *multi-line* HTML comment reports a line shifted by the comment's height. Documented in the `Validate` godoc; uncommon in generated blocks. If it bites the skill loop, map the coordinate back.
+- **New (low): no cross-call caching.** `Validate` re-parses supplied component sets per call — fine for pre-serve/dev-time use, not per-keystroke against a large library. Documented.
 
 #### Phase 2 (M2, tinkerdown) — consume `Validate()` per block + drop the temp-file dance (~1 session)
 
