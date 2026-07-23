@@ -81,6 +81,25 @@ Use only attributes from `reference.md`. If you need a capability you cannot fin
 there, check whether it exists before inventing an attribute for it — a plausible
 invention is the most common way generated pages fail.
 
+**Binding data and actions — three rules that cause most first-try failures:**
+
+- **State comes from `lvt-source` on the block's container.** `{{range .Data}}` and
+  `{{.Field}}` render the rows of the bound source. An interactive block (a form, a
+  per-row button) that has no `lvt-source` above it fails validation with *"no state
+  reference"* — put the form and its table inside one `<div lvt-source="…">` /
+  `<article lvt-source="…">`, as in the Quick Start.
+- **`name=` invokes an action.** In a **governed** project (one with a `generation:`
+  block) the name on a button or form must be either a built-in operation
+  (`Add`/`Delete`/`Toggle`/`Refresh`) or an **approved action name** — a made-up name
+  like `name="approve"` fails the policy check unless the manifest approves it. A
+  write-form's intake should invoke a governed action (e.g. `name="request-access"`),
+  not the built-in `Add` against a writable source, when the manifest keeps status/
+  approver fields server-controlled.
+- **Confirm-gated buttons need `data-confirm`.** A manifest action's `confirm:` field
+  is a *declaration*, not a runtime dialog — it produces no prompt on its own. To ask
+  the operator to confirm before a privileged action, put `data-confirm="…"` on the
+  button (`<button name="approve-export" data-id="{{.Id}}" data-confirm="Approve?">`).
+
 ### 3. Validate, and fix what it reports
 
 ```bash
@@ -141,27 +160,36 @@ whoever runs the server, not to the document.
 
 ### 1. Create a markdown file
 
-Create `myapp.md`:
+Create `myapp.md`. An interactive block gets its data from a **source** bound with
+`lvt-source` on the block's container — that binding is what gives the block state
+(`.Data`); a block with none fails validation with "no state reference". Declare the
+source in frontmatter (or use an approved one), then bind it:
 
 ```markdown
 ---
 title: "My App"
+sources:
+  items:
+    type: sqlite
+    db: ./items.db
+    table: items
+    readonly: false
 ---
 
 # My App
 
 \`\`\`lvt
-<div>
+<div lvt-source="items">
     <h2>Add Item</h2>
-    <form name="save" lvt-persist="items">
+    <form name="Add" lvt-el:reset:on:success>
         <input type="text" name="title" required>
         <button type="submit">Add</button>
     </form>
 
     <h2>Items</h2>
-    {{if .Items}}
+    {{if .Data}}
     <ul>
-        {{range .Items}}
+        {{range .Data}}
         <li>
             {{.Title}}
             <button name="Delete" data-id="{{.Id}}">Delete</button>
@@ -174,6 +202,11 @@ title: "My App"
 </div>
 \`\`\`
 ```
+
+The block's rows come from `.Data` (the source's rows), and `name=` on a button or
+form invokes an action: `Add`/`Delete`/`Toggle`/`Refresh` are built-in operations
+every writable source provides, and any other name invokes a **named action** (see
+the next section for governed projects).
 
 ### 2. Run it
 
@@ -189,10 +222,10 @@ Navigate to `http://localhost:3000` - your app is running!
 
 | Concept | What It Does |
 |---------|--------------|
-| `lvt-persist` | Auto-saves form data to SQLite. Creates table, generates CRUD. |
-| `lvt-source` | Connects to external data (PostgreSQL, REST API, CSV, JSON, scripts) |
-| `name` (on button/form) | Triggers server action on click (button) or form submission (form) |
+| `lvt-source` | Binds a block to a data source (SQLite, PostgreSQL, REST, CSV, JSON, exec) — the block's rows are `.Data` |
+| `name` (on button/form) | Triggers an action: built-in `Add`/`Delete`/`Toggle`/`Refresh`, or an approved named action |
 | `data-*` | Passes data with actions (e.g., `data-id="123"`) |
+| `data-confirm` | Prompts before an action fires (a manifest `confirm:` is a declaration, not a dialog) |
 | frontmatter sources | Define data sources in frontmatter - no `tinkerdown.yaml` needed! |
 
 ## Reference
@@ -207,7 +240,7 @@ See [reference.md](./reference.md) for complete API documentation:
 ## Examples
 
 See [examples/](./examples/) for complete working apps:
-1. [Todo App](./examples/01-todo-app.md) - Basic CRUD with `lvt-persist`
+1. [Todo App](./examples/01-todo-app.md) - Basic CRUD with `lvt-source`
 2. [Dashboard](./examples/02-dashboard.md) - Data display with `lvt-source`
 3. [Contact Form](./examples/03-contact-form.md) - Form handling
 4. [Blog](./examples/04-blog.md) - Multi-page with partials

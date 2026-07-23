@@ -1,20 +1,22 @@
 ---
 title: "Simple Blog"
+sources:
+  posts: { type: sqlite, db: ./posts.db, table: posts, readonly: false }
 ---
 
 # Simple Blog
 
-A blog demonstrating `lvt-persist` for posts.
+A blog demonstrating `lvt-source` with a SQLite table for posts.
 
 **Features demonstrated:**
-- `lvt-persist` for blog posts
+- `lvt-source` for blog posts
 - Textarea for long content
 - Date display
 - Delete functionality
 - **No CSS classes needed** - PicoCSS styles semantic HTML automatically
 
 ```lvt
-<main>
+<main lvt-source="posts">
     <!-- Header -->
     <hgroup>
         <h1>My Blog</h1>
@@ -24,7 +26,7 @@ A blog demonstrating `lvt-persist` for posts.
     <!-- New Post Form -->
     <article>
         <header>Write a Post</header>
-        <form name="save" lvt-persist="posts">
+        <form name="Add" lvt-el:reset:on:success>
             <input type="text" name="title" required placeholder="Post title">
             <textarea name="content" required rows="6" placeholder="Write your post content here..."></textarea>
             <input type="text" name="author" placeholder="Your name (optional)">
@@ -33,8 +35,8 @@ A blog demonstrating `lvt-persist` for posts.
     </article>
 
     <!-- Posts List -->
-    {{if .Posts}}
-    {{range .Posts}}
+    {{if .Data}}
+    {{range .Data}}
     <article>
         <header>
             <hgroup>
@@ -58,11 +60,11 @@ A blog demonstrating `lvt-persist` for posts.
 
 ## How It Works
 
-1. **Posts table** - `lvt-persist="posts"` creates a table with Title, Content, Author columns
-2. **Auto-generated fields** - Id and CreatedAt are added automatically
+1. **Source binding** - `lvt-source="posts"` binds the container to the SQLite `posts` table declared in the frontmatter; its rows load as `.Data`
+2. **Add a post** - `name="Add"` on the form inserts a row; each input `name` (title, content, author) maps to a column, and `lvt-el:reset:on:success` clears the form after publishing
 3. **Long content** - `<textarea>` is stored as text in SQLite
-4. **Template display** - Posts are available as `.Posts` array
+4. **Delete** - `name="Delete"` on a button removes that post
 
 ## Prompt to Generate This
 
-> Build a simple blog with Livemdtools. Let users write posts with a title, content, and optional author name. Display posts in a card layout with timestamps. Include delete buttons. Use semantic HTML.
+> Build a simple blog with Livemdtools. Let users write posts with a title, content, and optional author name. Store posts in a SQLite source. Display posts in a card layout with timestamps. Include delete buttons. Use semantic HTML.

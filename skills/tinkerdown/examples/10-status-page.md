@@ -21,6 +21,11 @@ sources:
   services:
     type: exec
     cmd: ./check-services.sh
+  incidents:
+    type: sqlite
+    db: ./incidents.db
+    table: incidents
+    readonly: false
 ```
 
 **check-services.sh:**
@@ -87,26 +92,34 @@ EOF
         {{end}}
     </article>
 
-    <!-- Incident Log (Manual Entry) -->
+</main>
+```
+
+## Incident Log
+
+The incident log is a **separate, writable source** — a block gets its state from one
+`lvt-source`, so incidents (a SQLite table) live in their own block, distinct from the
+read-only exec `services` above.
+
+```lvt
+<section lvt-source="incidents">
     <h2>Incident Log</h2>
 
-    <article>
-        <form name="save" lvt-persist="incidents">
-            <fieldset role="group">
-                <input type="text" name="title" required placeholder="Incident description">
-                <select name="severity" required>
-                    <option value="low">Low</option>
-                    <option value="medium">Medium</option>
-                    <option value="high">High</option>
-                    <option value="critical">Critical</option>
-                </select>
-                <button type="submit">Log Incident</button>
-            </fieldset>
-        </form>
-    </article>
+    <form name="Add" lvt-el:reset:on:success>
+        <fieldset role="group">
+            <input type="text" name="title" required placeholder="Incident description">
+            <select name="severity" required>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="critical">Critical</option>
+            </select>
+            <button type="submit">Log Incident</button>
+        </fieldset>
+    </form>
 
-    {{if .Incidents}}
-    {{range .Incidents}}
+    {{if .Data}}
+    {{range .Data}}
     <article>
         <header>
             {{if eq .Severity "critical"}}<mark>{{.Severity}}</mark>
@@ -116,14 +129,14 @@ EOF
         </header>
         <footer>
             <small>{{.CreatedAt}}</small>
-            <button name="Delete" data-id="{{.Id}}" >Resolve</button>
+            <button name="Delete" data-id="{{.Id}}">Resolve</button>
         </footer>
     </article>
     {{end}}
     {{else}}
     <p><em>No active incidents</em></p>
     {{end}}
-</main>
+</section>
 ```
 
 ## How It Works
@@ -131,7 +144,7 @@ EOF
 1. **Exec source** - Shell script outputs JSON, Livemdtools parses and displays it
 2. **Status indicators** - Use `<ins>` for operational, `<mark>` for warnings, `<del>` for outages
 3. **Conditional styling** - `{{if eq .status "operational"}}` for status colors
-4. **Incident log** - `lvt-persist` for manual incident tracking
+4. **Incident log** - a separate writable SQLite source (`lvt-source="incidents"`) with the built-in `Add`/`Delete` actions for manual incident tracking
 5. **Refresh** - `name="Refresh"` on button reloads data from the script
 
 ## Prompt to Generate This

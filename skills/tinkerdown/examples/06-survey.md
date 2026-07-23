@@ -1,5 +1,7 @@
 ---
 title: "Survey Form"
+sources:
+  responses: { type: sqlite, db: ./survey.db, table: responses, readonly: false }
 ---
 
 # Customer Survey
@@ -7,6 +9,7 @@ title: "Survey Form"
 A multi-section survey demonstrating radio buttons, select dropdowns, and ratings.
 
 **Features demonstrated:**
+- `lvt-source` with a SQLite table
 - Radio button groups
 - Select dropdowns
 - Range/rating inputs
@@ -15,7 +18,7 @@ A multi-section survey demonstrating radio buttons, select dropdowns, and rating
 - **No CSS classes needed** - PicoCSS styles semantic HTML automatically
 
 ```lvt
-<main>
+<main lvt-source="responses">
     <hgroup>
         <h1>Customer Satisfaction Survey</h1>
         <p>Help us improve by sharing your feedback</p>
@@ -23,7 +26,7 @@ A multi-section survey demonstrating radio buttons, select dropdowns, and rating
 
     <!-- Survey Form -->
     <article>
-        <form name="save" lvt-persist="responses">
+        <form name="Add" lvt-el:reset:on:success>
             <label>
                 Your Name
                 <input type="text" name="name" required placeholder="Enter your name">
@@ -81,8 +84,8 @@ A multi-section survey demonstrating radio buttons, select dropdowns, and rating
     <!-- Survey Results -->
     <h2>Survey Responses</h2>
 
-    {{if .Responses}}
-    {{range .Responses}}
+    {{if .Data}}
+    {{range .Data}}
     <article>
         <header>
             <strong>{{.Name}}</strong>
@@ -107,11 +110,12 @@ A multi-section survey demonstrating radio buttons, select dropdowns, and rating
 
 ## How It Works
 
-1. **Radio buttons** - Use `name="satisfaction"` with same name for grouping
-2. **Select dropdown** - Use `<select>` with `<option>` elements
-3. **Range input** - `type="range"` creates a slider
-4. **Fieldset** - Groups related form elements with a legend
+1. **Source binding** - `lvt-source="responses"` binds the container to the SQLite `responses` table; each input `name` maps to a column and rows load as `.Data`
+2. **Radio buttons** - Use `name="satisfaction"` with the same name for grouping
+3. **Select dropdown** - Use `<select>` with `<option>` elements
+4. **Range input** - `type="range"` creates a slider
+5. **Add / Delete** - `name="Add"` on the form inserts a response (`lvt-el:reset:on:success` clears it); `name="Delete"` removes one
 
 ## Prompt to Generate This
 
-> Build a customer survey with Livemdtools. Include name, email, satisfaction rating (radio buttons), how they heard about us (dropdown), a 1-10 rating slider, comments textarea, and a "would recommend" checkbox. Show results in cards. Use semantic HTML.
+> Build a customer survey with Livemdtools. Include name, email, satisfaction rating (radio buttons), how they heard about us (dropdown), a 1-10 rating slider, comments textarea, and a "would recommend" checkbox. Store responses in a SQLite source and show results in cards. Use semantic HTML.
