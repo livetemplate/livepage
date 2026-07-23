@@ -838,30 +838,51 @@ type Diagnostic struct {
 
 #### Phase 2 (M2, tinkerdown) — consume `Validate()` per block + drop the temp-file dance (~1 session)
 
-> **Goal at end:** `tinkerdown validate` runs each lvt block's template through `livetemplate.Validate()` and surfaces its structured line/hint diagnostics (replacing today's plain parse error), pinned to the Phase 1 tag; the `/tmp/lvt-*.tmpl` write is gone.
+> **Goal at end:** `tinkerdown validate` runs each lvt block's template through `livetemplate.Validate()` and surfaces its structured line + message diagnostics (closing the "block never ran through the parser, so a syntax error was invisible" gap), pinned to `v0.21.0`; the `/tmp/lvt-*.tmpl` write is gone.
 
 **Design refs:**
-- Phase 1 Learn (the shipped `Diagnostic` shape + tag) · § Standing Audit item for `@livetemplate/client` bumps (the provenance checklist — Phase 1 confirmed server-only, so likely a **No** on regenerating the bundle; re-confirm)
-- tinkerdown `cmd/tinkerdown/commands/validate.go:117` (the `ParseFileInSite` gate), `internal/server/websocket.go:493-511` (the temp-file workaround → `Validate`/`Parse`-from-string), `go.mod:11` (the pin)
+- Phase 1 Learn (the shipped `Diagnostic` shape `{Line, Severity, Message}` + tag `v0.21.0`) · § Standing Audit item for `@livetemplate/client` bumps (the provenance checklist — Phase 1 confirmed server-only)
+- tinkerdown `cmd/tinkerdown/commands/validate.go` (the `ParseFileInSite` gate + the per-file checks), `internal/server/websocket.go` (the temp-file workaround → `WithParseFS`-from-memory; `getComponentTemplates`), `page.go:479` (`InteractiveBlock.Content` = the processed template serve parses), `go.mod:11` (the pin)
 
 **Audit (first task):**
-- [ ] **Design-ref completeness check** + run the `@livetemplate/client` provenance checklist (expect No; verify `ClientVersion` didn't move).
-- [ ] Confirm where per-block template text is reachable at validate-time (`Page` exposes block content; `ParseFileInSite` already parses) so `Validate` runs per block without re-parsing the markdown.
-- [ ] Decide diagnostic presentation: map `[]Diagnostic` onto the existing `fileValidationError` rendering (line + hint), preserving the current stable-order/converge property.
+- [x] **Design-ref completeness check** + provenance checklist = **No** (`ClientVersion` still 0.20.0 in v0.21.0; server-only API, no bundle regen).
+- [x] Per-block text is `page.InteractiveBlocks[*].Content` — the **processed** template (post `autoGenerateTableTemplate`, `page.go:479`), exactly what serve parses. `ParseFileInSite` already extracts it; no re-parse.
+- [x] Diagnostic presentation: `[]Diagnostic` → `fileValidationError` as `"line N: message"` (no hint — Phase 1 dropped it), blocks iterated in **sorted-ID order** for stable/converging output.
+- [x] **(added) Component-set access.** `getComponentTemplates` was unexported in `internal/server`; `validate.go` is in `commands`, which **already imports `server`** (serve.go) — so exported it as `ComponentTemplates()` (single source of truth) rather than add a package. Validate must pass it, or every datatable/table block false-positives.
 
 **Implementation:**
-- [ ] Bump `go.mod` to the Phase 1 tag; `go mod tidy`.
-- [ ] `validate` calls `livetemplate.Validate(block.Content, WithComponentTemplates(...))` per lvt block; surface diagnostics with line + hint alongside the existing inert/unknown/policy checks.
-- [ ] Replace the `os.WriteFile("/tmp/lvt-*.tmpl")` + `WithParseFiles` path at `websocket.go:499-507` with `(*Template).Parse` / `WithParseFS`-from-memory (disk-free; no behavior change to serve).
-- [ ] `CHANGELOG.md`.
+- [x] Bumped `go.mod` to **`v0.21.0`** (`go mod tidy`; the livetemplate org needs `GOPRIVATE` — the sum DB 500s on it — the tag is fetched direct from git).
+- [x] `validate` calls `livetemplate.Validate(block.Content, livetemplate.WithValidateComponents(ComponentTemplates()...))` per interactive block (`validateBlockTemplates`, component sets built once); diagnostics surface alongside the inert/unknown/policy checks and gate `validFiles`.
+- [x] Replaced the `os.WriteFile("/tmp/lvt-*.tmpl")` + `WithParseFiles` at `websocket.go` with `WithParseFS`(in-memory `fstest.MapFS`) — same `parseSources` path (component defs preserved), disk-free, behavior-identical. `os` import dropped.
+- [x] **(added) `split` block helper** (operator decision — the new check surfaced a real bug; see Learn). `blockHelperFuncs` (currently `{"split": strings.Split}`) merged into the `ComponentTemplates()` set's funcs, so it reaches a block's **parse** (set funcs reach the main parse) and its **tree generation** (`getComponentFuncs` merges the set funcs).
+- [x] `CHANGELOG.md` (validate-checks-templates + the `split` helper).
 
 **Acceptance criteria:**
-- [ ] **Simplify:** `/simplify` the tinkerdown diff.
-- [ ] **Unit:** a block with an unclosed `{{range}}` now fails `validate` with a line+hint (previously a plain error or — worse — swallowed); a clean block passes; the temp-file path is gone (no `/tmp` write under serve).
-- [ ] **Integration:** `validate` over the PII example + the `examples/` corpus stays green (no regression from the richer parser feedback).
-- [ ] **E2E (chromedp, four-channel):** the PII console still serves + approves/denies correctly through the disk-free parse path — the render behavior is unchanged (four channels captured).
+- [x] **Simplify:** `code-simplifier` on the diff — one comment-accuracy fix, rest already clean.
+- [x] **Unit:** `validate_blocks_test.go` — unclosed `{{range}}` now fails with `line N: unexpected EOF` (was clean); a clean block and a `split`-using block pass; an unknown function is caught. `component_funcs_test.go` — `split` is present in **both** the parse funcMap (`ComponentTemplates().Funcs`) and the tree-gen funcMap (`getComponentFuncs()`).
+- [x] **Integration:** the full `examples/` corpus is **55/55 green** — including the datatable/table blocks (faithfulness: no false positives) and the `split` fix. Changed-package tests green (no regression).
+- [x] **E2E (chromedp, four-channel):** `TestPIIAccessApproval` passes (29.9 s) through the disk-free parse path — WS tree frames + datatable render captured; serve behavior unchanged.
 
-**Learn:** 4 prompts (feed-forward to Phase 3's Audit).
+**Learn:**
+
+*What surprised us.*
+1. **The new check found a real, pre-existing latent bug on its first run over the corpus.** `examples/markdown-data-bookmarks` uses `{{split .Tags ", "}}`, but `split` was registered *nowhere* (not a livetemplate builtin, not a datatable func, not in `runtime.TemplateFuncs`). So that block had *always* failed to render at serve (parse error → block logged + skipped → blank), invisible because `validate` never ran the template parser on block content. This is the exact "validates clean but breaks at serve" class M1 kept closing — now closed at the gate. **Operator chose to fix it by adding capability** (`split` as Tinkerdown's first base block helper) rather than degrade the demo.
+2. **Blocks get their non-builtin funcs from a *component set's* Funcs, not from `getComponentFuncs`.** `getComponentFuncs` is applied via `tmpl.Funcs()` *after* `New` (for tree generation), but html/template needs funcs at *parse* — so a func added only there lets nothing parse. Component-set Funcs, by contrast, reach the main block parse (verified: a block calling the datatable set's `{{mod}}` directly validates clean). That is why `blockHelperFuncs` rides `ComponentTemplates()`'s set funcs — one place that feeds *both* parse (the set) and tree-gen (`getComponentFuncs` merges the set funcs). A helper in only one would parse-then-fail or vice versa; a test pins both.
+3. **The `.Parse` method vs `parseSources` distinction (from Phase 1) paid off directly.** Dropping the temp-file dance had to use `WithParseFS` (→ `parseSources`, which clones the component-bearing template), *not* the `.Parse` method (fresh base template, drops components). Serve used `WithParseFiles` (also `parseSources`), so the swap is behavior-identical.
+
+*PLAN.md drift fixed in this commit.*
+- Diagnostic presentation corrected to `line + message` (Phase 1 dropped `hint`); the Goal's "line/hint" struck.
+- The block text is the *processed* `InteractiveBlock.Content`, not the raw fence.
+- `WithComponentTemplates` (serve-time `Option`) vs `WithValidateComponents` (the `Validate` option) disambiguated in the Implementation.
+
+*Feed-forward to **Phase 3**'s Audit.*
+- `validateBlockTemplates` now runs per interactive block; Phase 3's **bound-refs** and **action-param** checks slot in beside it (both operate on the same parsed `Page` + manifest).
+- The **base-helper mechanism** (`blockHelperFuncs` via `ComponentTemplates`) is where any future block helper goes — and it is the single place that keeps parse + tree-gen func sets in sync. Phase 3 should not reintroduce the split-brain by adding a func only to `getComponentFuncs`.
+- `split` is now a *known* function to the parser, so Phase 3's namespace/attribute work need not touch it.
+
+*New / changed risks.*
+- **New (low): the parse/tree-gen func split-brain is latent.** A contributor adding a block helper only to `getComponentFuncs` (the natural-looking place) would produce a block that parses and then fails to render. `blockHelperFuncs`-via-`ComponentTemplates` is the correct pattern; the `component_funcs_test.go` guard catches a helper that lands in only one map.
+- **Resolved: the datatable-component false-positive risk** the Audit flagged — the corpus (55/55, incl. table blocks) confirms `ComponentTemplates()` makes component references resolve in `validate` exactly as at serve.
 
 #### Phase 3 (M2, tinkerdown) — the tinkerdown-owned semantic gaps M1 verified (~1 session)
 

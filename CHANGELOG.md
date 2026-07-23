@@ -11,6 +11,23 @@ Earlier releases (v0.1.x) are documented in the
 
 ## [Unreleased]
 
+### Changed — `validate` now checks that every lvt block compiles as a template
+
+`tinkerdown validate` runs each lvt code block through the template parser
+(livetemplate `v0.21.0`'s new `Validate`), so a template-syntax or composition
+error inside a block — an unclosed `{{range}}`, an unknown function, an
+unresolved component — is now reported with a line and message instead of
+surfacing only at serve time as a block that silently renders nothing.
+Validation resolves against the same component templates and helper functions
+serve uses, so a block that renders under serve validates clean, and vice versa.
+
+### Added — `split` block helper
+
+Templates in an lvt block can call `{{split "a, b, c" ", "}}` to turn a
+delimited string into a slice (e.g. comma-separated tags into individual values
+for a `{{range}}`) — Tinkerdown's first base block helper, available to every
+block at both parse and render.
+
 ### Added — Atomic multi-statement SQL actions (`statements:`)
 
 A `kind: sql` action may now carry a `statements:` list instead of a single

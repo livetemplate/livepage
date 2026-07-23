@@ -9,12 +9,15 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/chromedp/chromedp"
+	"github.com/livetemplate/livetemplate"
 	"github.com/livetemplate/tinkerdown"
 	"github.com/livetemplate/tinkerdown/internal/config"
+	"github.com/livetemplate/tinkerdown/internal/server"
 )
 
 // ValidateCommand implements the validate command.
@@ -86,6 +89,11 @@ func ValidateCommand(args []string) error {
 	var validFiles int
 	var totalErrors int
 	var fileErrors []fileValidationError
+
+	// The component template sets serve renders each block against, built once
+	// and reused for every block's template validation (each Validate call
+	// re-parses whatever sets it is handed).
+	componentSets := server.ComponentTemplates()
 
 	err = filepath.WalkDir(absDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -161,6 +169,18 @@ func ValidateCommand(args []string) error {
 				totalErrors++
 			}
 
+			// Templates: does every lvt block compile as a livetemplate template?
+			// The attribute checks above prove the markup is well-formed, not that
+			// the {{...}} template parses — an unclosed {{range}} or an unknown
+			// function renders nothing at serve with no error reported here.
+			// Validate closes that gap, against the same component and function set
+			// serve uses.
+			templateDiags := validateBlockTemplates(page, componentSets)
+			for _, td := range templateDiags {
+				fileErrors = append(fileErrors, fileValidationError{file: relPath, error: td})
+				totalErrors++
+			}
+
 			// Also validate Mermaid diagrams
 			mermaidErrors, err := validateMermaidDiagrams(path)
 			if err != nil {
@@ -176,7 +196,7 @@ func ValidateCommand(args []string) error {
 					error: fmt.Sprintf("Mermaid errors:\n  %s", errorMsg),
 				})
 				totalErrors += len(mermaidErrors)
-			} else if len(violations) == 0 && len(unknown) == 0 && len(inert) == 0 {
+			} else if len(violations) == 0 && len(unknown) == 0 && len(inert) == 0 && len(templateDiags) == 0 {
 				validFiles++
 				fmt.Printf("✓ %s\n", relPath)
 			}
@@ -471,6 +491,47 @@ func isTransientChromedpError(err error) bool {
 	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "websocket") || strings.Contains(msg, "timeout")
+}
+
+// validateBlockTemplates runs each of the page's lvt blocks through
+// livetemplate.Validate, catching template-syntax and composition errors
+// (unclosed {{range}}, unknown functions, unresolved components) that the
+// attribute and policy checks cannot see and that otherwise surface only at
+// serve time as a block that silently renders nothing. Blocks are checked in
+// stable ID order so a generating agent sees the same diagnostics each run.
+func validateBlockTemplates(page *tinkerdown.Page, componentSets []*livetemplate.TemplateSet) []string {
+	if page == nil {
+		return nil
+	}
+	ids := make([]string, 0, len(page.InteractiveBlocks))
+	for id := range page.InteractiveBlocks {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+
+	var out []string
+	for _, id := range ids {
+		block := page.InteractiveBlocks[id]
+		if block == nil {
+			continue
+		}
+		diags, err := livetemplate.Validate(block.Content, livetemplate.WithValidateComponents(componentSets...))
+		if err != nil {
+			// An infrastructure failure (e.g. a malformed component set) is
+			// Tinkerdown's own problem, not the document's — surface it rather
+			// than silently pass the block.
+			out = append(out, fmt.Sprintf("template validation could not run: %v", err))
+			continue
+		}
+		for _, d := range diags {
+			if d.Line > 0 {
+				out = append(out, fmt.Sprintf("line %d: %s", d.Line, d.Message))
+			} else {
+				out = append(out, d.Message)
+			}
+		}
+	}
+	return out
 }
 
 // pageRefs bridges the parser's view of what a document reaches for to the shape the
