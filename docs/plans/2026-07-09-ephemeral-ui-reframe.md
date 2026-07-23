@@ -669,22 +669,40 @@ Sections marked `[skip on phase execution]` (Appendix A) are historical context 
 - § Verification (M1 acceptance) · all M1 phase Learn outputs · § Risks ("30s" is a generation-reliability target)
 
 **Audit:**
-- [ ] **Design-ref completeness check.**
-- [ ] Confirm every prior M1 phase is closed (manifest, lint+summary, skill, reference fixtures). Surface any incomplete Learn.
-- [ ] Define the measurement: LLM-generation wall-time vs. framework leg (validate + parse + first SSR + WS upgrade); framework leg target = low tens of ms.
+- [x] **Design-ref completeness check.**
+- [x] Prior M1 phases closed — Phase 1–4 built and merged (#301, #302, #303, #304); Phase 3's tracker + Learn reconstructed (the #304 drift-repair). Phase 6 remains. All prior Learn surfaced.
+- [x] Define the measurement — the **in-process** framework leg (parse/discover + first SSR + WS upgrade + initial tree), *not* the `serve` command (which adds Go process startup). Target: low tens of ms. **Two scope corrections (advisor):** (1) killed the planned "first-pass validate-clean *rate* across N runs" — with me authoring the generator instructions, the reference, the target *and* the validator, a percentage from N≈5 is the self-certifying pattern this session hit four times: a guard that cannot fail. Kept the *runs* (a few independent generations into scratch dirs), but the deliverable is the qualitative **failure list**. (2) Skipped the mockup + pixel visual-regression — hand-authoring `mockups/pii-console.html` to match a console that already exists, then "verifying" the match, is circular; the Phase-4 e2e screenshot is the visual artifact.
 
 **Implementation:**
-- [ ] Run the full skill flow against the demo manifest; iterate the generation context (reference/corpus/manifest describes-metadata) until first-pass validity is reliably high — the generation-context assets are the lever (per § Risks).
-- [ ] Record: first-pass validate-clean rate across N runs; median generate→serving latency; framework-leg latency.
-- [ ] **Visual spec + conformance.** Author a one-screen visual spec for the console (a `mockups/pii-console.html` + screenshot — the *visual* target, per skeleton convention 11, scoped to this single generated screen; **created at execution time, not in plan mode**). Acceptance includes a visual-regression check of the served console against it, and a house-style-conformance check (the generated app used the manifest theme + `site_css` + preferred components — not off-brand free-form HTML).
-- [ ] Capture a demo transcript/screencast of the acceptance test for the README reframe.
+- [x] **Framework-leg latency harness** (`pii_console_latency_test.go`, in-process, gorilla WS client): **~17 ms** — parse/discover ≈ 1.7 ms, first SSR ≈ 6.3 ms, WS upgrade + initial tree ≈ 9.1 ms. Three-plus orders of magnitude below the ~30 s generation budget: the budget is the LLM, not the runtime.
+- [x] **Three independent blind generations → a failure list** (replaces the rate). Each agent generated the console from *only* the intent + generation context (SKILL.md + reference.md + manifest), never the golden `app.md`. Findings below (Learn).
+- [x] **Iterate the generation context — generic edits, driven by the verified failures** (not overfit to this console): fixed SKILL.md's **Quick Start** (verified-broken — `<form lvt-persist>` fails `validate` with *"no state reference"*); documented the state model (state comes from `lvt-source` on the block's container; `.Data` holds the rows), the `name=`→action binding (built-in vs approved-named action), and that a manifest `confirm:` needs a `data-confirm` on the button to produce a dialog; corrected `reference.md`'s `lvt-persist` section to the validating `lvt-source` pattern.
+- [x] ~~Visual spec (mockup) + pixel visual-regression~~ — dropped as circular (see Audit). Conformance kept to the non-circular, checkable facts (Acceptance).
+- [x] Demo/acceptance record — the measured framework leg is now a concrete claim in `examples/pii-access-approval/README.md` ("Whole-plan acceptance"); the acceptance results are recorded in this Learn.
 
 **Acceptance criteria:**
-- [ ] **Simplify:** N/A (integration) — but fold any skill-asset cleanups.
-- [ ] **Unit/Integration:** the reliability + latency harness runs and reports.
-- [ ] **E2E (chromedp, four-channel):** the whole-plan test — generate → review → live console; Approve runs export+audit (+ optional PR); verify server-authoritative state; framework leg within target; **visual-regression + house-style conformance** vs. the one-screen spec; screenshot.
+- [x] **Simplify:** N/A — measurement + docs; folded the generation-context edits.
+- [x] **Unit/Integration:** the latency harness runs and reports (~17 ms), with a sanity guard (< 1 s) so a regression past "near-instant" fails the build.
+- [x] **E2E (chromedp, four-channel):** the whole-plan live console + server-authoritative approve/deny + four-channel capture is proven by **Phase 4's `pii_access_approval_e2e_test.go`** (merged); Phase 5 adds the deterministic framework-leg number. **Conformance (non-circular):** the served console uses the constrained `lvt-*` vocabulary (`validate`-confirmed), the manifest theme, and no custom JS / off-brand free-form HTML — the properties the reframe actually claims, checkable without a circular mockup.
 
-**Learn:** what surprised us / plan drift / feed-forward to M2's Audit (does the generation loop need the upstream `Validate()` API's richer diagnostics — quantify where the real parser's feedback was insufficient) / new-or-changed risks.
+**Learn:**
+
+*What surprised us.*
+1. **The generation docs are out of sync with the validator — verified against SKILL.md's own Quick Start.** Three blind generations converged on one failure mode: a write-form intake with no `lvt-source` container fails `validate` with *"Interactive block has no state reference"*, and the fix (`lvt-source` provides state) is documented **nowhere** in SKILL.md or reference.md. Root cause, verified deterministically: `tinkerdown validate` on SKILL.md's *exact* Quick Start (`<form name="save" lvt-persist="items">`) fails — the docs teach an `lvt-persist` form model the validator replaced with an `lvt-source`/server-block state model. Every run's *read* blocks (queue, audit, datasets) passed first-try because `lvt-source` gives them state; only the *write-form* intake failed — the one pattern the docs get wrong. 2 of 3 runs avoided it only by parsing the manifest's YAML comments, not the docs.
+2. **The planned "first-pass validity rate" was the self-certifying pattern a fourth time.** I would have authored the generator, the reference, the target, and the validator, then reported a percentage from my own closed loop — a number that cannot fail. The advisor caught it; the failure list is the honest, useful deliverable instead.
+
+*PLAN.md drift fixed in this commit.*
+- The "rate across N runs" metric and the `mockups/pii-console.html` visual-regression are struck as self-certifying / circular respectively, with the reasons recorded (not silently dropped).
+- The framework-leg target ("low tens of ms") is confirmed empirically (~17 ms) rather than asserted.
+
+*Feed-forward to **M2**'s Audit — where the real parser's feedback was insufficient (the plan asks Phase 5 to quantify this):*
+1. **`validate` is silent on action-param completeness.** A governed form supplying only the `required` params passes the gate but errors at *runtime* on the first missing optional `:param` (substitution requires every referenced key). M2's `Validate()` should check that a form invoking an action supplies every `:name` the action's statement references.
+2. **`validate` is silent on template field names.** The snake_case→PascalCase mapping (`row_cap`→`.RowCap`, `ttl`→`.Ttl`) is a guess it can't check against the source schema; a wrong field renders empty at serve. Introspection (M3 gap #2) is what would close this.
+3. **The "no state reference" diagnostic points at an undefined concept** (`state=`/server block) the generation context never introduces, so a self-correcting agent thrashes. Either the diagnostic must teach the fix or the docs must — the latter is partly done here.
+4. **`reference.md`'s `lvt-persist` form-model is stale** — a documented feature the validator now rejects. A full reference form/state-model audit is warranted (as M0 Phase 2 did for client attributes); the most-misleading section is corrected here, the audit deferred.
+
+*New / changed risks.*
+- **New (medium, generation reliability): a docs-vs-binary drift on the form/state model.** Partly closed — SKILL.md's workflow + Quick Start now teach the `lvt-source` state model, and `reference.md`'s `lvt-persist` section is corrected. **Residual:** a full `reference.md` form/state audit (is `lvt-persist` fully dead, or does it still do something at runtime?) is not done; until it is, an agent reading a stray `lvt-persist` example could still be misled. Tracked as an M2 feed-forward above.
 
 #### Phase 6 (M1) — Capture the PII workflow as a reusable skill + the `/tinkerdown:save` capability (~1 session)
 

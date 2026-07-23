@@ -46,6 +46,16 @@ requested dataset to `orders_pii`, keeping what an approver sees identical to wh
 an approval exports. A fuller implementation would parameterize the export per
 dataset.
 
+## Whole-plan acceptance (M1)
+
+The reframe's premise is that generating a bespoke UI is *fast*. The slow part is
+the LLM authoring the document; the runtime that turns that document into a live
+page is near-instant. Measured in-process for this console
+(`pii_console_latency_test.go`): **parse ≈ 2 ms, first render ≈ 6 ms, WebSocket
+upgrade + initial tree ≈ 9 ms — a ~17 ms framework leg**, three-plus orders of
+magnitude under the ~30 s generation budget. So the budget really is the LLM: the
+"~30 s" target is about *generation reliability*, not runtime speed.
+
 ## Files
 
 - `tinkerdown.yaml` — the workspace manifest (approved surface + actions).

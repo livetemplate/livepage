@@ -141,28 +141,33 @@ Access in controller:
 
 #### `lvt-persist`
 
-Automatically create a SQLite table and generate CRUD operations.
+> **Correction:** a bare `<form lvt-persist="…">` does **not** satisfy the block-state
+> requirement — `tinkerdown validate` rejects it with *"Interactive block has no state
+> reference"*. Use the [`lvt-source`](#lvt-source) pattern below instead: declare the
+> source, bind it on the block's container, and let the built-in `Add` action insert.
+> That is the form pattern that validates and is used throughout the examples.
 
-```html
-<form name="save" lvt-persist="todos">
-    <input type="text" name="title" required>
-    <input type="checkbox" name="completed">
-    <button type="submit">Add Todo</button>
-</form>
+````markdown
+---
+sources:
+  todos: { type: sqlite, db: ./todos.db, table: todos, readonly: false }
+---
+
+```lvt
+<div lvt-source="todos">
+    <form name="Add" lvt-el:reset:on:success>
+        <input type="text" name="title" required>
+        <button type="submit">Add Todo</button>
+    </form>
+    {{range .Data}}
+    <li>{{.Title}} <button name="Delete" data-id="{{.Id}}">Delete</button></li>
+    {{end}}
+</div>
 ```
+````
 
-This auto-generates:
-- SQLite table `todos` with columns: `id`, `title`, `completed`, `created_at`
-- State struct with `Todos []Todo`
-- `Save` action (insert)
-- `Delete` action (with `data-id`)
-
-**Template access:**
-```html
-{{range .Todos}}
-    <li>{{.Title}} - {{if .Completed}}Done{{end}}</li>
-{{end}}
-```
+Rows come from `.Data`; `name="Add"`/`name="Delete"` are built-in operations on the
+writable source.
 
 ### Data Sources
 
