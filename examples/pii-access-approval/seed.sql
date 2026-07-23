@@ -4,8 +4,15 @@
 -- fabricated ("*.test" is a reserved non-routable TLD). This makes the export
 -- job genuinely run against "PII" while touching no real person's data.
 --
+-- Re-runnable: each table is DROP-then-CREATE, so re-seeding resets to a clean
+-- demo state — running it again does not error on existing tables or duplicate
+-- rows. This is a demo (fresh each run); a persistent workflow would seed once.
+--
 -- Build the database:  sqlite3 data/access.db < seed.sql
+--   (or, without the sqlite3 CLI:
+--    python3 -c "import sqlite3; sqlite3.connect('data/access.db').executescript(open('seed.sql').read())")
 
+DROP TABLE IF EXISTS access_requests;
 CREATE TABLE access_requests (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     requester   TEXT NOT NULL,
@@ -22,6 +29,7 @@ CREATE TABLE access_requests (
     created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+DROP TABLE IF EXISTS audit_log;
 CREATE TABLE audit_log (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     ts         TEXT,
@@ -35,6 +43,7 @@ CREATE TABLE audit_log (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+DROP TABLE IF EXISTS datasets;
 CREATE TABLE datasets (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     name        TEXT NOT NULL,
@@ -42,6 +51,7 @@ CREATE TABLE datasets (
     description TEXT
 );
 
+DROP TABLE IF EXISTS orders_pii;
 CREATE TABLE orders_pii (
     id     INTEGER PRIMARY KEY AUTOINCREMENT,
     name   TEXT,
@@ -49,6 +59,7 @@ CREATE TABLE orders_pii (
     amount REAL
 );
 
+DROP TABLE IF EXISTS exports;
 CREATE TABLE exports (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     request_id  INTEGER,
@@ -72,6 +83,7 @@ INSERT INTO datasets (name, sensitivity, description) VALUES
 -- redefine the approved `access_requests` source to point here must be ignored,
 -- because approval pins the source against page-level redefinition. Its single
 -- row is deliberately distinguishable from the approved queue's rows.
+DROP TABLE IF EXISTS decoy_requests;
 CREATE TABLE decoy_requests (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     requester   TEXT NOT NULL,

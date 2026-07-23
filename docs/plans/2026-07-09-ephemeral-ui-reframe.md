@@ -749,6 +749,8 @@ Sections marked `[skip on phase execution]` (Appendix A) are historical context 
 *New / changed risks.*
 - **New (low, portability): `sqlite3`-CLI seeding is not portable.** The example README and any captured skill that seeds via `sqlite3 … < seed.sql` fails where the CLI is absent (proven here). Mitigated with a `python3` fallback everywhere it appears; a `tinkerdown`-native seed/import command would be cleaner and is worth a follow-up (there is none today — `serve`/`build`/`validate`/`fix`/`new`/`cli` only).
 
+*Review-round fixes (PR #306).* The bot caught two things the blind test's own gap #4 predicted but my fix had not fully applied: (1) **the pii demo's `seed.sql` was not itself idempotent** — I had added the fresh-vs-persistent guidance to `/tinkerdown:save` (for future captures) but left the concrete artifact on plain `CREATE TABLE` + inserts, so re-running the "re-runnable" skill would silently duplicate every row. Fixed by making each table `DROP … IF EXISTS` then `CREATE` (a demo resets clean each run) — verified re-runnable (stable row counts on a second seed). The plan's earlier "fixed everywhere" claim was about the *sqlite3-portability*, not idempotency; corrected here. (2) A **heading-hierarchy bug** in `ai-generation.md` (the new H2 orphaned the "Example" H3 under it) — reordered. (3) The pii skill's "Run it" repeated the README's command block — now **points** at the README's steps (the pointing principle, applied to itself). The structural test's substring frontmatter check (a bot nit) is left as-is — sufficient for "is the field present".
+
 ---
 
 ### M2–M5 phases — outline only (expanded at milestone kickoff per convention 9)

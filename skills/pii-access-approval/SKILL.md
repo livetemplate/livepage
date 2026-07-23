@@ -42,20 +42,14 @@ variant with the `/tinkerdown` skill against your own manifest.
 ## Run it
 
 The artifacts live at [`examples/pii-access-approval/`](../../examples/pii-access-approval/)
-— the workspace manifest (`tinkerdown.yaml`), the console (`app.md`), and the
-synthetic fixtures (`seed.sql`). Stand it up:
+— the workspace manifest (`tinkerdown.yaml`), the console (`app.md`), and the synthetic
+fixtures (`seed.sql`). Its
+[README's **Run it** section](../../examples/pii-access-approval/README.md#run-it) has
+the exact steps (kept in one place so they cannot drift). In short: from that directory,
+build `data/access.db` from `seed.sql` — the seed is **re-runnable**, it resets to a
+clean demo state each run — then serve with an approver identity:
 
 ```bash
-cd examples/pii-access-approval
-
-# 1. Build the fixture database from the seed script (synthetic data only).
-mkdir -p data
-sqlite3 data/access.db < seed.sql
-# ...or, if the sqlite3 CLI isn't installed:
-# python3 -c "import sqlite3; sqlite3.connect('data/access.db').executescript(open('seed.sql').read())"
-
-# 2. Serve. --operator is the approver identity written into the audit trail
-#    (this app writes it into the audit records, so the flag matters here).
 tinkerdown serve . --operator you@corp.example
 ```
 

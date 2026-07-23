@@ -12,24 +12,6 @@ The reason this works is the constraint: interactivity comes from a **fixed `lvt
 
 Tinkerdown ships the [`skills/tinkerdown`](../../skills/tinkerdown/) skill, whose default action **is** generation: it teaches an assistant the constrained attribute vocabulary and source types, then runs the loop — read the approved surface (a `tinkerdown.yaml` [`generation:` block](../reference/config.md#the-generation-block), if present) → write `app.md` using only approved sources/actions → `tinkerdown validate` and self-correct on its diagnostics → check the operation summary if the app is privileged → serve. You describe what you want in plain language; the assistant does the rest.
 
-## Ephemeral by default; persist on request
-
-The point of generating a UI in seconds is that it is **cheap to throw away** — the
-view you need for one question this week, deleted after. Most generated UIs are
-ephemeral: use them, discard them, regenerate from an up-to-date source of truth when
-the need returns. What is durable is the **substrate** — your approved data sources,
-policies, house style — not any individual screen.
-
-But some workflows recur. When a generated UI is worth keeping, you don't just save the
-`app.md` — you **capture the whole workflow as a re-runnable skill**, so it stands up
-again in seconds with no LLM generation at all. This is **opt-in and on request** —
-never automatic; ephemeral is the default. The captured skill bundles (or points at)
-the manifest, the golden `app.md`, and the fixtures, plus the steps to seed and serve.
-
-The [`skills/pii-access-approval`](../../skills/pii-access-approval/) skill is a worked
-example: the PII / data-export approval console, captured so an operator re-runs the
-working console directly rather than regenerating it.
-
 ### Example: Creating an App with Natural Language
 
 Simply describe what you want:
@@ -47,6 +29,26 @@ The AI will:
 2. Set up the SQLite database
 3. Generate the markdown with appropriate `lvt-*` attributes
 4. Configure sources in frontmatter
+
+## Ephemeral by default; persist on request
+
+The point of generating a UI in seconds is that it is **cheap to throw away** — the
+view you need for one question this week, deleted after. Most generated UIs are
+ephemeral: use them, discard them, regenerate from an up-to-date source of truth when
+the need returns. What is durable is the **substrate** — your approved data sources,
+policies, house style — not any individual screen.
+
+But some workflows recur. When a generated UI is worth keeping, you don't just save the
+`app.md` — you **capture the whole workflow as a re-runnable skill**, so it stands up
+again in seconds with no LLM generation at all. This is **opt-in and on request** —
+never automatic; ephemeral is the default. The captured skill bundles the manifest,
+the golden `app.md`, and the fixtures (or, when they already live at a committed path,
+points at them), plus the steps to seed and serve — see the
+[`/tinkerdown:save`](../../skills/tinkerdown-save/) capability.
+
+The [`skills/pii-access-approval`](../../skills/pii-access-approval/) skill is a worked
+example: the PII / data-export approval console, captured so an operator re-runs the
+working console directly rather than regenerating it.
 
 ## Prompt Tips
 
