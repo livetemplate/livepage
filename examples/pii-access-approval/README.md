@@ -31,6 +31,8 @@ Nothing touches production and no data is real — `orders_pii` is synthetic.
 # 1. Build the fixture database from the seed script (synthetic data only).
 mkdir -p data
 sqlite3 data/access.db < seed.sql
+# ...or, if the sqlite3 CLI isn't installed:
+# python3 -c "import sqlite3; sqlite3.connect('data/access.db').executescript(open('seed.sql').read())"
 
 # 2. Serve. --operator is the approver identity written into the audit trail.
 tinkerdown serve . --operator you@corp.example

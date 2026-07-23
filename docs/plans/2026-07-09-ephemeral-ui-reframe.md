@@ -714,23 +714,42 @@ Sections marked `[skip on phase execution]` (Appendix A) are historical context 
 - Anthropic Claude skill-authoring best practices: progressive disclosure (concise `SKILL.md` + deep `reference.md`), explicit `name`/`description`/`triggers`, bundled examples + scripts, clear when-to-use, a validation step
 
 **Audit:**
-- [ ] **Design-ref completeness check.**
-- [ ] Decide the boundary between the *generic* `/tinkerdown` and the *specific* `skills/pii-access-approval/`: the latter bundles the manifest + golden `app.md` + fixtures + serve steps so re-running is near-instant and needs no LLM generation at all. Confirm it degrades cleanly if a team's data differs (parameterize the dataset/queue names).
-- [ ] `/tinkerdown:save` is a **namespaced sub-skill** (naming decided — see § Skills delivered + Appendix A). Define what it extracts from a conversation (the final `app.md`, the manifest deltas, the approve/deny wiring, the validate loop) and how it maps to `SKILL.md` + `reference.md` + `examples/`.
-- [ ] Confirm the generated skills pass the existing `skill_examples_test.go`-style structural contract (or an adapted one).
+- [x] **Design-ref completeness check.**
+- [x] Boundary between the generic `/tinkerdown` and the specific `skills/pii-access-approval/` — **operator/advisor correction: the captured skill POINTS at `examples/pii-access-approval/`, it does not bundle copies.** The plan's "bundle the manifest + golden `app.md` + fixtures" would copy a *committed source of truth* and then need a byte-match guard to keep the two in sync — which is the duplicate-the-source anti-pattern this milestone kept killing (Phase 5's corpus rot). A skill that ships in-repo to re-run an in-repo app should reference it. Degrades cleanly: if a team's data differs, edit `app.md` (a single human-editable file) or regenerate via `/tinkerdown`.
+- [x] `/tinkerdown:save` extracts: the final `app.md`, the manifest (if any — a frontmatter-sources app has none), the fixtures/seed, the stand-up steps, and the intent (→ description + triggers). **Bundle-vs-point rule:** bundle the artifacts into the skill when the UI was generated in an *ephemeral scratch dir* (the skill is then their only home — not duplication); point at the path when the artifacts are already *committed* (don't copy a source of truth).
+- [x] Structural contract: a new `TestCapturedSkillsWellFormed` (frontmatter present + every referenced repo path exists) — this is also the guard that makes the *pointer* safe (a moved/renamed example fails the test).
 
 **Implementation:**
-- [ ] `skills/pii-access-approval/` — `SKILL.md` (triggers: PII access, data-export approval, access request queue) + `reference.md` + `examples/` (the golden console) + the manifest + fixtures + a one-command serve. Re-running it stands up the working console in seconds.
-- [ ] `/tinkerdown:save` (namespaced sub-skill): given a completed generation session the user chose to persist, emit a well-formed skill (progressive disclosure, frontmatter, bundled example + validate step) following the Anthropic shape. Dogfood it by using it to (re)produce `skills/pii-access-approval/` from the Phase-4/5 session.
-- [ ] A short authoring guide (or extend `docs/guides/ai-generation.md`) documenting "ephemeral by default; persist on request by capturing the session as a skill via `/tinkerdown:save`" — the convention-13 doc.
+- [x] `skills/pii-access-approval/SKILL.md` — a **pointer skill** (triggers, when-to-use, what-it-does, stand-up steps) referencing `examples/pii-access-approval/`. No copied assets, no `reference.md`/`examples/` of its own (the example dir *is* the assets).
+- [x] `/tinkerdown:save` (`skills/tinkerdown-save/SKILL.md`) — the capture meta-skill: what to extract, how to produce `skills/<name>/`, the bundle-vs-point rule, and a required verify step. **Dogfooded via a *blind* agent** (given only the instructions + a synthetic "Team Standup Board" scratch session, never the golden PII skill): it produced a valid, validate-clean, correctly-*bundled* skill — and found four real instruction gaps, all fixed (see Learn).
+- [x] `docs/guides/ai-generation.md` — the convention-13 model (ephemeral by default; persist on request as a re-runnable skill), + corrected a stale note that the generate skill was "in development" (M1 Phase 3 shipped it).
+- [x] **(added) Portable seed guidance** in `/tinkerdown:save`, the pii skill, and the example README — the blind agent proved `sqlite3` is *absent* in this environment, so the literal `sqlite3 … < seed.sql` command fails; added a `python3` fallback.
 
 **Acceptance criteria:**
-- [ ] **Simplify:** `/simplify` + skill-asset pass.
-- [ ] **Unit/structural:** the two new skills pass the structural contract (frontmatter, required sections, referenced assets exist); a captured skill is well-formed.
-- [ ] **Integration:** run `skills/pii-access-approval/` end-to-end → working console in seconds; run skill-capture against the Phase-5 session → a valid skill that itself reproduces the console.
-- [ ] **E2E (chromedp, four-channel):** the re-run-from-skill path serves the console live; Approve/Deny work; screenshot.
+- [x] **Simplify:** prose/asset pass on both skills.
+- [x] **Unit/structural:** `TestCapturedSkillsWellFormed` (frontmatter + referenced paths exist); the blind capture produced a well-formed, validate-clean skill.
+- [x] **Integration:** the pii-access-approval skill's stand-up steps *are* `examples/pii-access-approval/`, which Phase 4's e2e already drives — serving the skill is serving the example. The `/tinkerdown:save` blind run stood up a working captured app (`tinkerdown validate` clean; seed → serve verified).
+- [x] ~~**E2E (chromedp, four-channel):** re-run-from-skill~~ — **struck as redundant** (advisor): the pointer skill serves the *same* artifacts Phase 4's four-channel e2e already exercises end to end. Re-running chromedp against identical bytes adds no coverage.
 
-**Learn:** what surprised us / plan drift / feed-forward to M5's Audit (the "save if the need recurs" gallery in M5 should store *skills*, not just `app.md` — connect the capture capability to the gallery) / new-or-changed risks.
+**Learn:**
+
+*What surprised us.*
+1. **The blind-agent verification — the honest test the advisor insisted on over self-grading — found the meta-skill's real weakness, and it wasn't the markup.** A blind agent given only the `/tinkerdown:save` instructions + a scratch session produced a valid, correctly-bundled skill, but reported four gaps, all in the *stand-up* half: (a) the seed command was unspecified and the natural `sqlite3 … < seed.sql` *fails* here because sqlite3 isn't installed (it fell back to `python3`); (b) `tinkerdown serve` never applies `seed.sql`, so seeding is a mandatory-but-implicit step; (c) no criterion for `--operator`/`--allow-exec`; (d) **fresh-vs-persistent DB is unresolved and contradicts the use case** — the user said "we run standup *every day*," yet `seed.sql` does `CREATE TABLE` + sample inserts, so a re-run errors or wipes real data. The mechanical capture (bundle-vs-point, what to extract, validate) was well-specified; the operational half was not. All four fixed.
+2. **I was one step from building the anti-pattern this milestone spent itself killing.** My first design was "bundle copies of the reference app into the skill + a test asserting the copies are byte-identical to the example." The advisor named it: two files that must always be equal should be *one* file — the byte-match guard is make-work around a duplication that shouldn't exist. The pointer skill is the correction.
+
+*PLAN.md drift fixed in this commit.*
+- The Implementation's "bundle the manifest + golden app.md + fixtures" is corrected to **point** (the artifacts are a committed source of truth). The bundle-vs-point *rule* is what generalizes — bundle ephemeral, point committed.
+- The re-run-from-skill chromedp e2e is struck as redundant (same artifacts as Phase 4).
+- The captured skill has no `reference.md`/`examples/` of its own — the referenced example dir is the assets; a parallel copy would be exactly the drift Phase 5 fixed.
+
+*Feed-forward to **M5**'s Audit.*
+- M5's "save if the need recurs" gallery should store the **captured skill** (the `/tinkerdown:save` output), not just the `app.md` — the capture capability *is* the gallery's unit. The bundle-vs-point rule carries over: a gallery of *ephemeral* captures bundles the artifacts; a captured *committed* app points. M5 should not re-litigate this.
+- The fresh-vs-persistent DB question `/tinkerdown:save` now *flags* (idempotent seed + seed-only-if-absent) is a real product decision M5's persistence model must settle — a saved workflow that recurs is persistent by nature.
+
+*New / changed risks.*
+- **New (low, portability): `sqlite3`-CLI seeding is not portable.** The example README and any captured skill that seeds via `sqlite3 … < seed.sql` fails where the CLI is absent (proven here). Mitigated with a `python3` fallback everywhere it appears; a `tinkerdown`-native seed/import command would be cleaner and is worth a follow-up (there is none today — `serve`/`build`/`validate`/`fix`/`new`/`cli` only).
+
+*Review-round fixes (PR #306).* The bot caught two things the blind test's own gap #4 predicted but my fix had not fully applied: (1) **the pii demo's `seed.sql` was not itself idempotent** — I had added the fresh-vs-persistent guidance to `/tinkerdown:save` (for future captures) but left the concrete artifact on plain `CREATE TABLE` + inserts, so re-running the "re-runnable" skill would silently duplicate every row. Fixed by making each table `DROP … IF EXISTS` then `CREATE` (a demo resets clean each run) — verified re-runnable (stable row counts on a second seed). The plan's earlier "fixed everywhere" claim was about the *sqlite3-portability*, not idempotency; corrected here. (2) A **heading-hierarchy bug** in `ai-generation.md` (the new H2 orphaned the "Example" H3 under it) — reordered. (3) The pii skill's "Run it" repeated the README's command block — now **points** at the README's steps (the pointing principle, applied to itself). The structural test's substring frontmatter check (a bot nit) is left as-is — sufficient for "is the field present".
 
 ---
 
