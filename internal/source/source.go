@@ -56,6 +56,13 @@ type SchemaProvider interface {
 	Schema(ctx context.Context) ([]ColumnInfo, error)
 }
 
+// SQLStatement is one parameterized statement in a transactional batch.
+// Query uses positional placeholders (?), already substituted from :name form.
+type SQLStatement struct {
+	Query string
+	Args  []interface{}
+}
+
 // SQLExecutor extends Source with ability to execute arbitrary SQL statements.
 // This is used by custom actions defined in frontmatter (action kind: "sql").
 type SQLExecutor interface {
@@ -64,6 +71,13 @@ type SQLExecutor interface {
 	// Exec executes a SQL statement with the given arguments.
 	// Returns the number of rows affected.
 	Exec(ctx context.Context, query string, args ...interface{}) (int64, error)
+
+	// ExecTx runs stmts in a single transaction: either every statement
+	// commits, or the first error rolls all of them back. It exists so one
+	// action can change state and append its audit record atomically — a
+	// partial success (state changed, audit missing) would defeat the durable
+	// trail that makes an approval workflow auditable.
+	ExecTx(ctx context.Context, stmts []SQLStatement) error
 }
 
 // Registry holds configured sources for a site

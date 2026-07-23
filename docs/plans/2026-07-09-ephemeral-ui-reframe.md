@@ -568,23 +568,41 @@ Sections marked `[skip on phase execution]` (Appendix A) are historical context 
 - `internal/server/playground.go` (`ParseString`, `PlaygroundSession`, TTL) — the ephemeral serve substrate
 
 **Audit:**
-- [ ] **Design-ref completeness check.**
-- [ ] Decide the skill's generation context: reuse `docs/llm-system-prompt.md` + `reference.md` + the `examples/` corpus + the loaded manifest (approved sources/actions/style). Confirm the corpus's few-shot pairs are current post-M0.
-- [ ] Decide ephemeral serve mechanism: the existing `serve` (writes a temp file) vs. the disk-free `playground` render path. Prefer whichever is faster + cleaner for throwaway. Measure.
-- [ ] Define the validate loop's stop condition + max iterations (deterministic self-correction budget).
+- [x] **Design-ref completeness check.**
+- [x] Decide the skill's generation context: adopted `docs/llm-system-prompt.md` (seeded in M0 Phase 1) + the existing `skills/tinkerdown/reference.md` + `examples/` corpus + the loaded manifest. Corpus few-shot pairs confirmed current post-M0 (M0 Phase 2 already reconciled them against the client).
+- [x] Decide ephemeral serve mechanism — **chose `tinkerdown serve` on a scratch directory, *not* the playground's `ParseString` path.** The playground is not the disk-free win the plan assumed: it is an HTTP endpoint requiring a running server + a POST + a session id, and `websocket.go:495` still writes each block to `/tmp` regardless. A scratch directory the operator can re-run and inspect is more useful, and a UI worth keeping is already a file. (The genuine disk-free path is the `WithParseFS` refactor flagged in M0 Phase 0's Learn — deferred, not on Phase 3's critical path.)
+- [x] Define the validate loop's stop condition + max iterations — **~5 rounds.** A request still failing after five likely needs a capability the vocabulary lacks; saying so beats substituting attributes until something passes.
 
 **Implementation:**
-- [ ] `skills/tinkerdown/SKILL.md` — instructs Claude Code to: (1) load the manifest (approved sources/actions **+ the style guide: theme + `site_css` + `style-guide.md`**) + reference + corpus, (2) emit `app.md` using only approved sources/actions + the constrained `lvt-*` vocabulary, conforming to the house style, (3) run `tinkerdown validate` (policy lint enforced) and self-correct on diagnostics until clean, (4) run `validate --summary`; **if the app is privileged**, present the operation summary and get the operator's OK (read-only → skip straight through), (5) `serve` (ephemeral).
-- [ ] Bundle the generation context assets (reference + few-shot corpus) with the skill; keep them the single source of truth (don't fork `reference.md`).
-- [ ] Redirect the phantom `/new-app` etc. references (from M0 Phase 1) to this real skill.
+- [x] `skills/tinkerdown/SKILL.md` — the full generation workflow: read the approved surface → write the document (leading with the ```lvt fence requirement) → `tinkerdown validate` and self-correct (~5 rounds) → check the operation summary if privileged → serve on a scratch dir.
+- [x] Bundle the generation context assets — the existing `skills/tinkerdown/reference.md` is referenced, **not forked**; it stays the single source of truth.
+- [x] ~~Redirect the phantom `/new-app` etc. references.~~ **Moot — already removed in M0 Phase 1** (which deleted the five-command table and documented the real describe→validate→serve loop). Nothing left to redirect by Phase 3.
+- [x] **(added) `vocabulary.go` — validate now checks attribute *names*** (M2's allowlist pulled forward, per operator decision). A document using `lvt-filter`/`lvt-scroll`/a literal `lvt-totally-made-up` previously validated with zero errors — unknown `lvt-*` was emitted as inert HTML, so a hallucinated attribute survived every loop iteration. It now fails, with a migration hint only where a real one exists. `knownDataAttributes` is a closed 22-entry exact-match set (not a `data-lvt-` prefix, which let `data-lvt-sortable` through in review).
+- [x] **(added) `InertAttributes()` gate — the third silent-failure class, found by dogfooding.** Following the workflow produced a page that validated clean, summarised privileged, served without error, and rendered nothing: `lvt-*` only binds inside a ```lvt fence; in the markdown body it is inert HTML, with no console error and no server warning. `validate` now flags `lvt-*` markup outside a fence.
 
 **Acceptance criteria:**
-- [ ] **Simplify:** prose + asset pass.
-- [ ] **Unit/structural:** a test asserting the skill bundle is well-formed + the referenced assets exist (mirror `skill_examples_test.go`).
-- [ ] **Integration:** dry-run the skill's validate loop against a deliberately-broken `app.md` — confirm the diagnostics let it converge to clean.
-- [ ] **E2E:** covered in Phase 5 (full generate→serve).
+- [x] **Simplify:** prose + asset pass.
+- [x] **Unit/structural:** `vocabulary_test.go` (`TestKnownAttributesAreReal`, `TestUnknownAttributes`, `TestInertAttributes`) + the extended `attribute_docs_test.go`; the existing `skill_examples_test.go` continues to validate the skill bundle + assets. Both new guards verified to fail when their conditions are violated.
+- [x] **Integration:** `TestUnknownAttributes` is the dry-run — a deliberately-broken doc (`lvt-scroll`, `lvt-sortable`) produces line+hint diagnostics an agent converges on; a clean doc passes.
+- [x] **E2E:** covered in Phase 5 (full generate→serve).
 
-**Learn:** 4 prompts.
+**Learn:**
+
+*What surprised us.*
+1. **"Validate is clean" did not mean "the page works" — in three distinct ways, and only one was on the plan.** The plan scoped Phase 3 as a skill-authoring task; it became a validation-hardening task once dogfooding exposed that a document could pass `validate` and still do nothing. Three silent-failure classes, all closed at the gate: (a) **unknown/hallucinated attribute names** (`lvt-totally-made-up` validated clean) — the one the plan's Risk 755 predicted, fixed by pulling M2's allowlist forward; (b) **`data-lvt-` as a blanket-allowed prefix** let `data-lvt-sortable` through — fixed by enumerating the closed 22-name set; (c) **`lvt-*` markup outside a ```lvt fence is inert HTML** — no error anywhere, found only by *following my own SKILL.md instructions* and getting a blank page.
+2. **The self-certifying-test failure mode recurred a third time, and knowing the mode was not enough — only running the falsification test caught it.** `TestKnownAttributesAreReal` scanned `vocabulary.go`, which *contains* the allowlist keys, so every entry matched itself and `"lvt-totally-made-up": true` passed. I had fixed this exact pattern in `collectGo` in the same commit and still failed to apply it to the new scanner. Fixed by excluding `vocabulary.go`; the lesson is procedural, not conceptual — verify a guard can fail before trusting it.
+
+*PLAN.md drift fixed in this commit.*
+- **This whole block is the drift.** #303 merged the code without updating the tracker or writing this Learn; reconstructed here as its own commit (from the #303 diff + commit message), boxes ticked only against what the diff actually did.
+- The serve-mechanism decision diverged from the plan's two options (serve-temp-file vs. playground) — recorded with the reason (playground isn't disk-free) rather than silently picking one.
+- The "redirect phantom commands" item was already satisfied by M0 Phase 1; struck rather than re-done.
+
+*Feed-forward to **Phase 4**'s Audit.*
+- The golden `app.md` Phase 4 authors **must pass the now-stricter `validate`** — real attribute names only. Appendix B's illustrative golden uses `lvt-filter` and `lvt-value` (both non-existent per M0 Phase 2 / Phase 3's allowlist) and the wrong action schema (`type:`/`sql:` instead of `kind:`/`statement:`); do not copy it verbatim — author against the real vocabulary and let `validate` gate it. Model on `examples/team-tasks/app.md`.
+- The operation summary is what the operator reviews. Phase 4 must ensure the summary names the sensitive operations — see Phase 4's Audit finding on `orders_pii` being invisible to a name-only summary.
+
+*New / changed risks.*
+- **Retire Risk 755's "M1 must pull forward the allowlist or accept the gap"** — pulled forward and closed for exact-match attribute names. **Residual (still open, M2):** namespace *members* are unvalidated (`lvt-el:bogus:on:success` passes) — a deliberate limit, since `lvt-on:` takes arbitrary DOM events and hard-coding a member set would create a second list to rot.
 
 #### Phase 4 (M1) — The PII / data-export access-approval reference app (~1 session)
 
@@ -596,24 +614,52 @@ Sections marked `[skip on phase execution]` (Appendix A) are historical context 
 - `auto_tables.go` (queue table + Add form inference), `styling.site_css` (house style)
 
 **Audit:**
-- [ ] **Design-ref completeness check.**
-- [ ] Build the fixtures: a synthetic-PII SQLite (harmless fake rows), a seeded requests-queue store (a few pending requests with all fields), an audit-log writable store, and — if the optional grant-PR path is in scope — a fixture git repo + confirm `gh` is authenticated.
-- [ ] Confirm the scoped-export action is genuinely *bounded* (parameterized query with a row cap) — the whole point is the approver grants *scoped*, not blanket, access.
-- [ ] Confirm the request-intake path (self-serve form vs webhook) — pick the simplest that's demoable (likely the app's own Request form via a writable source).
+- [x] **Design-ref completeness check.**
+- [x] Build the fixtures — one `access.db` (built at test time from `seed.sql`, gitignored, per the repo's 0-byte-`.db` convention) with `access_requests` (queue), `audit_log` (append-only), `datasets` (catalog, read-only), `orders_pii` (synthetic PII — **8 rows, more than any request's cap so a bounded LIMIT genuinely bites**), `exports` (bounded artifacts), and `decoy_requests` (for the shadowing test).
+- [x] Confirm the scoped-export is genuinely *bounded* — **and server-authoritative**: the button sends only the request `id`; the row cap and dataset are read from the request row via SQL subqueries (`LIMIT (SELECT row_cap FROM access_requests WHERE id = :id)`), so a tampered client cannot widen the export. `LIMIT (subquery)` verified empirically against modernc in `internal/source/exectx_test.go`.
+- [x] Confirm the request-intake path — the app's own `<form name="Add" lvt-source="access_requests">` (a built-in writable-source insert), the simplest demoable option.
+- [x] **(added) Gap resolved — one `Action` was one statement.** Approve is three operations (bounded export, audit append, status change) that must be atomic; a partial success (access granted, audit missing) destroys the durable-audit guarantee. **Chose multi-statement atomicity over the alternatives:** added `Action.Statements []string` + a transactional `ExecTx` on `SQLExecutor` (implemented once in `SQLiteSource`; only sqlite implements the interface). Rejected a DB trigger — a trigger would hide the audit+export side-effects from the *operation-summary review surface*, and transparency is the demo's point.
+- [x] **(added) Finding — the operation summary omits `orders_pii`.** `Summarize`/`Refs` list only sources the *document* references; `orders_pii` appears only inside the approve action's SQL subquery, and nothing parses SQL — so the most sensitive operation in a PII-transparency demo would be invisible. Fixed by making the action's `describes:` enumerate it verbatim (`describes:` renders in the summary); structural subquery-read detection is deferred to M2/M3.
+- [x] **(added) Finding — config `confirm:` is inert.** It is copied into the runtime action but never read and never shipped to the client; the client's only confirm path is the `data-confirm` HTML attribute. So the manifest's `confirm:` produces no dialog today. **M1 decision:** the click-time affordance is `data-confirm` authored on the golden app.md's buttons; the manifest `confirm:` stays as the declared intent that **M3's `WithActionPolicy` will enforce regardless of render path**. Risk updated (below).
 
 **Implementation:**
-- [ ] Fixture data + the demo `tinkerdown.yaml` manifest (approved: requests source, scoped-export action, audit-append, deny action, optional grant-PR action; house style).
-- [ ] The reference `app.md` (this is the *golden* generated artifact — hand-authored here as the target the skill should be able to produce): queue table with all decision-context fields + a scoped-query preview; Approve/Deny `confirm:` actions; a Request-access form.
-- [ ] Approve action → runs the scoped export against fixture PII DB + appends an audit record (approver/time/scope/reason/TTL); optional → opens a real grant PR via `gh`.
-- [ ] Deny action → status→denied + reason + audit record.
+- [x] Fixtures + the demo `tinkerdown.yaml` manifest under `examples/pii-access-approval/` (approved: `access_requests`, `audit_log`, `datasets`; actions `approve-export`, `deny-request`). ~~optional grant-PR action~~ **deferred** (explicitly optional; adds `gh` + a fixture git repo without exercising anything new).
+- [x] The golden `app.md` — modeled on `examples/team-tasks/app.md` (hand-written `{{range .Data}}` rows for the rich decision context Appendix B's bare `lvt-columns` could not format), **not** Appendix B's illustrative markup, which uses non-existent attributes (`lvt-filter`, `lvt-value`) and the wrong action schema. Per-row `<button name="approve-export" data-id data-confirm>` / `deny-request`; a Request-access form; a refreshable audit view; a datasets catalog.
+- [x] Approve → `ExecTx` of three statements (bounded `INSERT … SELECT … LIMIT (subquery)` export, audit append, status change), atomic.
+- [x] Deny → audit append + status→denied, atomic. Free-text deny reason deferred (a per-row text input needs a per-row form); the audit records approver + decision + the request's own scope/reason.
+- [x] **(added) Core fix — the policy lint flagged built-in source affordances as unapproved actions.** `<form name="Add">` failed `validate` ("action Add not in the approved set"). Add/Delete/Toggle/Refresh/… are intrinsic writable-source affordances governed by *source* approval + writability, not by the approved-*action* set. Added `runtime.IsBuiltinAction` (single source of truth beside the dispatch switch) and made `collectRefs` skip built-ins. Generic fix — any approved writable source's Add/Delete controls now lint clean.
 
 **Acceptance criteria:**
-- [ ] **Simplify:** `/simplify` the diff.
-- [ ] **Unit:** action handlers — scoped export respects the row cap + filter; audit append is durable + complete; deny records reason.
-- [ ] **Integration:** run the reference app.md via `serve`; drive Approve/Deny against fixtures; assert audit rows + (optional) a real PR via `gh pr list`.
-- [ ] **E2E (chromedp, four-channel):** load the served console; render the queue; click Approve (through the `confirm:` dialog); assert the export ran + audit row appended + UI reflects new state (server-authoritative, no drift); click Deny; capture console + server stderr + WS frames + HTML + screenshot.
+- [x] **Simplify:** `/simplify` against the diff.
+- [x] **Unit:** `exectx_test.go` (commit applies all statements; **rollback undoes a partial batch** — the durable-audit guarantee; readonly rejected; bounded LIMIT bites: 5 PII rows, cap 3 → exactly 3 exported); `validate_actions_test.go` (exactly-one-of statement/statements); `refs_test.go` (built-in action names not collected).
+- [x] **Integration:** the golden `app.md` passes the stricter `validate` clean and `validate --summary` reports `privileged: true` with `orders_pii` surfaced via `describes:`.
+- [x] **E2E (chromedp, four-channel):** `TestPIIAccessApproval` — queue renders 3 pending; Approve through the `data-confirm` dialog runs the export + audit + status atomically; asserts **exported rows == the request's cap** (never the whole table), audit row appended, status flipped, and the Approve button gone (server-authoritative); Deny records a decision and exports nothing; the audit trail **renders** after Refresh. `TestPIIAccessApprovalShadowing` — the runtime demo Phase 1 (M1) carried here: a frontmatter shadow of the approved `access_requests` resolves to the **approved** rows, not the decoy (two distinguishable sources, so a pass is not hollow). Four channels captured (console, server log, WS frames, HTML + screenshot).
 
-**Learn:** 4 prompts.
+**Learn:**
+
+*What surprised us.*
+1. **The plan's central UX primitive — `confirm:`-gated actions — does nothing.** The manifest declares `confirm:` on every approve/deny action, the reference demo says each "pops the manifest's confirm: dialog," and Risk 758 lists `confirm:` as an M1 safety layer — but `confirm:` is inert: copied into the runtime action, never read, never sent to the client. The only working confirm is the `data-confirm` HTML attribute. The tempting "fix" — make the `lvt-actions` table generator emit `data-confirm` from the manifest — was **rejected** because it would enforce confirm *only for that one render path*, which is false assurance; render-path-independent manifest enforcement is exactly M3's `WithActionPolicy`, by name. M1's honest story: `data-confirm` is the affordance now; M3 enforces the manifest gate.
+2. **The shadowing E2E "failed" first for a harness reason, not a pin bug — and the harness trap is worth internalizing.** Bare `server.New(dir)` uses `DefaultConfig()` and does **not** load `tinkerdown.yaml`; the manifest (and its `generation:` block) only loads via `LoadFromDir` + `NewWithConfig`, which is what `tinkerdown serve` does. So the first run served with no approved set, the frontmatter shadow won correctly, and the decoy rendered. The pin was never broken. Any manifest-dependent test must serve the way `serve` does — bare `server.New` silently drops the manifest.
+3. **Appendix B's golden `app.md` was doubly fictional** (predicted by Phase 3's feed-forward, confirmed here): fabricated attributes (`lvt-filter`, `lvt-value`) *and* the wrong action schema (`type:`/`sql:` instead of `kind:`/`statement(s):`). The real vocabulary lives in `examples/team-tasks/app.md`. The stricter `validate` (Phase 3) is what makes copying Appendix B verbatim fail loudly — the reframe eating its own dogfood.
+4. **The review bot found the class of bug the happy-path tests structurally could not: what happens to an id that is *not* a live pending row.** Three real findings (PR #304): (a) the bounded export's `LIMIT (SELECT row_cap …)` returns `LIMIT NULL` for a non-matching/already-decided id, which is undefined and unbounded on some SQLite builds — empirically 0 rows on the pinned modernc, but relying on it is fragile, so guarded with `COALESCE(…, 0)`; (b) **no idempotency** — a replay/double-click/direct call re-ran the export and appended a second audit row, since nothing restricted the statements to `status = 'pending'`; (c) the webhook exec path never injected `:operator`, a *direct symptom* of the two exec paths being hand-duplicated. The first two are pure-SQL fixes (the guards); the third was fixed at the root by extracting one `source.RunSQLAction` (+ `SubstituteParams`) both paths call, so operator injection and the atomic branch cannot diverge again. The lesson: my `exectx_test` only ever passed a *matching* id — a happy-path fixture cannot surface a not-found-row bug. `TestPIIActionsAreBoundedAndIdempotent` now exercises the real manifest SQL against a non-matching id and a replay.
+
+*PLAN.md drift fixed in this commit.*
+- **§ Appendix B corrected** — the manifest now uses `kind:`/`statements:`/`describes:` and the golden `app.md` uses real attributes (hand-written rows), matching what was actually built.
+- **§ Risks — the `confirm:` line (758) corrected**: `confirm:` is not an enforced M1 safety layer; `data-confirm` is the M1 click-time affordance and `WithActionPolicy` (M3) is the enforcement. The M1 safety rests on the policy lint + operation-summary review + `--allow-exec` + a human approver.
+- The optional grant-PR was deferred (recorded, not silently dropped).
+- Phase 4 built the **runtime shadowing demo Phase 1 (M1) flagged as not-met** (its Acceptance E2E box and the line-480 carry-forward) — now closed by `TestPIIAccessApprovalShadowing`.
+- **Review-round fixes (PR #304 follow-up commits):**
+  - Round 1: idempotency + bounded-LIMIT guards on the approve/deny SQL; `source.RunSQLAction`/`SubstituteParams` extracted so the runtime and webhook exec paths share one implementation (fixes the webhook `:operator` gap and prevents future drift); `TestPIIActionsAreBoundedAndIdempotent` added (a non-browser CI test over the real manifest SQL).
+  - Round 2 (found *because* the extraction made `RunSQLAction` load-bearing for a security property): **`operator` is now reserved server-set** — `RunSQLAction` unconditionally overwrites any client-supplied `operator`, so a client cannot attribute an approval to another identity (the audit trail's whole point); and **`IsBuiltinAction` is exact-match**, dropping the dispatch prefixes (`sort`/`nextpage`/`prevpage`) that would otherwise let a custom action like `sort-by-priority` bypass the approved-action lint by naming coincidence. Both regression-tested (audit-approver spoof; `sort-*` custom-action collection).
+  - Round 3: (a) **dispatch precedence** — round 2 fixed only the *lint* half of the prefix collision; `HandleAction` still routed a `sort-*` name to the datatable handler before custom actions, so an approved `sort-by-priority` still could not run. Reordered so custom actions win over the datatable-prefix fallback (test: `TestHandleAction_CustomActionWinsOverDatatablePrefix`). (b) **Intake forgery (operator decision: fix in M1, not defer to M3)** — the intake used the built-in `Add`, which inserts any client column, so a direct call could file a `status='approved'` row with a spoofed approver and *no* audit trail, forging the appearance of a governed decision. Fixed with M1 primitives: the three display sources (`access_requests`/`audit_log`/`datasets`) are now **read-only**; a separate **writable `access_store`** (deliberately *not* in `generation.sources`, so no generated app can bind it and re-expose `Add`) backs the actions; and intake is a governed **`request-access`** action that hard-codes `status='pending'` and no approver. Net: no source the client can reach accepts a forged decision, and the operation summary is cleaner (three read-only sources + three governed write actions). Regression-tested (a spoofed `status`/`approver` in the intake payload is ignored).
+
+*Feed-forward to **Phase 5**'s Audit.*
+- Phase 5's generate→serve acceptance runs against **these** fixtures/manifest; the golden `app.md` is the target the `/tinkerdown` skill should be able to produce. The skill must author `data-confirm` on privileged buttons itself (the manifest `confirm:` won't produce a dialog) — worth a line in `skills/tinkerdown/SKILL.md` when Phase 5 iterates the generation context.
+- The framework-leg latency Phase 5 measures should exclude the one-time Docker-Chrome spin-up the e2e harness pays (~1s); the served-page first paint + WS upgrade is the number that matters.
+
+*New / changed risks.*
+- **New (low, UX): cross-block live refresh.** The audit view is a separate source/block, so it does not live-update when an approve/deny in the queue block writes to `audit_log`; the durable trail is in the DB (E2E-verified) and the app exposes a manual **Refresh**. Live cross-source sync is a livetemplate concern, not an M1 blocker.
+- **Changed: `confirm:` reclassified** from an M1 safety layer to an M3-enforced declaration (Risk 758).
 
 #### Phase 5 (M1) — End-to-end acceptance: generate → review → live in ~30s (~1 session)
 
@@ -755,7 +801,7 @@ This plan follows the skeleton's load-bearing parts (LLM session guide, per-phas
 - **[M1 — sharpened by Phase 2; was scoped as an M2 improvement] Nothing in the stack validates attribute *names*.** Proved empirically in Phase 2: a document using `lvt-filter`, `lvt-scroll`, and a literal `lvt-totally-made-up` passes `tinkerdown validate` with **zero errors** — unknown `lvt-*` attributes are emitted as inert HTML. Phase 2's guard closes the *docs → implementation* direction, but the direction M1 depends on is the reverse: **generated app → implementation**, which is entirely unguarded. M1 Phase 3's design has the skill "self-correct on `validate` diagnostics until clean," and a clean pass demonstrably does **not** mean the attributes exist — an agent that hallucinates `lvt-sortable` gets a green validate and a silently dead page. This is the empirical case for M2's `Validate()` attribute diagnostics, and it sits *inside* M1's critical path rather than after it. **M1 Phase 3 must either accept the gap explicitly (documented, with the demo's attributes hand-checked) or pull forward the attribute-allowlist portion of M2.** Do not let "validate is clean" stand in for "the app works."
 - **[all milestones] Committed-artifact provenance.** `internal/assets/client/tinkerdown-client.browser.js` is a *generated file tracked in git*, so it can silently disagree with the lockfile that supposedly produced it — exactly what issue #295 recorded (`node_modules` stale at 0.11.9 vs a 0.14.3 lockfile, so any rebuild reverted shipped fixes). Mitigated in Phase 0 by `make build` running `npm ci` first. **Residual:** CI cannot catch a regression here, because the e2e tests that would are `//go:build !ci` and do not run there — so a local e2e run before committing a rebuilt bundle is the only gate, not a formality. Tracked as [#297](https://github.com/livetemplate/tinkerdown/issues/297) (browser e2e smoke subset in CI), with a standing pre-bump checklist under § M2–M5 phases so the milestone that next regenerates the artifact makes the call deliberately rather than rediscovering this.
 - **[M1] "30 seconds" is a generation-reliability target, not a framework-latency target.** The framework leg is tens of ms; the budget is spent on the LLM. M1 must treat the generation-context assets (manifest + style guide + attribute reference + few-shot corpus) as first-class — that's what makes generation one-shot.
-- **[M1] Generated-app safety in M1 rests on the manifest + policy lint + proportional operation review + `confirm:` + `--allow-exec`, not yet on runtime `WithActionPolicy` (M3).** Acceptable for the demo with a human approver in the loop; M3 hardens it. State this explicitly so M1 isn't mistaken for production-grade authz.
+- **[M1] Generated-app safety in M1 rests on the manifest + policy lint + proportional operation-summary review + `--allow-exec`, not yet on runtime `WithActionPolicy` (M3).** Acceptable for the demo with a human approver in the loop; M3 hardens it. State this explicitly so M1 isn't mistaken for production-grade authz. **Correction (Phase 4 finding): config `confirm:` is *not* an enforced M1 safety layer** — it is inert (copied into the runtime action but never read or shipped to the client). The M1 click-time affordance is the `data-confirm` HTML attribute authored on the button; enforcing the manifest's `confirm:` *regardless of render path* is precisely what M3's `WithActionPolicy` adds. Until then, `confirm:` in a manifest is a declaration of intent, not a gate.
 - **[cross-repo] Upstream-first milestones (M2–M4) require tagged releases before tinkerdown can pin them** — adds release overhead per **session-guide** convention 11.
 
 ---
@@ -777,7 +823,7 @@ This plan follows the skeleton's load-bearing parts (LLM session guide, per-phas
 
 ## Appendix B — Expected output (worked example) `[skip on phase execution]`
 
-The two concrete artifacts of the M1 demo. **(1)** is authored once by the team (the workspace manifest); **(2)** is what `/tinkerdown` *generates and serves* for the PII console — the golden `app.md` (M1 Phase 4). Linked from § Deliverables + § The reference demo. Syntax is illustrative (final keys settle in M1 Phase 1–2 Audit); the `generation:` block + `describes:`/`row_cap` are the plan's proposed manifest extensions, marked inline.
+The two concrete artifacts of the M1 demo. **(1)** is authored once by the team (the workspace manifest); **(2)** is what `/tinkerdown` *generates and serves* for the PII console — the golden `app.md`. **Both are now committed and validated at `examples/pii-access-approval/`** (M1 Phase 4); the snippets below are **corrected to match what was actually built** — the pre-execution drafts here used non-existent attributes and the wrong action schema, exactly the fiction Phase 3's stricter `validate` now rejects.
 
 ### (1) `tinkerdown.yaml` — the workspace manifest (authored once)
 
@@ -785,107 +831,79 @@ The two concrete artifacts of the M1 demo. **(1)** is authored once by the team 
 # Approved data sources + named actions an LLM may wire up. Everything else is off-limits.
 sources:
   access_requests:                 # the pending/approved/denied queue
+    describes: "The pending / approved / denied queue of PII access requests."
     type: sqlite
     db: ./data/access.db
     table: access_requests
     readonly: false
-  audit_log:                       # append-only decision trail
-    type: sqlite
-    db: ./data/access.db
-    table: audit_log
-    readonly: false
-  datasets:                        # the catalog of requestable datasets (read-only)
-    type: sqlite
-    db: ./data/access.db
-    table: datasets
-    readonly: true
+  audit_log:  { describes: "Append-only decision trail.", type: sqlite, db: ./data/access.db, table: audit_log, readonly: false }
+  datasets:   { describes: "Requestable-dataset catalog (read-only).", type: sqlite, db: ./data/access.db, table: datasets, readonly: true }
 
-generation:                        # ← proposed extension (Phase 1): the approved-for-generation surface
-  approved_sources: [access_requests, audit_log, datasets]
-  approved_actions: [approve_export, deny_request]
+actions:                           # kind:/statements: — a batch runs atomically (ExecTx)
+  approve-export:
+    describes: "Runs a bounded SELECT of up to the request's row cap from orders_pii (synthetic PII) into exports, appends an audit row, marks the request approved — atomically."
+    kind: sql
+    source: access_requests
+    confirm: "Approve this request and run the bounded PII export?"   # declared intent; enforced at click-time via data-confirm in app.md; M3 WithActionPolicy enforces server-side
+    params: { id: { type: number, required: true } }
+    statements:                    # only :id (+ :operator) come from the client — cap/dataset are read from the row (server-authoritative)
+      - "INSERT INTO exports (request_id, exported_at, name, email)
+           SELECT :id, datetime('now'), name, email FROM orders_pii
+           LIMIT (SELECT row_cap FROM access_requests WHERE id = :id)"
+      - "INSERT INTO audit_log (ts, approver, requester, dataset, decision, scope, reason, ttl)
+           SELECT datetime('now'), :operator, requester, dataset, 'approved', scope, reason, ttl
+           FROM access_requests WHERE id = :id"
+      - "UPDATE access_requests SET status = 'approved', approver = :operator WHERE id = :id"
+  deny-request:
+    describes: "Marks the request denied and appends an audit row. No data access granted."
+    kind: sql
+    source: access_requests
+    params: { id: { type: number, required: true } }
+    statements:
+      - "INSERT INTO audit_log (ts, approver, requester, dataset, decision, scope, reason, ttl)
+           SELECT datetime('now'), :operator, requester, dataset, 'denied', scope, reason, ttl
+           FROM access_requests WHERE id = :id"
+      - "UPDATE access_requests SET status = 'denied', approver = :operator WHERE id = :id"
 
-actions:                           # named, confirm:-gated actions (existing config.Action surface)
-  approve_export:
-    type: sql
-    confirm: "Approve {{.requester}}'s access to {{.dataset}} — run a bounded export ({{.row_cap}} rows) + write audit?"
-    describes: "Runs a bounded SELECT on the approved dataset, writes the export artifact, appends an audit row, marks the request approved."   # ← proposed (Phase 2): feeds the operation summary
-    params: [request_id, requester, dataset, row_cap, reason, approver, ttl]
-    sql: |
-      INSERT INTO audit_log (ts, approver, requester, dataset, decision, scope, reason, ttl)
-        VALUES (datetime('now'), :approver, :requester, :dataset, 'approved',
-                :dataset || ' LIMIT ' || :row_cap, :reason, :ttl);
-      UPDATE access_requests SET status = 'approved', approver = :approver
-        WHERE id = :request_id;
-      -- the bounded export itself runs as a scoped, row-capped SELECT (Phase 4)
-  deny_request:
-    type: sql
-    confirm: "Deny {{.requester}}'s request for {{.dataset}}?"
-    describes: "Marks the request denied with a reason and appends an audit row. No data access granted."
-    params: [request_id, approver, deny_reason]
-    sql: |
-      UPDATE access_requests SET status = 'denied', approver = :approver
-        WHERE id = :request_id;
-      INSERT INTO audit_log (ts, approver, requester, dataset, decision, reason)
-        SELECT datetime('now'), :approver, requester, dataset, 'denied', :deny_reason
-        FROM access_requests WHERE id = :request_id;
+generation:                        # the approved-for-generation surface (keys: sources / actions)
+  sources: [access_requests, audit_log, datasets]
+  actions: [approve-export, deny-request]
 
-styling:                           # optional — omit for sane PicoCSS/theme defaults
-  theme: clean
-  site_css: /assets/house.css
+styling: { theme: clean }          # optional — omit for sane PicoCSS/theme defaults
 ```
 
 ### (2) The generated `app.md` — what `/tinkerdown` emits + serves (the golden artifact)
 
+Modeled on `examples/team-tasks/app.md`: hand-written `{{range .Data}}` rows (the rich per-row decision context a bare `lvt-columns` table cannot format), per-row buttons that send only `data-id`, and `data-confirm` for the click-time dialog. **No `lvt-filter`/`lvt-actions`/`lvt-value`** — those do not exist. Abridged (full file committed):
+
 ````markdown
----
-title: PII / Data-Export Access Approval
-# sources + actions are the APPROVED ones from tinkerdown.yaml, referenced by name.
----
-
-# PII / Data-Export Access Approval
-
-Pending requests for access to sensitive data. Review the **scope** before you act:
-**Approve** runs a bounded export + writes a durable audit record; **Deny** records a reason.
-
-## Pending requests {#pending}
+## [Pending] status = pending | [All] | [Approved] status = approved | [Denied] status = denied
 
 ```lvt
-<table lvt-source="access_requests"
-       lvt-columns="requester:Requester,dataset:Dataset,scope:Scope,reason:Justification,ttl:TTL,ticket:Ticket"
-       lvt-filter
-       lvt-actions="Approve,Deny"
-       lvt-empty="No pending requests 🎉">
-</table>
-```
-
-<!-- Approve/Deny are wired to the approved `approve_export` / `deny_request` actions;
-     each pops the manifest's confirm: dialog before running. -->
-
-## Request access {#request}
-
-```lvt
-<form name="RequestAccess" lvt-source="access_requests">
-  <input name="requester" placeholder="you@company.com" required>
-  <select name="dataset" lvt-source="datasets" lvt-value="id" lvt-label="name"></select>
-  <input name="reason" placeholder="Business justification" required>
-  <input name="ttl" placeholder="e.g. 24h" value="24h">
-  <input name="ticket" placeholder="TICKET-123">
-  <button type="submit">Request access</button>
-</form>
-```
-
-## Recent decisions (audit) {#audit}
-
-```lvt
-<table lvt-source="audit_log"
-       lvt-columns="ts:When,approver:Approver,requester:Requester,dataset:Dataset,decision:Decision,scope:Scope"
-       lvt-empty="No decisions yet">
-</table>
+<article lvt-source="access_requests">
+  <figure><table>
+    <thead><tr><th>Requester</th><th>Dataset</th><th>Scope (bounded)</th>…<th>Decision</th></tr></thead>
+    <tbody>
+      {{range .Data}}
+      <tr data-key="{{.Id}}">
+        <td><kbd>{{.Requester}}</kbd></td><td><code>{{.Dataset}}</code></td><td><small>{{.Scope}}</small></td>…
+        <td>{{if eq .Status "pending"}}
+          <button name="approve-export" data-id="{{.Id}}"
+                  data-confirm="Approve {{.Requester}}'s bounded export of {{.Dataset}}?">Approve</button>
+          <button name="deny-request" data-id="{{.Id}}" data-confirm="Deny this request?">Deny</button>
+        {{else}}<small>by {{.Approver}}</small>{{end}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table></figure>
+  <footer><details><summary>Request access</summary>
+    <form name="Add" lvt-el:reset:on:success> … <button type="submit">Request access</button></form>
+  </details></footer>
+</article>
 ```
 ````
 
-**Operation summary the operator OKs before this serves** (privileged → surfaced; from `tinkerdown validate --summary`):
-`access_requests` (read+write), `audit_log` (write), `datasets` (read), action `approve_export` → **runs a bounded SQL export + writes audit** (privileged), action `deny_request` → writes audit. No `exec`/network unless the optional grant-PR variant adds `gh pr create`.
+**Operation summary the operator OKs before this serves** (privileged → surfaced; from `tinkerdown validate --summary`, emitting JSON): `access_requests` (write), `audit_log` (write), `datasets` (read), action `approve-export` → its `describes:` verbatim (**names the `orders_pii` read** — the sensitive op a name-only summary would miss), action `deny-request` → writes audit. No `exec`/network unless the optional grant-PR variant adds `gh pr create`.
 
 ---
 

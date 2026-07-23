@@ -79,7 +79,7 @@ func TestSubstituteParams(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotQuery, gotArgs, err := substituteParams(tt.stmt, tt.data)
+			gotQuery, gotArgs, err := source.SubstituteParams(tt.stmt, tt.data)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("substituteParams() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -484,6 +484,27 @@ func TestExecuteSQLAction_SourceNotFound(t *testing.T) {
 	}
 	if err.Error() != `source "missing" not found` {
 		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+// TestHandleAction_CustomActionWinsOverDatatablePrefix pins the dispatch
+// precedence: a custom (governed) action whose name starts with a datatable
+// prefix (sort/nextpage/prevpage) must be dispatched as the custom action, not
+// routed to the datatable handler — otherwise an approved action the policy lint
+// allowed could never actually run. With a nil registry the sql action fails
+// distinctively ("source registry not configured"), proving it reached
+// executeCustomAction rather than handleDatatableAction.
+func TestHandleAction_CustomActionWinsOverDatatablePrefix(t *testing.T) {
+	state := &GenericState{
+		actions: map[string]*config.Action{
+			"sort-by-priority": {Kind: "sql", Source: "db", Statement: "UPDATE t SET x = 1"},
+		},
+		registry: nil,
+	}
+
+	err := state.HandleAction("sort-by-priority", nil)
+	if err == nil || err.Error() != "source registry not configured" {
+		t.Errorf("custom action with a datatable-prefix name was not dispatched as custom: got %v", err)
 	}
 }
 

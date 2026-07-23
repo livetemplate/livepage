@@ -1,0 +1,121 @@
+# Workspace manifest for the PII / data-export access-approval console.
+#
+# A team authors this once. The `generation:` block is the approved surface an
+# LLM may wire up when generating an app against this project — everything else
+# is off-limits. `describes:` on each source and action is what an operator reads
+# in the operation summary before serving; it must name what is actually touched
+# (see approve-export, which reads synthetic PII).
+
+sources:
+  # The three sources a generated app may bind to are ALL read-only: the app
+  # only reads. Every write goes through a governed, audited action (below), so a
+  # client cannot bypass the workflow — a direct write to a readonly source is
+  # rejected, and nothing renders an editable control over these.
+  access_requests:
+    describes: "The pending / approved / denied queue of PII data-export access requests (read-only)."
+    type: sqlite
+    db: ./data/access.db
+    table: access_requests
+    readonly: true
+
+  audit_log:
+    describes: "Append-only trail of every approve/deny decision (approver, time, scope, reason, TTL) (read-only)."
+    type: sqlite
+    db: ./data/access.db
+    table: audit_log
+    readonly: true
+
+  datasets:
+    describes: "Catalog of requestable datasets and their sensitivity tags (read-only)."
+    type: sqlite
+    db: ./data/access.db
+    table: datasets
+    readonly: true
+
+  # The writable store the governed actions run against. Deliberately NOT in the
+  # generation.sources approved set, so a generated app cannot bind it directly
+  # (that would re-expose the built-in Add and let a requester forge a decision
+  # with a client-supplied status/approver). Only the named actions touch it.
+  access_store:
+    describes: "Writable backing store for the access database — used only by the governed request/approve/deny actions, never bound by the UI."
+    type: sqlite
+    db: ./data/access.db
+    table: access_requests
+    readonly: false
+
+actions:
+  request-access:
+    describes: "Files a new access request. The status is server-set to 'pending' and no approver is recorded — a requester cannot self-approve or forge a decision; only approve-export / deny-request (below) change a status."
+    kind: sql
+    source: access_store
+    # Every field the statement references is declared, so this is the complete
+    # input contract: a caller must supply all of them (the intake form does).
+    # required:true is enforced; the rest may be empty but must still be present,
+    # because :name substitution errors on a key that is absent from the payload.
+    params:
+      requester:   { required: true }
+      dataset:     { required: true }
+      row_cap:     { type: number, required: true }
+      reason:      { required: true }
+      team:        {}
+      scope:       {}
+      ticket:      {}
+      ttl:         {}
+      sensitivity: {}
+    # status is hard-coded in the INSERT — it is not a parameter, so a client
+    # cannot submit status='approved' (the forgery the built-in Add allowed).
+    # approver is left NULL; only a governed decision sets it.
+    statement: "INSERT INTO access_requests (requester, team, dataset, row_cap, scope, reason, ticket, ttl, sensitivity, status)
+                VALUES (:requester, :team, :dataset, :row_cap, :scope, :reason, :ticket, :ttl, :sensitivity, 'pending')"
+
+  approve-export:
+    describes: "Runs a bounded SELECT of up to the request's row cap from orders_pii (synthetic PII: names + emails) into the exports table, appends an audit row (approver, time, scope, reason, TTL), and marks the request approved — all atomically."
+    kind: sql
+    source: access_store
+    confirm: "Approve this request and run the bounded PII export?"
+    params:
+      id:
+        type: number
+        required: true
+    # The three statements commit or roll back together (ExecTx). Every statement
+    # is guarded on `status = 'pending'`, so the action is idempotent: a replay,
+    # a double-click that beats the UI refresh, or a direct call with an
+    # already-decided id affects zero rows — no second export, no second audit.
+    # The row cap and dataset are read from the request row, not passed by the
+    # client, so the export is bounded server-side. COALESCE(..., 0) makes a
+    # non-matching / non-pending id export zero rows rather than relying on
+    # LIMIT NULL (which is undefined and, on some SQLite builds, unbounded).
+    # `:id` is the request id (from the button's data-id); `:operator` is the
+    # approver identity, injected from --operator.
+    statements:
+      - "INSERT INTO exports (request_id, exported_at, name, email)
+           SELECT :id, datetime('now'), name, email FROM orders_pii
+           LIMIT COALESCE((SELECT row_cap FROM access_requests WHERE id = :id AND status = 'pending'), 0)"
+      - "INSERT INTO audit_log (ts, approver, requester, dataset, decision, scope, reason, ttl)
+           SELECT datetime('now'), :operator, requester, dataset, 'approved', scope, reason, ttl
+           FROM access_requests WHERE id = :id AND status = 'pending'"
+      - "UPDATE access_requests SET status = 'approved', approver = :operator WHERE id = :id AND status = 'pending'"
+
+  deny-request:
+    describes: "Marks the request denied and appends an audit row. No data access is granted; no export runs."
+    kind: sql
+    source: access_store
+    confirm: "Deny this request?"
+    params:
+      id:
+        type: number
+        required: true
+    # Guarded on status = 'pending' like approve-export, so denying an
+    # already-decided request is a no-op rather than a second audit row.
+    statements:
+      - "INSERT INTO audit_log (ts, approver, requester, dataset, decision, scope, reason, ttl)
+           SELECT datetime('now'), :operator, requester, dataset, 'denied', scope, reason, ttl
+           FROM access_requests WHERE id = :id AND status = 'pending'"
+      - "UPDATE access_requests SET status = 'denied', approver = :operator WHERE id = :id AND status = 'pending'"
+
+generation:
+  sources: [access_requests, audit_log, datasets]
+  actions: [request-access, approve-export, deny-request]
+
+styling:
+  theme: clean

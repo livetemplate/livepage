@@ -5,7 +5,21 @@ import (
 	"strings"
 
 	"golang.org/x/net/html"
+
+	"github.com/livetemplate/tinkerdown/internal/runtime"
 )
+
+// recordAction notes an action reference unless it is a runtime built-in
+// (add/delete/toggle/refresh/…). Built-ins are source affordances — governed by
+// whether the source is approved and writable, not by the approved-action set —
+// so recording them would make an approved writable source's own Add or Delete
+// control fail the policy lint.
+func recordAction(actions map[string]bool, name string) {
+	if name == "" || runtime.IsBuiltinAction(name) {
+		return
+	}
+	actions[name] = true
+}
 
 // DocRefs is what a document reaches for: the sources it binds to and the actions it
 // invokes, plus what it declared for itself in frontmatter.
@@ -110,24 +124,18 @@ func collectRefs(markup string, sources, actions map[string]bool) {
 				// missing it would leave actions invisible to policy in documents the
 				// tool wrote.
 				case strings.HasPrefix(attr.Key, "lvt-on:"):
-					if attr.Val != "" {
-						actions[attr.Val] = true
-					}
+					recordAction(actions, attr.Val)
 
 				// Explicit form routing, first in the client's resolution order:
 				// lvt-form:action, then submitter name, then form name.
 				case attr.Key == "lvt-form:action":
-					if attr.Val != "" {
-						actions[attr.Val] = true
-					}
+					recordAction(actions, attr.Val)
 
 				case attr.Key == "name":
 					// Only on the elements that bind an action. On <input> and
 					// <select>, `name` is a form field.
 					if n.Data == "button" || n.Data == "form" {
-						if attr.Val != "" {
-							actions[attr.Val] = true
-						}
+						recordAction(actions, attr.Val)
 					}
 				}
 			}

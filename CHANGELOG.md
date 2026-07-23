@@ -11,6 +11,42 @@ Earlier releases (v0.1.x) are documented in the
 
 ## [Unreleased]
 
+### Added — Atomic multi-statement SQL actions (`statements:`)
+
+A `kind: sql` action may now carry a `statements:` list instead of a single
+`statement:`; the statements run in one transaction — all commit, or the first
+error rolls all of them back:
+
+```yaml
+approve-export:
+  kind: sql
+  source: access_requests
+  statements:
+    - "INSERT INTO exports (...) SELECT ... FROM orders_pii LIMIT (SELECT row_cap FROM access_requests WHERE id = :id)"
+    - "INSERT INTO audit_log (...) SELECT ... FROM access_requests WHERE id = :id"
+    - "UPDATE access_requests SET status = 'approved' WHERE id = :id"
+```
+
+This exists so an action can change state **and** append its audit record
+atomically — a partial success (state changed, audit missing) is impossible. An
+action must set exactly one of `statement`/`statements`; both, or neither, is a
+config error caught at load.
+
+### Added — PII / data-export access-approval reference app
+
+`examples/pii-access-approval/` — the M1 reference console: a request queue where
+**Approve** runs a bounded, server-authoritative export (the row cap is read from
+the request row, not sent by the client) plus a durable audit record, and **Deny**
+records a decision without granting access. Built entirely on the manifest +
+existing primitives.
+
+### Fixed — policy lint no longer flags built-in source affordances
+
+`tinkerdown validate` treated a writable source's own `Add`/`Delete`/`Toggle`/
+`Refresh` controls as unapproved *actions*. These are intrinsic affordances,
+governed by whether the source is approved and writable — not by the
+approved-action set — so an approved writable source's Add form now lints clean.
+
 ### Added — `generation:` block: an approved surface for LLM-generated apps
 
 A `tinkerdown.yaml` may now declare which of its sources and actions an LLM is allowed

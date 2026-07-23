@@ -251,6 +251,34 @@ func createSource(name string, cfg config.SourceConfig, siteDir, currentFile str
 
 // HandleAction dispatches an action to the appropriate handler.
 // This replaces the reflection-based dispatch used in generated plugins.
+// builtinActions are action names the runtime handles intrinsically for any
+// source, independent of the manifest — source affordances (refresh a view,
+// add/delete a row) rather than custom, governed actions. The policy lint must
+// not treat them as unapproved: they are governed by whether the source itself
+// is approved and writable. Kept in sync with the HandleAction switch below.
+var builtinActions = map[string]bool{
+	"refresh": true, "run": true, "filter": true, "edit": true, "canceledit": true,
+	"add": true, "toggle": true, "delete": true, "update": true,
+}
+
+// builtinActionPrefixes are the datatable action families (Sort_X, NextPage_X,
+// PrevPage_X). Used only by HandleAction's dispatch to route framework-generated
+// datatable actions — deliberately NOT part of IsBuiltinAction (see below).
+var builtinActionPrefixes = []string{"sort", "nextpage", "prevpage"}
+
+// IsBuiltinAction reports whether name is one of the runtime's built-in source
+// affordances (add/delete/toggle/refresh/…) that every writable source handles,
+// as opposed to a custom, governed action. Exact-match, case-insensitive.
+//
+// It feeds the policy lint (refs.go), so the datatable dispatch prefixes
+// (sort/nextpage/prevpage) are intentionally excluded: those actions are
+// framework-generated and never appear in authored markup, and a prefix match
+// would classify a custom governed action like "sort-by-priority" as built-in
+// and silently drop it from the approved-action check — a governance hole.
+func IsBuiltinAction(name string) bool {
+	return builtinActions[strings.ToLower(name)]
+}
+
 func (s *GenericState) HandleAction(action string, data map[string]interface{}) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -281,16 +309,20 @@ func (s *GenericState) HandleAction(action string, data map[string]interface{}) 
 		}
 		return err
 	default:
-		// Check for datatable actions (Sort_X, NextPage_X, PrevPage_X)
-		if strings.HasPrefix(actionLower, "sort") ||
-			strings.HasPrefix(actionLower, "nextpage") ||
-			strings.HasPrefix(actionLower, "prevpage") {
-			return s.handleDatatableAction(action, data)
-		}
-
-		// Check for custom declared actions
+		// A custom (governed) action wins over the datatable-prefix fallback, so an
+		// approved action whose name starts with sort/nextpage/prevpage actually
+		// runs — keeping "the policy lint approved it" and "it executes" in sync.
+		// Framework-generated datatable actions (Sort_<col>, NextPage, PrevPage) are
+		// never manifest actions, so they still fall through to handleDatatableAction.
 		if customAction, ok := s.actions[action]; ok {
 			return s.executeCustomAction(customAction, data)
+		}
+
+		// Datatable actions (Sort_X, NextPage_X, PrevPage_X).
+		for _, p := range builtinActionPrefixes {
+			if strings.HasPrefix(actionLower, p) {
+				return s.handleDatatableAction(action, data)
+			}
 		}
 
 		return fmt.Errorf("unknown action %q", action)
