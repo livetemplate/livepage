@@ -56,6 +56,9 @@ func TestPIIConsoleFrameworkLatency(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	ssrDur := time.Since(tSSR)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("SSR returned %d, want 200", resp.StatusCode)
+	}
 	// The SSR renders the page shell (title, filter tabs); the live block data
 	// (the {{range .Data}} rows with Approve/Deny buttons) arrives over the WS
 	// tree, which the next step measures.

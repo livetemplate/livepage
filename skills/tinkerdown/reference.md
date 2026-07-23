@@ -16,9 +16,9 @@ title: "App Title"
 Regular markdown content...
 
 \`\`\`lvt
-<!-- Interactive HTML with lvt-* attributes -->
-<div>
-    <form name="save" lvt-persist="items">
+<!-- Interactive HTML with lvt-* attributes; the block binds a source with lvt-source -->
+<div lvt-source="items">
+    <form name="Add">
         <input type="text" name="title">
         <button type="submit">Add</button>
     </form>
@@ -79,20 +79,24 @@ Frontmatter sources take precedence over `tinkerdown.yaml` sources if both defin
 
 #### `name` (on form)
 
-Handle form submission. Used with `lvt-persist` for auto-CRUD.
+Handle form submission. A form invokes an action by its `name`; `Add` is the
+built-in insert against the block's writable source. The form must sit inside a
+block bound with `lvt-source`.
 
 ```html
-<form name="save" lvt-persist="contacts">
-    <input type="text" name="name" required>
-    <input type="email" name="email" required>
-    <button type="submit">Submit</button>
-</form>
+<div lvt-source="contacts">
+    <form name="Add">
+        <input type="text" name="name" required>
+        <input type="email" name="email" required>
+        <button type="submit">Submit</button>
+    </form>
+</div>
 ```
 
-The form data is automatically:
-1. Parsed from form fields
-2. Saved to SQLite table (created automatically)
-3. Available in template as `.Contacts`
+On submit the form data is:
+1. Parsed from the form fields
+2. Inserted into the source (a writable `sqlite` source, declared in frontmatter)
+3. Available in the template as `.Data`
 
 **Supported field types:**
 - `text`, `email`, `url`, `tel` → string
@@ -109,11 +113,13 @@ Trigger a server action on click.
 
 ```html
 <button name="Delete" data-id="{{.Id}}">Delete</button>
-<button name="ToggleComplete" data-id="{{.Id}}">Toggle</button>
+<button name="Toggle" data-id="{{.Id}}">Toggle</button>
 <button name="Refresh">Refresh Data</button>
 ```
 
-The action name (e.g., `Delete`) maps to a method on your Controller. With `lvt-persist`, common actions are auto-generated.
+`Add`, `Delete`, `Toggle`, `Update`, and `Refresh` are built-in operations every
+writable source provides; any other `name` invokes a named action (in a governed
+project it must be an approved action).
 
 ### Data Attributes
 
@@ -139,13 +145,14 @@ Access in controller:
 
 ### Auto-Persistence
 
-#### `lvt-persist`
+#### `lvt-persist` — removed
 
-> **Correction:** a bare `<form lvt-persist="…">` does **not** satisfy the block-state
-> requirement — `tinkerdown validate` rejects it with *"Interactive block has no state
-> reference"*. Use the [`lvt-source`](#lvt-source) pattern below instead: declare the
-> source, bind it on the block's container, and let the built-in `Add` action insert.
-> That is the form pattern that validates and is used throughout the examples.
+> **Removed.** `lvt-persist` no longer does anything (the auto-CRUD it once provided
+> was replaced by the `lvt-source` state model). A block using it has no state
+> reference and `tinkerdown validate` rejects it. Use [`lvt-source`](#lvt-source):
+> declare a writable source, bind it on the block's container, and let the built-in
+> `Add`/`Delete` actions insert and remove. That is the form pattern that validates
+> and is used throughout the examples.
 
 ````markdown
 ---
@@ -460,17 +467,19 @@ tinkerdown build myapp.md -o myapp
 ### CRUD List
 
 ```html
-<form name="save" lvt-persist="items">
-    <input type="text" name="title" required>
-    <button type="submit">Add</button>
-</form>
+<div lvt-source="items">
+    <form name="Add">
+        <input type="text" name="title" required>
+        <button type="submit">Add</button>
+    </form>
 
-{{range .Items}}
-<div>
-    {{.Title}}
-    <button name="Delete" data-id="{{.Id}}">Delete</button>
+    {{range .Data}}
+    <div>
+        {{.Title}}
+        <button name="Delete" data-id="{{.Id}}">Delete</button>
+    </div>
+    {{end}}
 </div>
-{{end}}
 ```
 
 ### Data Table from API
@@ -491,12 +500,14 @@ sources:
 ### Form with Validation
 
 ```html
-<form name="save" lvt-persist="contacts">
-    <input type="text" name="name" required minlength="2">
-    <input type="email" name="email" required>
-    <input type="tel" name="phone" pattern="[0-9]{10}">
-    <button type="submit">Submit</button>
-</form>
+<div lvt-source="contacts">
+    <form name="Add">
+        <input type="text" name="name" required minlength="2">
+        <input type="email" name="email" required>
+        <input type="tel" name="phone" pattern="[0-9]{10}">
+        <button type="submit">Submit</button>
+    </form>
+</div>
 ```
 
 HTML5 validation is built-in. Add `required`, `minlength`, `pattern`, etc.

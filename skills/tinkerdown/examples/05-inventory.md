@@ -1,41 +1,28 @@
 ---
 title: "Inventory Manager"
+sources:
+  products: { type: sqlite, db: ./inventory.db, table: products, readonly: false }
 ---
 
 # Inventory Manager
 
-An inventory system demonstrating PostgreSQL integration with `lvt-source`.
+An inventory system demonstrating `lvt-source` with a SQLite table.
 
 **Features demonstrated:**
-- `lvt-source` with PostgreSQL
+- `lvt-source` with a SQLite table
 - Number inputs
 - CRUD operations
 - Conditional styling for low stock
 - **No CSS classes needed** - PicoCSS styles semantic HTML automatically
 
-**Configuration (tinkerdown.yaml):**
-```yaml
-title: "Inventory Manager"
-
-sources:
-  products:
-    type: pg
-    query: SELECT id, name, sku, quantity, price FROM products ORDER BY name
-```
-
-**Required environment:**
-```bash
-export DATABASE_URL="postgres://user:pass@localhost:5432/inventory"
-```
-
 ```lvt
-<main>
+<main lvt-source="products">
     <h1>Inventory Manager</h1>
 
     <!-- Add Product Form -->
     <article>
         <header>Add Product</header>
-        <form name="save" lvt-persist="products">
+        <form name="Add" lvt-el:reset:on:success>
             <fieldset role="group">
                 <input type="text" name="name" required placeholder="Product name">
                 <input type="text" name="sku" required placeholder="SKU-001">
@@ -55,7 +42,7 @@ export DATABASE_URL="postgres://user:pass@localhost:5432/inventory"
             <button name="Refresh" class="outline">Refresh</button>
         </header>
 
-        {{if .Products}}
+        {{if .Data}}
         <table>
             <thead>
                 <tr>
@@ -67,7 +54,7 @@ export DATABASE_URL="postgres://user:pass@localhost:5432/inventory"
                 </tr>
             </thead>
             <tbody>
-                {{range .Products}}
+                {{range .Data}}
                 <tr>
                     <td>{{.Name}}</td>
                     <td><code>{{.Sku}}</code></td>
@@ -89,11 +76,11 @@ export DATABASE_URL="postgres://user:pass@localhost:5432/inventory"
 
 ## How It Works
 
-1. **PostgreSQL source** - Define query in `tinkerdown.yaml`, reference with `lvt-source`
+1. **Source binding** - `lvt-source="products"` binds the container to the SQLite `products` table declared in the frontmatter; its rows load as `.Data`
 2. **Number inputs** - `type="number"` with `min`, `step` attributes
 3. **Low stock warning** - Conditional styling with `{{if lt .Quantity 10}}` using `<mark>` tag
-4. **CRUD** - `lvt-persist` auto-generates Save/Delete actions
+4. **Add / Delete / Refresh** - `name="Add"` on the form inserts a row, `name="Delete"` removes one, and `name="Refresh"` reloads the table
 
 ## Prompt to Generate This
 
-> Build an inventory manager with Livemdtools. Connect to PostgreSQL for products. Show a table with name, SKU, quantity, price. Highlight low stock (under 10). Include add/delete functionality. Use semantic HTML.
+> Build an inventory manager with Livemdtools. Store products in a SQLite source. Show a table with name, SKU, quantity, price. Highlight low stock (under 10). Include add/delete functionality and a refresh button. Use semantic HTML.

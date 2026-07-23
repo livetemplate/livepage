@@ -1,5 +1,7 @@
 ---
 title: "Appointment Booking"
+sources:
+  bookings: { type: sqlite, db: ./bookings.db, table: bookings, readonly: false }
 ---
 
 # Appointment Booking
@@ -7,13 +9,14 @@ title: "Appointment Booking"
 A booking system demonstrating date/time inputs and scheduling.
 
 **Features demonstrated:**
+- `lvt-source` with a SQLite table
 - Date and time inputs
 - Select dropdown for services
 - Booking confirmation display
 - **No CSS classes needed** - PicoCSS styles semantic HTML automatically
 
 ```lvt
-<main>
+<main lvt-source="bookings">
     <hgroup>
         <h1>Book an Appointment</h1>
         <p>Schedule your visit with us</p>
@@ -21,7 +24,7 @@ A booking system demonstrating date/time inputs and scheduling.
 
     <!-- Booking Form -->
     <article>
-        <form name="save" lvt-persist="bookings">
+        <form name="Add" lvt-el:reset:on:success>
             <fieldset role="group">
                 <input type="text" name="name" required placeholder="Your name">
                 <input type="tel" name="phone" required placeholder="(555) 123-4567">
@@ -67,8 +70,8 @@ A booking system demonstrating date/time inputs and scheduling.
     <!-- Upcoming Bookings -->
     <h2>Upcoming Appointments</h2>
 
-    {{if .Bookings}}
-    {{range .Bookings}}
+    {{if .Data}}
+    {{range .Data}}
     <article>
         <header>
             <strong>{{.Date}} at {{.Time}}</strong>
@@ -94,11 +97,12 @@ A booking system demonstrating date/time inputs and scheduling.
 
 ## How It Works
 
-1. **Date input** - `type="date"` shows a native date picker
-2. **Time slots** - Use `<select>` with predefined time slots for scheduling
-3. **Phone input** - `type="tel"` for phone number formatting
-4. **Booking display** - Cards showing appointment details with cancel button
+1. **Source binding** - `lvt-source="bookings"` binds the container to the SQLite `bookings` table; each input `name` maps to a column and rows load as `.Data`
+2. **Date input** - `type="date"` shows a native date picker
+3. **Time slots** - Use `<select>` with predefined time slots for scheduling
+4. **Phone input** - `type="tel"` for phone number formatting
+5. **Book / Cancel** - `name="Add"` on the form inserts a booking (`lvt-el:reset:on:success` clears it); `name="Delete"` on a button cancels one
 
 ## Prompt to Generate This
 
-> Build an appointment booking system with Livemdtools. Include name, phone, email, service selection, date picker, time slots dropdown, and notes. Display upcoming bookings in cards with date/time prominently shown. Include cancel button. Use semantic HTML.
+> Build an appointment booking system with Livemdtools. Include name, phone, email, service selection, date picker, time slots dropdown, and notes. Store bookings in a SQLite source. Display upcoming bookings in cards with date/time prominently shown. Include a cancel button. Use semantic HTML.

@@ -222,10 +222,10 @@ Navigate to `http://localhost:3000` - your app is running!
 
 | Concept | What It Does |
 |---------|--------------|
-| `lvt-persist` | Auto-saves form data to SQLite. Creates table, generates CRUD. |
-| `lvt-source` | Connects to external data (PostgreSQL, REST API, CSV, JSON, scripts) |
-| `name` (on button/form) | Triggers server action on click (button) or form submission (form) |
+| `lvt-source` | Binds a block to a data source (SQLite, PostgreSQL, REST, CSV, JSON, exec) — the block's rows are `.Data` |
+| `name` (on button/form) | Triggers an action: built-in `Add`/`Delete`/`Toggle`/`Refresh`, or an approved named action |
 | `data-*` | Passes data with actions (e.g., `data-id="123"`) |
+| `data-confirm` | Prompts before an action fires (a manifest `confirm:` is a declaration, not a dialog) |
 | frontmatter sources | Define data sources in frontmatter - no `tinkerdown.yaml` needed! |
 
 ## Reference
@@ -240,7 +240,7 @@ See [reference.md](./reference.md) for complete API documentation:
 ## Examples
 
 See [examples/](./examples/) for complete working apps:
-1. [Todo App](./examples/01-todo-app.md) - Basic CRUD with `lvt-persist`
+1. [Todo App](./examples/01-todo-app.md) - Basic CRUD with `lvt-source`
 2. [Dashboard](./examples/02-dashboard.md) - Data display with `lvt-source`
 3. [Contact Form](./examples/03-contact-form.md) - Form handling
 4. [Blog](./examples/04-blog.md) - Multi-page with partials
