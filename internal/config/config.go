@@ -690,6 +690,55 @@ type StylingConfig struct {
 	// shell too, while CustomCSS stays quarantined to landing pages. On landing
 	// pages SiteCSS loads before CustomCSS so the landing layer can override it.
 	SiteCSS string `yaml:"site_css,omitempty"`
+	// Tokens overrides individual design tokens — the on-brand palette — declaratively,
+	// so a team sets its brand without writing raw CSS. Keys are the snake_case names
+	// in KnownStyleTokens (e.g. "accent", "bg_primary", "card_bg"); each drives the
+	// matching CSS custom property (--accent, --bg-primary, …) in the page's :root,
+	// overriding the built-in default via the same mechanism primary_color uses for
+	// --accent. Overriding a token skins the generated (semantic) HTML on-brand by
+	// construction. An unknown key is a config error (ValidateStyleTokens). Absent,
+	// the built-in defaults apply.
+	Tokens map[string]string `yaml:"tokens,omitempty"`
+}
+
+// KnownStyleTokens maps each overridable design-token key (snake_case, as used in
+// styling.tokens) to the CSS custom property it drives in the page's :root. This
+// is the page-shell on-brand palette (server.go's :root); client-chrome tokens
+// (search/tabs/toc) are internal and deliberately not author-facing.
+var KnownStyleTokens = map[string]string{
+	"bg_primary":     "--bg-primary",
+	"bg_secondary":   "--bg-secondary",
+	"text_primary":   "--text-primary",
+	"text_secondary": "--text-secondary",
+	"text_heading":   "--text-heading",
+	"border_color":   "--border-color",
+	"accent":         "--accent",
+	"card_bg":        "--card-bg",
+	"card_border":    "--card-border",
+	"card_shadow":    "--card-shadow",
+	"code_bg":        "--code-bg",
+	"code_border":    "--code-border",
+	"pre_bg":         "--pre-bg",
+	"pre_text":       "--pre-text",
+}
+
+// ValidateStyleTokens rejects any styling.tokens key that is not a known design
+// token, so a typo fails loudly at load rather than silently skinning nothing.
+func (c *Config) ValidateStyleTokens() error {
+	if c == nil {
+		return nil
+	}
+	for key := range c.Styling.Tokens {
+		if _, ok := KnownStyleTokens[key]; !ok {
+			known := make([]string, 0, len(KnownStyleTokens))
+			for k := range KnownStyleTokens {
+				known = append(known, k)
+			}
+			slices.Sort(known)
+			return fmt.Errorf("styling.tokens: %q is not a known design token (known: %s)", key, strings.Join(known, ", "))
+		}
+	}
+	return nil
 }
 
 // BlocksConfig holds block-related configuration
@@ -948,6 +997,9 @@ func Load(configPath string) (*Config, error) {
 	// A sql action with both statement and statements, or neither, is a
 	// misconfiguration that would otherwise surface only when a user clicks it.
 	if err := config.ValidateActions(); err != nil {
+		return nil, err
+	}
+	if err := config.ValidateStyleTokens(); err != nil {
 		return nil, err
 	}
 

@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"html"
+	"slices"
 	"strings"
 
 	"github.com/livetemplate/tinkerdown/internal/config"
@@ -27,19 +28,47 @@ func themeDefault(s config.StylingConfig) string {
 	return "auto"
 }
 
-// buildStylingOverrideCSS returns a <style> block overriding theme tokens
-// based on user config. Returns "" if no overrides are set.
+// buildStylingOverrideCSS returns a <style> block overriding theme tokens based
+// on user config (primary_color, font, and the styling.tokens design-token
+// palette). Returns "" if no overrides are set.
 func buildStylingOverrideCSS(s config.StylingConfig) string {
 	primary := sanitizeCSSValue(s.PrimaryColor)
 	font := sanitizeCSSValue(s.Font)
-	if primary == "" && font == "" {
+
+	// Design-token overrides, in deterministic key order. Unknown keys are
+	// rejected at config load (ValidateStyleTokens); skip defensively here.
+	keys := make([]string, 0, len(s.Tokens))
+	for k := range s.Tokens {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	var tokenDecls []string
+	for _, key := range keys {
+		cssVar, ok := config.KnownStyleTokens[key]
+		if !ok {
+			continue
+		}
+		if val := sanitizeCSSValue(s.Tokens[key]); val != "" {
+			tokenDecls = append(tokenDecls, fmt.Sprintf("%s: %s;", cssVar, val))
+		}
+	}
+
+	if primary == "" && font == "" && len(tokenDecls) == 0 {
 		return ""
 	}
 
 	var out strings.Builder
 	out.WriteString("<style>\n")
+	// primary_color is shorthand for --accent; emit first so an explicit
+	// tokens.accent wins if a project sets both.
 	if primary != "" {
 		fmt.Fprintf(&out, "        :root { --accent: %s; }\n", primary)
+	}
+	// The token block is injected after the built-in :root and [data-theme="dark"]
+	// blocks (server.go), so — same specificity, later source order — it wins for
+	// both themes, exactly as --accent does.
+	if len(tokenDecls) > 0 {
+		fmt.Fprintf(&out, "        :root { %s }\n", strings.Join(tokenDecls, " "))
 	}
 	if font != "" {
 		fmt.Fprintf(&out, "        body { font-family: %s, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif; }\n", font)

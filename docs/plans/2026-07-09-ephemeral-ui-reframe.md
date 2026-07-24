@@ -1018,30 +1018,34 @@ type Diagnostic struct {
 
 #### Phase 1 (M4, tinkerdown) — Design-token system: on-brand by construction (~1 session)
 
-> **Goal at end:** the design tokens the page already renders against become a **formalized, complete, single-sourced schema driven from config** — every consumed token defined (the four currently-undefined ones included), the re-hardcoded per-use fallbacks removed, and a team able to set its palette once. Semantic HTML + PicoCSS then renders on-brand **by construction**, no prompt and no lint required.
+> **Goal at end:** a team can set its on-brand **page-shell palette** once, declaratively, via a `styling.tokens` config block — each token driving the matching CSS custom property in every page's `:root`, overriding the built-in default through the **same mechanism `primary_color` already uses for `--accent`**. Semantic HTML + PicoCSS then renders on-brand **by construction**, no prompt and no lint required.
 
 **Design refs:**
 - § house-style gap · § M4 design (the token-inventory finding)
-- tinkerdown `internal/server/server.go:1196-1234` (the `:root`/`[data-theme="dark"]` block + its `<head>` injection at `:3121`), `internal/styling/styling.go` (`buildStylingOverrideCSS` — `theme`→light/dark, `primary_color`→`--accent`, `font`), `internal/config/config.go:676-693` (`StylingConfig`), `internal/assets/client/tinkerdown-client.browser.css` (token consumers + the re-hardcoded fallbacks + the undefined `--bg-hover`/`--badge-bg`/`--highlight-bg`/`--hover-bg`)
+- tinkerdown `internal/server/server.go:1196-1234` (the `:root`/`[data-theme="dark"]` block — the 14 author-facing page-shell tokens — + its `<head>` injection at `:3121`), `internal/server/styling.go` (`buildStylingOverrideCSS` — `theme`→light/dark, `primary_color`→`--accent`, `font`; and now `tokens`), `internal/config/config.go` (`StylingConfig`)
 
 **Audit (first task):**
-- [ ] **Design-ref completeness check.**
-- [ ] Inventory the full **consumed** token set (grep `var(--` across the client CSS) vs the **defined** set (`server.go:1196-1234`); list the four undefined tokens + everywhere a fallback literal is re-hardcoded. That diff *is* the work.
-- [ ] Design the **token schema**: the semantic set the client already consumes (colors: `--bg-*`, `--text-*`, `--border-color`, `--accent`, `--card-*`, `--code-bg`/`--pre-bg`, + the four undefined), single-sourced in `:root`/`[data-theme=dark]`. Decide the **config surface**: extend `StylingConfig` with a `tokens` block (a team sets values once → drives `:root`), with `theme`/`primary_color`/`font` kept as shortcuts (presets).
-- [ ] Confirm this is **structural** (skins the page regardless of the prompt) — distinct from Phase 2's generation-context wiring.
+- [x] **Design-ref completeness check** — corrected the styling path (`internal/server/styling.go`, not `internal/styling/`).
+- [x] **Scope split settled (advisor-confirmed): page-shell palette IN, client-chrome CSS OUT.** The inventory found two distinct token layers. (1) The **page-shell** palette — `server.go:1196-1234`'s `:root` (`--bg-*`, `--text-*`, `--border-color`, `--card-*`, `--code-bg`/`--pre-bg`, `--accent`) — is author-facing house style; **this is Phase 1's scope.** (2) The re-hardcoded `var(--x, literal)` fallbacks and the four undefined tokens (`--bg-hover`/`--badge-bg`/`--highlight-bg`/`--hover-bg`) live **only in `internal/assets/client/tinkerdown-client.browser.css`** — a *generated, minified* artifact (built from `client/src` via esbuild) skinning internal client **chrome** (toc/tabs/search), never author-facing. Hand-editing it is the #295 provenance trap, and a "consumed-but-undefined token" lint over generated CSS is a self-certifying guard. So that half is **EXCLUDED from M4** (not deferred — it was never house style), matching the milestone's **no-lint** shape.
+- [x] Config surface: extend `StylingConfig` with a `tokens` map (snake_case key → value); `primary_color`/`font` stay as shortcuts. An unknown key is a config **error** (fail-loud at load), not a silent skip.
 
 **Implementation:**
-- [ ] Single-source the token layer: define **all** consumed tokens (add the four undefined) in one `:root`/`[data-theme=dark]` block; remove the per-use re-hardcoded fallbacks in the client CSS (or reduce to one authoritative fallback).
-- [ ] Extend `StylingConfig` with a `tokens` config that sets the `:root` values; `theme`/`primary_color`/`font` remain shortcuts. Default tokens = today's values (no visual change with no config).
-- [ ] `CHANGELOG.md`.
+- [x] `StylingConfig.Tokens map[string]string` + `KnownStyleTokens` (the 14 page-shell keys → CSS custom properties) + `ValidateStyleTokens()`, wired into `config.Load` so a typo fails loudly (names the key, lists the known set). Absent → empty map, no behavior change (backward-compatible).
+- [x] `buildStylingOverrideCSS` emits a `:root { --token: value; … }` block from `styling.tokens`, in deterministic key order, values run through `sanitizeCSSValue` (CSS-injection defense). Emitted **after** the `primary_color` block, so an explicit `tokens.accent` wins over the defaulted `primary_color` (source-order precedence — load-bearing; the two `:root` blocks must stay separate).
+- [x] `CHANGELOG.md`.
 
 **Acceptance criteria:**
-- [ ] **Simplify:** `/simplify` the diff.
-- [ ] **Unit:** no consumed-but-undefined token remains (a test that fails if the client CSS references a `var(--x)` not defined in the `:root` block); a custom `tokens` config yields the expected `:root` CSS; `theme`/`primary_color` shortcuts drive the right tokens.
-- [ ] **Integration:** the `examples/` corpus renders unchanged under defaults (no style regression — the default token values equal today's).
-- [ ] **E2E (chromedp, four-channel):** a page with a custom `tokens` config renders on-brand — assert the computed CSS custom properties (accent/card/bg) match the config, and screenshot; the default page renders with the default tokens.
+- [x] **Simplify:** `/simplify` the diff — code-simplifier found it already minimal (no edits); confirmed the two-`:root`-block ordering is load-bearing, not churn.
+- [x] **Unit:** `TestBuildStylingOverrideCSS_Tokens`/`_TokensSanitized` (styling); `TestLoad_StylingTokens`, `_UnknownKeyRejected`, `_DefaultsEmpty`, `TestValidateStyleTokens_AllKnownKeysAccepted` (config-load: round-trip, fail-loud typo, backward-compat, map↔validator drift guard).
+- [x] **Integration:** the `examples/` corpus renders unchanged under defaults **by construction** — the token block is emitted only when `styling.tokens` is non-empty, so a no-tokens config produces byte-identical output; full suite green confirms no corpus regression.
+- [x] **E2E (chromedp, four-channel):** `TestStylingTokensComputedStyle` — a `tokens.accent: #ff00ff` + `card_bg: #00ff00` config produces exactly those **computed** `getComputedStyle(...).getPropertyValue()` values (through the real cascade, not just emitted `<style>` text); an unconfigured site keeps the default `#007bff`. Screenshot + four-channel capture wired.
 
-**Learn:** what surprised us / plan drift / feed-forward to Phase 2's Audit / new-or-changed risks.
+**Learn:**
+- **What surprised us.** The "effective default" `--accent` is **`#007bff` (`DefaultConfig.PrimaryColor`), not `#0066cc` (the page-shell `:root`)** — every loaded config emits a `primary_color` override, so the shell literal is never the computed value. The control assertion had to pin `#007bff`. This *also* validated the emission order: `tokens.accent` beating the defaulted `primary_color` proves the token block is emitted second and wins the cascade.
+- **Plan drift fixed in this commit.** This Phase 1 block still carried the pre-kickoff full scope (remove client-CSS fallbacks, define the four undefined tokens, a consumed-but-undefined lint) though the milestone-shape section was re-scoped to spine-only/no-lint at kickoff. Rewrote Goal/Design-refs/Audit/Implementation/Acceptance to the shipped spine + recorded the page-shell-IN / client-chrome-OUT split. Corrected the `internal/styling/` → `internal/server/styling.go` path.
+- **Feed-forward to Phase 2's Audit.** The token *names* the generator should be told about = `KnownStyleTokens`' 14 keys (the single source of truth for the palette summary Phase 2 wires into generation). Phase 2 reads `GenerationConfig.StyleGuide` (still declared-but-unconsumed) **plus** a summary derived from `KnownStyleTokens` — don't re-enumerate tokens by hand.
+- **New/changed risks.** None new. The excluded client-chrome tokens (`--bg-hover` et al.) remain undefined-but-consumed in the generated CSS; that is a pre-existing client-side condition, out of tinkerdown's house-style scope, and untouched here. Verified they are consumed **only** in `client/src/core/{search,tabs}.css` (search-result badge, tab hover) — chrome, never generated content — so the exclusion is sound.
+- **Known limitation (single-value, not per-theme).** A `tokens` override is one value applied to **both** light and dark (its `:root` block wins over `[data-theme="dark"]` by source order — identical to how `primary_color` already behaves). "Set your palette once" therefore means single-value today; per-theme palettes are a future affordance, not spine scope. Noted in CHANGELOG; a Phase 2 consideration if the generation context needs to advertise theme-awareness.
 
 #### Phase 2 (M4, tinkerdown) — Wire the house style into the generation context (~1 session)
 

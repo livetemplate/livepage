@@ -70,6 +70,29 @@ func TestBuildStylingOverrideCSS_Both(t *testing.T) {
 	}
 }
 
+func TestBuildStylingOverrideCSS_Tokens(t *testing.T) {
+	got := buildStylingOverrideCSS(config.StylingConfig{
+		Tokens: map[string]string{"accent": "#ff00ff", "card_bg": "#00ff00"},
+	})
+	// snake_case keys map to the CSS custom property, emitted into :root.
+	if !strings.Contains(got, "--accent: #ff00ff;") {
+		t.Errorf("missing --accent override: %q", got)
+	}
+	if !strings.Contains(got, "--card-bg: #00ff00;") {
+		t.Errorf("missing --card-bg override: %q", got)
+	}
+}
+
+func TestBuildStylingOverrideCSS_TokensSanitized(t *testing.T) {
+	// A token value that tries to break out of the CSS context is dropped, not emitted.
+	got := buildStylingOverrideCSS(config.StylingConfig{
+		Tokens: map[string]string{"accent": "red; } body { display:none"},
+	})
+	if strings.Contains(got, "display:none") {
+		t.Errorf("malicious token value should be sanitized away, got: %q", got)
+	}
+}
+
 func TestSanitizeCSSValue_BlocksInjection(t *testing.T) {
 	blocked := []string{
 		"</style><script>alert(1)</script>",
