@@ -728,17 +728,25 @@ func (c *Config) ValidateStyleTokens() error {
 	if c == nil {
 		return nil
 	}
+	// Collect unknown keys and sort before reporting: iterating the map and
+	// returning on the first miss would name a different key run-to-run when more
+	// than one is wrong. Sorting makes the error message deterministic.
+	var unknown []string
 	for key := range c.Styling.Tokens {
 		if _, ok := KnownStyleTokens[key]; !ok {
-			known := make([]string, 0, len(KnownStyleTokens))
-			for k := range KnownStyleTokens {
-				known = append(known, k)
-			}
-			slices.Sort(known)
-			return fmt.Errorf("styling.tokens: %q is not a known design token (known: %s)", key, strings.Join(known, ", "))
+			unknown = append(unknown, key)
 		}
 	}
-	return nil
+	if len(unknown) == 0 {
+		return nil
+	}
+	slices.Sort(unknown)
+	known := make([]string, 0, len(KnownStyleTokens))
+	for k := range KnownStyleTokens {
+		known = append(known, k)
+	}
+	slices.Sort(known)
+	return fmt.Errorf("styling.tokens: %q is not a known design token (known: %s)", unknown[0], strings.Join(known, ", "))
 }
 
 // BlocksConfig holds block-related configuration

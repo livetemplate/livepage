@@ -99,6 +99,25 @@ func TestLoad_StylingTokensDefaultsEmpty(t *testing.T) {
 	}
 }
 
+// With more than one unknown key, ValidateStyleTokens names the sorted-first key so
+// the error is deterministic run-to-run (not whichever the map iteration yields).
+func TestValidateStyleTokens_MultipleUnknownDeterministic(t *testing.T) {
+	c := &Config{Styling: StylingConfig{Tokens: map[string]string{
+		"zzz_bogus": "x",
+		"aaa_bogus": "x",
+	}}}
+	err := c.ValidateStyleTokens()
+	if err == nil {
+		t.Fatal("expected an error for unknown token keys")
+	}
+	if !strings.Contains(err.Error(), "aaa_bogus") {
+		t.Errorf("error should name the sorted-first unknown key (aaa_bogus): %v", err)
+	}
+	if strings.Contains(err.Error(), "zzz_bogus") {
+		t.Errorf("error should name only the deterministic first key, not zzz_bogus: %v", err)
+	}
+}
+
 // ValidateStyleTokens accepts every key in KnownStyleTokens — guards against the
 // map and the validator drifting apart.
 func TestValidateStyleTokens_AllKnownKeysAccepted(t *testing.T) {
