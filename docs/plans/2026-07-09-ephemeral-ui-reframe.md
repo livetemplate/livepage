@@ -21,7 +21,7 @@ What this reframe ships, most-important first. **M1 is the headline** (makes the
 
 **M0 — foundation:** repositioned narrative (README/SKILL/llms.txt) + upstream version bump to latest (`livetemplate` v0.10→latest, client, components).
 
-**M2–M5 — hardening:** `livetemplate.Validate()` API + policy lint *(M2, upstream + tinkerdown)* · runtime approved-surface enforcement *(M3, tinkerdown; field-name validation deferred — needs a schema source)* · house style on-brand by construction — formalized design tokens + wired `style_guide` *(M4, tinkerdown; no lint)* · save/share gallery (stores captured skills) + external-embed handshake *(M5)*.
+**M2–M5 — hardening:** `livetemplate.Validate()` API + policy lint *(M2, upstream + tinkerdown)* · runtime approved-surface enforcement *(M3, tinkerdown; field-name validation deferred — needs a schema source)* · house style on-brand by construction — formalized design tokens + wired `style_guide` *(M4, tinkerdown; no lint)* · save & share the captured skill — capture-completeness + a dogfooded gallery + #216 CLI parity *(M5, tinkerdown; spine-only, share = git; embed/review/hosted deferred)*.
 
 ---
 
@@ -109,7 +109,7 @@ The brief names four things a team defines once so LLMs can safely generate agai
 | 2 | No **field-name validation**: a misspelled `{{.Field}}` renders empty. (Action-name/`describes:` metadata already exists in `config.Summarize`.) | **Deferred** (M3 kickoff 2026-07-24): needs a *validate-time schema source* tinkerdown lacks — schema lives only in the runtime DB (gitignored, seed-built). Real fix = parse `CREATE TABLE` from a seed, or a declared `columns:` schema — a new introspection capability, not a lint. | `validate` catches a bad field before serve | **Deferred** (§ Risks) |
 | 3 | Runtime enforcement is generation-time only; a webhook / bypassing caller can invoke outside the approved surface (three action paths, no shared gate) | **Tinkerdown** policy gate at all three paths (kickoff 2026-07-24: an upstream `WithActionPolicy` is dead code — tinkerdown never uses livetemplate dispatch) | Runtime safety (defense in depth) | **M3** |
 | 4 | House style can't be guaranteed on-brand: the design-token layer is duplicated/partial + `style_guide` is a declared-but-unconsumed config field. (The `lvt/components` library is deep — ~29 components — but tinkerdown uses 1; enrichment is optional, not the gap.) | **Tinkerdown** (kickoff 2026-07-24): formalize the tokens + wire `style_guide` into generation — on-brand by construction, no lint | Guaranteed on-brand, no generic LLM aesthetic | **M4** |
-| 5 | External-app embedding is iframe-bridge only | Embed handshake [client] | Sandboxed external embeds | **M5** |
+| 5 | External-app embedding: today's `embed-lvt` is inline (not iframe) + unsandboxed + LiveTemplate-specific | Sandboxed any-framework embed handshake [client] | Sandboxed external embeds | **Deferred → [#249](https://github.com/livetemplate/tinkerdown/issues/249)** (design-only upstream; dropped from M5 at kickoff 2026-07-24) |
 | 6 | Generation→validate→serve **orchestration** | **Legitimately tinkerdown** (all 3 exploration agents concur) | The skill itself | **M1** |
 
 **The load-bearing decision (per operator sign-off):** M1 ships the demo on primitives that already exist (items 6 + M0's bump); items 1–5 are explicit *hardening* milestones **after** the demo runs. This is a deliberate sequencing choice, not a shortcut — the generation orchestration is the one layer that always lived in tinkerdown.
@@ -168,7 +168,7 @@ The brief names four things a team defines once so LLMs can safely generate agai
 
 **upstream (fix here per the rule):**
 - `../livetemplate` — version bump (M0); `Validate()` API (M2). *(M3 is tinkerdown-only — the planned upstream `WithActionPolicy`/introspection would be dead code; see § M3 phases.)*
-- `../client` — consume via bump (M0); embed handshake (M5).
+- `../client` — consume via bump (M0). *(The embed handshake originally planned for M5 was deferred at kickoff → [#249](https://github.com/livetemplate/tinkerdown/issues/249); the re-scoped M5 is tinkerdown-only.)*
 - `../lvt/components` — enrich vocabulary (M4).
 
 ---
@@ -187,17 +187,17 @@ All follow the Anthropic skill shape already used by `skills/tinkerdown/` (conci
 
 ## Roadmap
 
-Ordered milestones. **M0, M1, M2, M3 and M4 are fully detailed** (full phase blocks); M5 is outline-only and gets expanded at its kickoff (see LLM session guide convention 9).
+Ordered milestones. **M0–M5 are all fully detailed** (full phase blocks) — M5 expanded at kickoff 2026-07-24 (convention 9), re-scoped to a tinkerdown-only, spine-only "save & share the captured skill."
 
 - **M0 — Reframe + upstream bump + a trustworthy vocabulary.** Reposition the narrative (README/SKILL/llms.txt/ai-generation) around ephemeral generated UIs; **bump `livetemplate` + client + components to their latest tags** and absorb behavior changes; **reconcile the `lvt-*` attribute reference with what the client actually implements** (Phase 2 — added after Phase 1's Audit found 8 of 11 sampled attributes stale). *Lights up:* the fast, correct runtime substrate, the honest story, and a vocabulary reference that is safe to hand an LLM — the last being a hard prerequisite for M1, not polish. *(no demo yet)*
 - **M1 — THE DEMO (thin vertical slice).** The five M1 deliverables (see § Deliverables at a glance) on existing primitives. *Lights up:* the target acceptance test — generate a real, friction-removing UI in ~30s — *and* re-run it from a skill in seconds.
 - **M2 — Deterministic validation (upstream `Validate()` + tinkerdown lint).** `livetemplate.Validate(templateText)` exposes the **structured, line-numbered parse / reactive-AST diagnostics** that today live in livetemplate's `internal/parse` (unreachable downstream) and that its public render path silently *swallows* — plus an optional render-determinism check. tinkerdown's `validate` consumes it per lvt block and adds the **tinkerdown-owned** semantic checks livetemplate cannot see: **bound-refs** (a used `lvt-source` must resolve to a declared source), **action-param completeness**, a **state-ref diagnostic that teaches the real `lvt-source` fix**, and the **`lvt-persist`→removed-with-migration** cleanup. *Lights up:* first-pass generation reliability — richer diagnostics for the skill's self-correct loop, and the "validates clean but breaks at serve" gaps M1 kept hitting closed at the gate. *(The attribute allowlist stays in tinkerdown, guarded against the vendored client bundle — livetemplate-Go can't own it, as it never references the client-only `lvt-mod:`/`lvt-nav:`/`lvt-ignore` namespaces. Design expanded at kickoff 2026-07-23 — see § M2 design.)*
 - **M3 — Runtime approved-surface enforcement (tinkerdown).** A server-side policy gate at all three action paths (WS-custom, webhook, builtins) so a running app — or a webhook / crafted-message caller — may only invoke **approved** actions against **approved** sources, respecting readonly: defense-in-depth beyond the *generation-time* lint. *Lights up:* the running app can't exceed the approved surface — the server-side gate `confirm:` never was. *(Kickoff 2026-07-24 re-scoped this **tinkerdown-only** — the planned upstream `WithActionPolicy` would be dead code for tinkerdown, which never routes actions through livetemplate. **Field-name validation was de-scoped** — it needs a validate-time schema source tinkerdown lacks; see § M3 phases and § Risks.)*
 - **M4 — House style on-brand by construction (tinkerdown).** Formalize the design-token layer that already exists implicitly (single-source it, define the four undefined tokens, drive it from a `tokens` config) so semantic HTML + PicoCSS renders on-brand **by construction**; and wire the **declared-but-unconsumed** `style_guide` into the generation context. *Lights up:* guaranteed on-brand generated UIs — no generic LLM aesthetic — via tokens, not a rejecting lint. *(Kickoff 2026-07-24 re-scoped this **tinkerdown-only** [tinkerdown consumes 1 of `lvt/components`' ~29 components], **spine-only** [component enrichment deferred, operator decision], and **no enforcement lint** [it fights semantic-HTML-first]; see § M4 phases.)*
-- **M5 — Persist to the malleable substrate (save & share).** This is where **malleability lives**: persist a generated UI to the repo + a gallery + share link by storing the captured **skill** (per convention 13 / M1 Phase 6), not just the `app.md` — so "save" means a re-runnable workflow you evolve, while individual UIs stay ephemeral; plus **substrate extensibility** (teams can add their own approved source types) and the external-app embed handshake. *Lights up:* "throw away the UI, keep + reshape the substrate" (folds issues #223 host read-only apps, #282 review mode, #249 external embed, #216 writable WASM sources, #222 custom Go+WASM sources).
+- **M5 — Save & share the captured skill.** This is where **malleability lives**: a generated UI worth keeping is captured as a git-committed **skill** (per M1 Phase 6), not just an `app.md` — so "save" means a re-runnable workflow you evolve, while individual UIs stay ephemeral. *(Kickoff 2026-07-24 re-scoped this **tinkerdown-only, spine-only**, operator decision: **save = real** — complete the capture so the house style travels [M4 feed-forward] + a **dogfooded gallery** listing the committed skill dirs + close out **#216** writable-WASM CLI parity; **share = git portability** [commit → pull → re-run], *not* a hosted service or share-link subsystem; see § M5 phases.)* *Lights up:* "throw away the UI, keep + reshape the substrate." *Deferred as named follow-ups (not in M5):* #282 review-mode (collaborative share), #249 sandboxed any-framework embed (design-only upstream, security-sensitive), #223 hosted service (no infra for a CLI/library), #222 custom Go source types (the unresolved build-time source-registration decision).
 
 **Open-issue walkthrough.** Triaged into three buckets against this reframe. *(Counts drift: **48 open** at plan authoring, **82** by 2026-07-19 — the repo files `from-review` issues continuously. The named issue→milestone mappings below stay valid; **re-run the triage at M0 kickoff** rather than trusting the totals, same as the version pins.)*
-- **Folded into milestones (reframe-aligned):** #223 host read-only apps → **M5** gallery; #282 review mode → **M5**; #249 `lvt-external` embed any framework → **M5** embed handshake; #216 writable WASM sources → **M5** sources; #222 custom sources in Go+WASM → **M5**; #226 ROADMAP lifecycle-attr pattern + #230 `lvt-preserve`→`lvt-ignore` doc fixes → **M0** reframe pass.
+- **Folded into milestones (reframe-aligned):** #216 writable WASM sources → **M5 Phase 3** (verify + CLI parity + docs — already implemented in code); #226 ROADMAP lifecycle-attr pattern + #230 `lvt-preserve`→`lvt-ignore` doc fixes → **M0** reframe pass. **Deferred out of M5 at kickoff 2026-07-24 (remain open, named follow-ups):** #223 host read-only apps (hosted service, no infra), #282 review mode (collaborative share — a standalone feature), #249 `lvt-external` embed (design-only upstream, security-sensitive), #222 custom Go source types (unresolved build-time source-registration). *(M5 re-scoped to the in-grain "save & share the captured skill" spine — see § M5 phases.)*
 - **Reliability/tech-debt, pulled in only if a phase's Audit finds it blocking:** #269 hot-reload serves stale `/`, #275 Kroki timeout blocks discovery, #259 multi-range highlight overlay misalign (all P2) — none sit on the M1 critical path, but #269 touches serve/hot-reload which M0's bump also touches, so M0 Audit checks it.
 - **Orthogonal `from-review` follow-ups (~35 at authoring and growing — #258–#273 etc., mostly P3/P4):** refactors/test-coverage/perf nits with no bearing on the reframe. Not scheduled here; left to normal backlog grooming. Explicitly *out of scope* so the reframe stays a thin vertical, not a debt-paydown.
 
@@ -1081,12 +1081,99 @@ type Diagnostic struct {
 
 ---
 
-### M5 phases — outline only (expanded at milestone kickoff per convention 9)
+### M5 phases — save & share the captured skill (expanded at kickoff 2026-07-24, per convention 9)
 
-The *what* + *why* of each is in § Roadmap; here is only the milestone's **kickoff design checklist** — the sections to write into full phase blocks when it starts (per convention 9):
+*(M2, M3, M4 were also expanded to full phase blocks at kickoff — see § M2/M3/M4 phases above. Re-scopes recorded there: M3's upstream `WithActionPolicy` dropped as dead code + field-name validation deferred; M4 re-scoped tinkerdown-only, spine-only, no enforcement lint.)*
 
-*(M2, M3, M4 were expanded to full phase blocks at kickoff — see § M2/M3/M4 phases above. Re-scopes recorded there: M3's upstream `WithActionPolicy` dropped as dead code + field-name validation deferred; M4 re-scoped tinkerdown-only, spine-only, no enforcement lint — the on-brand vision delivered by tokens, not rejection.)*
-- **M5** (tinkerdown + `client`): the persistence model (stores captured *skills*, not just `app.md`); gallery UX; the external-embed handshake protocol; **substrate extensibility** — writable WASM sources (#216) + custom Go+WASM source types (#222), and how a team-authored source enters the *approved* set.
+> **Milestone shape (settled at kickoff 2026-07-24):** **tinkerdown-only, spine-only** — "save & share" delivered as **save-is-real + share-via-git**, not a hosted service or a collaboration subsystem (operator decision: the in-grain spine over the bigger capstone). A direct read (Explore 2026-07-24) found the plan's five folded features heterogeneous and mostly mis-framed vs reality:
+> - **Persistence is greenfield, but the durable *unit already exists.*** The "persist to the repo" the plan wants **is git-committed skill dirs** (`skills/<name>/`, already produced by `/tinkerdown:save` per M1 Phase 6). `playground.go`'s 1-hour in-memory RAM store is a paste-preview sandbox — irrelevant to save/share. So the gallery is a **read-only listing** over the committed skill dirs, *not* a new persistence subsystem.
+> - **Capture omits the house style.** `/tinkerdown-save` captures approved sources + actions but **not** `styling`/`generation`/`style_guide` (the M4 Phase 2 feed-forward, § M4 Phase 2 Learn). Small, real, in-grain.
+> - **#216 writable WASM is already implemented** (`internal/wasm/source.go` `WriteItem`/`IsReadonly`). Honest disposition: **verify it runs + fix the one real residual** (`cmd/tinkerdown/commands/cli.go:221-240` `createCLISource` omits `wasm`/`exec`, so writable WASM works over WebSocket but not via `tinkerdown cli`) **+ docs** — *not* "build it", *not* "close untouched."
+> - **The embed framing is wrong twice over.** Today's `embed-lvt` (repo-root `embed_lvt.go`) is **inline, not iframe**, *and* **unsandboxed** (server-fetches + inlines untrusted upstream HTML into the docs DOM, forwarding cookies). #249's real ask (any-framework, *sandboxed*) is a different, security-sensitive mechanism, and #249 is a **design-only** issue upstream. Deferred.
+>
+> **What "share" means (honest headline — no overclaim):** save is real — a captured skill re-runs on-brand with **no LLM generation**. **Share = git portability:** commit the skill dir → a teammate pulls → re-runs. There is **no hosted service, no share-link subsystem, and no collaborative review** in M5; those are the deferred items.
+>
+> **Deferred as named follow-ups** (recorded, not pretend-in-scope — each stays its own open issue): **#282** review-mode (collaborative "share a UI, collect comments" — the *heart of a bigger share*, a standalone feature; the operator chose the spine over pulling this in); **#249** sandboxed any-framework embed (design-only upstream, security-sensitive, would bump `@livetemplate/client` + regen the bundle); **#223** hosted service (`tinkerdown.town/...` — no infra for a CLI/library); **#222** custom Go source types (forces the unresolved **build-time source-registration** decision — the type set is a hardcoded `switch`, `internal/source/source.go:224`). Substrate **approval** already exists (`Generation.Sources` allowlist, `config.go` `ApprovedSource`); only **registration** of a new *type* is unbuilt, and that is #222/#249's open question, not M5's.
+>
+> **No client bump.** With embed deferred, M5 touches **no** `@livetemplate/client` code — so the § *Standing Audit item … artifact provenance* checklist (which the plan tagged M5 with under the old embed scope) **does not apply** to this re-scoped M5.
+
+#### Phase 1 (M5, tinkerdown) — Capture completeness: the house style travels (~1 session)
+
+> **Goal at end:** `/tinkerdown-save` captures the *whole* relevant manifest — approved sources + actions **and the house style** (`styling` incl. `tokens`, `generation.style_guide` + the referenced `style-guide.md`) — so a saved skill re-runs **on-brand and self-contained**, closing the M4 Phase 2 feed-forward.
+
+**Design refs:**
+- § M4 Phase 2 Learn (the feed-forward: "a saved skill should capture its manifest's `styling`/`style_guide` so the palette travels")
+- `skills/tinkerdown-save/SKILL.md` (§ *What to extract* step 2 "The manifest" — captures sources + actions, omits styling); `examples/pii-access-approval/` (the committed capture target — post-M4 it carries `styling.tokens` + `generation.style_guide` + `style-guide.md`); the M4 `TestPIIManifestHouseStyleConsumable` pattern (tie the test to real config state, not word-presence)
+
+**Audit (first task):**
+- [ ] **Design-ref completeness check.**
+- [ ] Confirm `SKILL.md` step 2 omits `styling`/`generation`/`style_guide` (Explore verified). Confirm the committed `skills/pii-access-approval` **points at** `examples/pii-access-approval/` (bundle-vs-point: committed source), whose manifest already carries the house style post-M4.
+- [ ] Decide the test tie (advisor: real state, not prose). Mirror `TestPIIManifestHouseStyleConsumable`: assert the **captured skill's referenced manifest** round-trips `styling.tokens` + `generation.style_guide` — checked against a loaded config, not a word in `SKILL.md`. **Confront the pointer brittleness (advisor):** `skills/pii-access-approval` points at `examples/pii-access-approval` via *prose* in `SKILL.md`, so "resolve the manifest the skill points at" must **not** scrape a path from prose — the same trap the M4 token drift-guard refused. Either **(a)** the test re-loads the known `examples/pii-access-approval` dir directly — then be honest it is ≈ M4's `TestPIIManifestHouseStyleConsumable`, and Phase 1 is fundamentally a `SKILL.md` **prose edit whose effect on *future* LLM captures is untestable** (say so in Learn) — or **(b)** introduce a machine-readable skill→manifest pointer worth testing. Decide which; do not let a prose-scrape masquerade as a real tie.
+- [ ] Confirm the `style-guide.md` file is captured under the same **bundle-vs-point** rule as `seed.sql`/`app.md` (bundle when throwaway, point when committed) — no new rule.
+
+**Implementation:**
+- [ ] `skills/tinkerdown-save/SKILL.md` step 2: extend "The manifest" to capture the **house style** — `styling` (incl. `tokens`), `generation.style_guide`, and the referenced `style-guide.md` file (bundle-or-point). One line in the verify checklist: the captured manifest carries the style the app ran on.
+- [ ] `CHANGELOG.md`.
+
+**Acceptance criteria:**
+- [ ] **Simplify:** prose pass.
+- [ ] **Unit/structural:** a test asserting the `pii-access-approval` captured skill's referenced manifest round-trips `styling.tokens` + `generation.style_guide` (tie to `config.LoadFromDir`, not a `SKILL.md` substring). `TestCapturedSkillsWellFormed` still green.
+- [ ] **Integration:** load the captured skill's manifest; assert the house style resolves (the `style-guide.md` path exists + tokens populate) — the saved workflow is on-brand by construction.
+- [ ] **E2E:** N/A (capture is a skill-doc + manifest; the on-brand *render* guarantee is M4's tokens, already E2E-verified).
+
+**Learn:** what surprised us / plan drift / feed-forward to Phase 2's Audit / new-or-changed risks.
+
+#### Phase 2 (M5, tinkerdown) — The gallery: a dogfooded index of saved skills (~1 session)
+
+> **Goal at end:** a **gallery** — itself a Tinkerdown app (dogfooded, convention 12) — lists the committed `skills/<name>/` dirs with each `SKILL.md`'s `name`/`description`/`triggers`, so "save if the need recurs" has a discoverable home. Individual UIs stay ephemeral; the gallery indexes the durable captured **skills**.
+
+**Design refs:**
+- § Roadmap M5 ("throw away the UI, keep + reshape the substrate"); convention 12 (dogfood the ecosystem — no custom JS, an existing source type only)
+- `internal/source/` (the closed source-type set: `sqlite`/`pg`/`rest`/`json`/`csv`/`markdown`/`exec`/`wasm`/`graphql`/`computed`, dispatch at `source.go:224`); `skills/*/SKILL.md` frontmatter (the listing's data); M1 Phase 6 Learn (the capture is the gallery's unit — do not re-litigate)
+
+**Audit (first task) — the in-grain gate is the whole risk of this phase:**
+- [ ] **Design-ref completeness check.**
+- [ ] **Discriminating question (advisor): can the gallery be built with an *existing* source type over `skills/`?** It must read a **directory** of `SKILL.md` files and surface each one's frontmatter (`name`/`description`/`triggers`). Enumerate the source types against that need. If the only path is **`exec`** (→ `--allow-exec` friction on a *listing* page — wrong for a gallery), a **new source type**, or **new Go persistence**, that is **drift out of grain (convention 12): STOP and reconsider** — options then are (a) a build-time-generated markdown index (`tinkerdown build`-adjacent), (b) narrowing the gallery to a static committed index, or (c) escalate the missing primitive upstream per convention 12. Resolve here before any implementation; do not force a gallery that needs `exec`.
+- [ ] Decide where the gallery lives (an `examples/gallery/` app? a docs surface?) and whether it lists *all* `skills/` or a curated subset (the framework-authoring skills `tinkerdown`/`tinkerdown-save` are not user workflows — the gallery indexes *captured* workflows like `pii-access-approval`).
+
+**Implementation:**
+- [ ] The gallery app (dogfooded — `lvt-*` + an in-grain source only, no custom JS) listing the captured skills with their frontmatter; a path from a listed skill to its stand-up steps.
+- [ ] `CHANGELOG.md`.
+
+**Acceptance criteria:**
+- [ ] **Simplify:** `/simplify` the diff.
+- [ ] **Unit/structural:** the gallery app `tinkerdown validate`s clean; it lists the committed captured skills (assert against the real `skills/` set).
+- [ ] **Integration:** serve the gallery; assert it renders the captured-skill entries with their descriptions.
+- [ ] **E2E (chromedp, four-channel):** load the served gallery; the captured skills render as a browsable list; a listed skill's stand-up path is reachable; console + server log + WS frames + HTML + screenshot.
+
+**Learn:** what surprised us (esp. whether the in-grain gate held) / plan drift / feed-forward to Phase 3's Audit / new-or-changed risks.
+
+#### Phase 3 (M5, tinkerdown) — #216 disposition: writable-WASM CLI parity + docs (~1 session)
+
+> **Goal at end:** writable WASM has **CLI parity** — the already-implemented `WritableSource` WASM path is *verified running*, `tinkerdown cli`'s CRUD reaches it (the `createCLISource` gap closed, or `exec`/`wasm` omission documented as intentional), the wasm-source template + `docs/sources/wasm.md` reflect writability, and **#216 is closed with an honest disposition** — not left "done in code, unverified."
+
+**Design refs:**
+- [#216](https://github.com/livetemplate/tinkerdown/issues/216) (writable WASM sources, Phase C2)
+- `internal/wasm/source.go` (`WriteItem`/`IsReadonly` — already implement `WritableSource`); `cmd/tinkerdown/commands/cli.go:221-240` (`createCLISource` — omits `wasm`/`exec`); `examples/lvt-source-wasm-test/` (the runnable path); `cmd/tinkerdown/commands/templates/wasm-source/` + `docs/sources/wasm.md` (the residual doc/template surface the issue names)
+
+**Audit (first task):**
+- [ ] **Design-ref completeness check.**
+- [ ] **Verify, don't infer (advisor):** actually *run* the writable-WASM path (`examples/lvt-source-wasm-test/`) over the WS/serve path and confirm a write lands — code existing is not the feature working. Record the result.
+- [ ] Confirm the `createCLISource` gap (`wasm`/`exec` absent) and **decide per type:** `wasm` writable → belongs in CLI CRUD; `exec` is read-oriented — decide whether CLI CRUD over `exec` is meaningful or an intentional omission to *document* rather than fill.
+- [ ] Read #216's stated residual (template + `docs/sources/wasm.md`) and reconcile with what verification finds.
+
+**Implementation:**
+- [ ] `createCLISource`: add `wasm` (writable) — and `exec` only if the Audit finds it meaningful; otherwise a comment documenting the intentional omission (a silent `default:` error is not documentation).
+- [ ] Update `cmd/tinkerdown/commands/templates/wasm-source/` + `docs/sources/wasm.md` to reflect writability.
+- [ ] `CHANGELOG.md`; close #216 with a comment stating what was verified + fixed.
+
+**Acceptance criteria:**
+- [ ] **Simplify:** `/simplify` the diff.
+- [ ] **Unit:** `createCLISource` returns a writable source for `wasm`; the CRUD path exercises a write.
+- [ ] **Integration:** `tinkerdown cli` add/list against a writable `wasm` source (the `examples/lvt-source-wasm-test` fixture) works end to end.
+- [ ] **E2E:** N/A (CLI) — the browser/WS writable-WASM path is verified in the Audit run.
+
+**Learn:** what surprised us (esp. whether writable WASM actually ran) / plan drift / feed-forward to **any future substrate-extensibility milestone**'s Audit (the build-time source-registration decision #222/#249 defers) / new-or-changed risks.
 
 #### Standing Audit item for milestones that bump `@livetemplate/client` (M2, M5) — artifact provenance
 
@@ -1100,7 +1187,7 @@ The *what* + *why* of each is in § Roadmap; here is only the milestone's **kick
 | **M2** `Validate()` API | Go `livetemplate` | **Check `ClientVersion`** — it is a wire contract with no runtime handshake, so a server bump that moves it obliges matching the client (what M0 Phase 0 did: server v0.19.1 → client 0.18.2). A release touching only server-side APIs may leave `ClientVersion` unchanged — `Validate()` is arguably one — in which case this is legitimately a **No**. Read the constant, don't assume. |
 | **M3** approved-surface gate + field validation | **none** — tinkerdown-only (kickoff 2026-07-24 dropped the upstream `WithActionPolicy` as dead code) | **N/A.** No upstream bump, no client bump. |
 | **M4** component vocabulary | Go `lvt/components` | **No.** `github.com/livetemplate/lvt/components` is a server-side Go module consumed by `internal/server/websocket.go` and `internal/runtime/state.go`; it appears nowhere in `client/src` or `client/package.json`. Skip this checklist unless M4 also bumps `@livetemplate/client` for some client-side affordance a new component needs. |
-| **M5** embed handshake | `client` | **Certainly** — it ships a client-side feature. |
+| **M5** save & share (re-scoped 2026-07-24) | **none** — tinkerdown-only (embed deferred → #249) | **No.** The re-scoped M5 (capture-completeness + dogfooded gallery + #216 CLI parity) touches no `client` code. The old "embed handshake ships a client feature" row applied to the deferred scope only. |
 
 When the table says yes, the executing session must:
 - [ ] Re-read § Risks → *Committed-artifact provenance* and M0 Phase 0's Learn before touching `client/package.json` or `go.mod`.
