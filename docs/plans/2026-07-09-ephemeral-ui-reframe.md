@@ -21,7 +21,7 @@ What this reframe ships, most-important first. **M1 is the headline** (makes the
 
 **M0 — foundation:** repositioned narrative (README/SKILL/llms.txt) + upstream version bump to latest (`livetemplate` v0.10→latest, client, components).
 
-**M2–M5 — hardening (upstream-first):** `livetemplate.Validate()` API + policy lint · `WithActionPolicy` runtime authz + source introspection · richer `lvt/components` + enforceable design-token style guide · save/share gallery (stores captured skills) + external-embed handshake.
+**M2–M5 — hardening:** `livetemplate.Validate()` API + policy lint *(M2, upstream + tinkerdown)* · runtime approved-surface enforcement + field-name validation *(M3, tinkerdown)* · richer `lvt/components` + enforceable design-token style guide *(M4)* · save/share gallery (stores captured skills) + external-embed handshake *(M5)*.
 
 ---
 
@@ -106,8 +106,8 @@ The brief names four things a team defines once so LLMs can safely generate agai
 |---|-----|------|-----------|-----------|
 | 0 | Old pins hide shipped fixes | Bump `livetemplate`, client, `lvt/components` → latest tags | Ephemeral speed + determinism | **M0** |
 | 1 | Generated docs get only a *plain* parse error; the structured, line-numbered parse/reactive-AST diagnostics live in `livetemplate/internal/parse` (unreachable downstream) and the public render path *swallows* them. Allowed-tags, bound-refs and action-param are tinkerdown-owned semantics livetemplate can't see. | **Split** (kickoff 2026-07-23): `livetemplate.Validate(templateText)` exposes the structured parse/AST diagnostics + optional render-determinism [server]; allowlist / bound-refs / action-param stay in tinkerdown `validate` | Deterministic first-pass correctness | **M2** |
-| 2 | No state/source **introspection** (fields + action names as metadata) | Reflective metadata surface [server] | LLM binds to real fields | **M3** |
-| 3 | Permission enforcement is coarse; no per-action/field authz | Declarative `WithActionPolicy` hook [server] | Runtime safety (defense in depth) | **M3** |
+| 2 | No **field-name validation**: a misspelled `{{.Field}}` renders empty. (Action-name/`describes:` metadata already exists in `config.Summarize`.) | **Tinkerdown** `validate` + `source.SchemaProvider` (kickoff 2026-07-24: livetemplate can't introspect map-based state) | `validate` catches a bad field before serve | **M3** |
+| 3 | Runtime enforcement is generation-time only; a webhook / bypassing caller can invoke outside the approved surface (three action paths, no shared gate) | **Tinkerdown** policy gate at all three paths (kickoff 2026-07-24: an upstream `WithActionPolicy` is dead code — tinkerdown never uses livetemplate dispatch) | Runtime safety (defense in depth) | **M3** |
 | 4 | Primitive library too thin (no charts, badges, cards, stat tiles, alerts, empty-states) | Enrich `lvt/components` [components] | "LLMs rarely need custom HTML" | **M4** |
 | 5 | External-app embedding is iframe-bridge only | Embed handshake [client] | Sandboxed external embeds | **M5** |
 | 6 | Generation→validate→serve **orchestration** | **Legitimately tinkerdown** (all 3 exploration agents concur) | The skill itself | **M1** |
@@ -152,7 +152,7 @@ The brief names four things a team defines once so LLMs can safely generate agai
 **Key flows.**
 1. **Generate** — skill reads manifest + reference → emits `app.md` → `validate` loop → review → `serve`. *(M1)*
 2. **Approve** — a `confirm:` action that runs a scoped export + appends a durable audit record (+ optionally opens a GitOps grant PR via `gh pr create`). *(M1)*
-3. **Policy gate at generation** — the skill may only wire up sources/actions the manifest approves; `validate` (M1) + `livetemplate.Validate()` (M2) enforce doc cleanliness; `WithActionPolicy` (M3) enforces at runtime. *(M1→M3)*
+3. **Policy gate at generation** — the skill may only wire up sources/actions the manifest approves; `validate` (M1) + `livetemplate.Validate()` (M2) enforce doc cleanliness; the M3 runtime gate enforces the approved surface at action time (every path a caller can reach). *(M1→M3)*
 4. **Ephemeral lifecycle** — disk-free `ParseString` + TTL session; thrown away or saved to a gallery. *(M1 render; M5 save/share)*
 
 ---
@@ -167,7 +167,7 @@ The brief names four things a team defines once so LLMs can safely generate agai
 - `internal/source/{exec.go,sqlite.go}`, `auto_tables.go`, `execargs` (typed action forms), `WritableSource`/`SQLExecutor` — the queue + scoped-export + audit-append + approve-and-run primitives the demo reuses.
 
 **upstream (fix here per the rule):**
-- `../livetemplate` — version bump (M0); `Validate()` API (M2); introspection + `WithActionPolicy` (M3).
+- `../livetemplate` — version bump (M0); `Validate()` API (M2). *(M3 is tinkerdown-only — the planned upstream `WithActionPolicy`/introspection would be dead code; see § M3 phases.)*
 - `../client` — consume via bump (M0); embed handshake (M5).
 - `../lvt/components` — enrich vocabulary (M4).
 
@@ -187,12 +187,12 @@ All follow the Anthropic skill shape already used by `skills/tinkerdown/` (conci
 
 ## Roadmap
 
-Ordered milestones. **M0, M1 and M2 are fully detailed** (full phase blocks); M3–M5 are outline-only and get expanded at their kickoff (see LLM session guide convention 9).
+Ordered milestones. **M0, M1, M2 and M3 are fully detailed** (full phase blocks); M4–M5 are outline-only and get expanded at their kickoff (see LLM session guide convention 9).
 
 - **M0 — Reframe + upstream bump + a trustworthy vocabulary.** Reposition the narrative (README/SKILL/llms.txt/ai-generation) around ephemeral generated UIs; **bump `livetemplate` + client + components to their latest tags** and absorb behavior changes; **reconcile the `lvt-*` attribute reference with what the client actually implements** (Phase 2 — added after Phase 1's Audit found 8 of 11 sampled attributes stale). *Lights up:* the fast, correct runtime substrate, the honest story, and a vocabulary reference that is safe to hand an LLM — the last being a hard prerequisite for M1, not polish. *(no demo yet)*
 - **M1 — THE DEMO (thin vertical slice).** The five M1 deliverables (see § Deliverables at a glance) on existing primitives. *Lights up:* the target acceptance test — generate a real, friction-removing UI in ~30s — *and* re-run it from a skill in seconds.
 - **M2 — Deterministic validation (upstream `Validate()` + tinkerdown lint).** `livetemplate.Validate(templateText)` exposes the **structured, line-numbered parse / reactive-AST diagnostics** that today live in livetemplate's `internal/parse` (unreachable downstream) and that its public render path silently *swallows* — plus an optional render-determinism check. tinkerdown's `validate` consumes it per lvt block and adds the **tinkerdown-owned** semantic checks livetemplate cannot see: **bound-refs** (a used `lvt-source` must resolve to a declared source), **action-param completeness**, a **state-ref diagnostic that teaches the real `lvt-source` fix**, and the **`lvt-persist`→removed-with-migration** cleanup. *Lights up:* first-pass generation reliability — richer diagnostics for the skill's self-correct loop, and the "validates clean but breaks at serve" gaps M1 kept hitting closed at the gate. *(The attribute allowlist stays in tinkerdown, guarded against the vendored client bundle — livetemplate-Go can't own it, as it never references the client-only `lvt-mod:`/`lvt-nav:`/`lvt-ignore` namespaces. Design expanded at kickoff 2026-07-23 — see § M2 design.)*
-- **M3 — Runtime policy + introspection (upstream).** `WithActionPolicy` per-action/field authz + state/source introspection metadata. *Lights up:* defense-in-depth (the running app can't exceed granted access) + LLM binds to real fields.
+- **M3 — Runtime approved-surface enforcement + field-name validation (tinkerdown).** A server-side policy gate at all three action paths (WS-custom, webhook, builtins) so a running app — or a webhook / crafted-message caller — may only invoke **approved** actions against **approved** sources, respecting readonly: defense-in-depth beyond the *generation-time* lint. Plus `validate` **field-name checking** against a source's schema (sqlite-first). *Lights up:* the running app can't exceed the approved surface, and a misspelled `{{.Field}}` is caught before serve. *(Kickoff 2026-07-24 re-scoped this **tinkerdown-only** — the planned upstream `WithActionPolicy` would be dead code for tinkerdown, which never routes actions through livetemplate; see § M3 phases.)*
 - **M4 — Component vocabulary + enforceable house style (upstream `lvt/components` + tinkerdown).** Charts, badges, cards, stat tiles, alerts, empty-states; **plus** promoting the UX style guide from coarse (`site_css` + `style-guide.md`) to **design tokens + an enforced component set** (the "style guide object" the exploration found missing). *Lights up:* richer generated dashboards with no free-form HTML, guaranteed on-brand.
 - **M5 — Persist to the malleable substrate (save & share).** This is where **malleability lives**: persist a generated UI to the repo + a gallery + share link by storing the captured **skill** (per convention 13 / M1 Phase 6), not just the `app.md` — so "save" means a re-runnable workflow you evolve, while individual UIs stay ephemeral; plus **substrate extensibility** (teams can add their own approved source types) and the external-app embed handshake. *Lights up:* "throw away the UI, keep + reshape the substrate" (folds issues #223 host read-only apps, #282 review mode, #249 external embed, #216 writable WASM sources, #222 custom Go+WASM sources).
 
@@ -934,17 +934,84 @@ type Diagnostic struct {
 
 ---
 
-### M3–M5 phases — outline only (expanded at milestone kickoff per convention 9)
+### M3 phases — runtime approved-surface enforcement + field-name validation (expanded at kickoff 2026-07-24, per convention 9)
+
+> **Milestone shape (settled at kickoff):** **tinkerdown-only.** The plan filed M3 as upstream (`WithActionPolicy` + introspection), but a direct read of both repos (Explore 2026-07-24) shows both would be **dead code upstream**: tinkerdown routes actions entirely through its own `runtime.GenericState.HandleAction` → `RunSQLAction`, **never** through `livetemplate.DispatchWithState` — so a livetemplate action-policy hook would never fire for tinkerdown; and tinkerdown's state is map-based (`[]map[string]interface{}`), so livetemplate's reflection-based introspection has no typed struct to read. Unlike M2 (where tinkerdown genuinely *consumed* the upstream `Validate()`), an upstream hook here has **zero tinkerdown consumption**. Two tinkerdown phases. *(A livetemplate `WithActionPolicy` for its own typed-struct consumers is separable framework work, deferred — see the decisions summary.)*
+
+**Kickoff Audit findings (Explore of `../livetemplate` + tinkerdown, 2026-07-24):**
+
+- **Three action paths, no shared chokepoint.** A runtime action reaches SQL three ways: **WS-custom** (`websocket.go:726` → `GenericState.HandleAction` `state.go:282` → `executeCustomAction` `actions.go:262` → sql/http/exec), **webhook-direct** (`webhook.go:567` → `RunSQLAction`, bypassing `HandleAction` entirely), and **WS-builtins** (add/delete/toggle → `handleWriteAction` `actions.go:97` → `WriteItem`). `RunSQLAction` is shared *only for SQL* and misses http/exec + all builtins. **One policy-check function called at each of the three entry points** (not a dispatch refactor — the paths differ in shape; a mid-milestone rewrite is what balloons).
+- **`confirm:` is a client hint, not a runtime gate — and must stay one.** It is enforced only in the browser bundle (`checkConfirm` → `window.confirm`); the server never reads `Action.Confirm`. A dialog cannot be server-verified, so M3 does **not** "enforce `confirm:`." What M3 enforces server-side is the **approved surface**: a running app — or a webhook / crafted-message caller — may only invoke **approved** actions against **approved** sources, respecting `IsReadonly`. That is the real "can't exceed what was approved at generation time"; `confirm:` is untangled from it. (Corrects the M1 Phase 4 Learn's conflation.)
+- **Per-action, not per-user.** The operator is process-global (`--operator` → `runtime.go:35-52`); no per-request user identity is threaded to the WS action path. Per-user authz needs new plumbing — deferred. M3 scopes to "is this action/source approved."
+- **Introspection is half-built, tinkerdown-side.** `source.SchemaProvider`/`SQLiteSource.Schema()` (`sqlite.go:433`, `PRAGMA table_info`) exposes columns for **sqlite only**; other sources expose fields only as first-row map keys post-`Fetch`. `config.Summarize`/`Operation` (`summary.go:37`) already emits action names + `describes:` + risk flags (the "LLM binds to real actions" half). So the M3 introspection deliverable is **validate-time field-name checking**, sqlite-first.
+- **The field transform:** `row_cap`→`.RowCap` is `snakeToPascal` at render time (`state.go:445,456`); both keys resolve. A field check applies `snakeToPascal` to schema columns before comparing, and must not conflate **row fields** (from `.Data`, snakeToPascal) with **struct-level state keys** (`Data`/`Status`/`Error`/`Table`/`EditingID`, plain titlecase, `state.go:34-53`).
+- **Provenance checklist: N/A for M3** — tinkerdown-only, no `@livetemplate/client` bump.
+
+#### Phase 1 (M3, tinkerdown) — Runtime approved-surface enforcement (~1 session)
+
+> **Goal at end:** an action invoked **outside the approved surface** is rejected server-side on **every path a caller can reach** — WS-custom, webhook, and builtins — closing the hole the generation-time lint + the inert `confirm:` leave open (a bypassing caller today reaches un-approved actions).
+
+**Design refs:**
+- § M3 design (the three paths + the "one shared check" finding) · M1 Phase 4 Learn (`confirm:` inert; render-path-independent enforcement is M3) · § Risks (Risk 758)
+- tinkerdown `internal/runtime/state.go:282` (`HandleAction`), `internal/runtime/actions.go:262` (`executeCustomAction`) + `:97` (`handleWriteAction` builtins), `internal/server/webhook.go:567` (webhook direct), `internal/config/config.go:186` (`ApprovedSource`/`ApprovedAction`) + `:168` (`GenerationConfig`), `internal/config/policy.go` (the generation-time predicate to reuse)
+
+**Audit (first task):**
+- [ ] **Design-ref completeness check.**
+- [ ] Confirm the three entry points don't share a gate (Explore verified) and pin the **one shared predicate**: an invoked custom action must be `ApprovedAction`; a source it (or a builtin) touches must be `ApprovedSource`; a write must respect `IsReadonly`. Reuse `config.ApprovedAction`/`ApprovedSource` — do not re-derive.
+- [ ] Pin the **opt-in boundary**: only gate when the manifest has a `generation:` block (no block → no approved set → no gate, mirroring the lint — no regression for plain projects).
+- [ ] Confirm builtins are governed by **source approval + writability**, not the approved-*action* set (they are `IsBuiltinAction`); the gate for a builtin is "its source is approved and (for writes) not readonly."
+- [ ] `confirm:` stays a client hint — do **not** attempt to server-enforce a dialog.
+
+**Implementation:**
+- [ ] A shared policy gate (`config`/`runtime`): given the loaded config + an action name (+ the source it targets) + read-vs-write, return a clear error when outside the approved surface; nil when no generation block.
+- [ ] Call it at all three entry points: `GenericState.HandleAction` (before `executeCustomAction`), the webhook entry (before `RunSQLAction`), and `handleWriteAction` (before `WriteItem`).
+- [ ] Reject with a logged, caller-visible error; `CHANGELOG.md`.
+
+**Acceptance criteria:**
+- [ ] **Simplify:** `/simplify` the diff.
+- [ ] **Unit:** an unapproved action rejected via *each* path (WS-custom, webhook, builtin-on-unapproved-source); an approved action passes; a write to a readonly source rejected; a no-generation-block project has no gate (no regression).
+- [ ] **Integration:** the PII example approve/deny still succeed (approved); a crafted webhook invoking an *unapproved* action is rejected.
+- [ ] **E2E (chromedp, four-channel):** the PII console approves/denies through the gate (approved actions pass); a direct/webhook call to an unapproved action is rejected server-side — the proof M3 closed the hole `confirm:` never did.
+
+**Learn:** what surprised us / plan drift / feed-forward to Phase 2's Audit / new-or-changed risks.
+
+#### Phase 2 (M3, tinkerdown) — Field-name validation via source introspection (~1 session)
+
+> **Goal at end:** `tinkerdown validate` flags a template field (`{{.Bogus}}`) that maps to no real source column — closing M2 Phase 5 feed-forward #2 (`{{.RowCap}}` renders empty when the column is misspelled) — sqlite-first, skipping sources that expose no schema (a safe miss, not a false positive).
+
+**Design refs:**
+- M2 Phase 5 Learn feed-forward #2 · Phase 1 Learn
+- tinkerdown `internal/source/source.go:50` (`SchemaProvider`/`ColumnInfo`), `internal/source/sqlite.go:433` (`Schema()` via `PRAGMA table_info`, excludes `id`/`created_at`), `internal/runtime/state.go:445,456` (`snakeToPascal`) + `:34-53` (the struct-level state keys), the M2 Phase 3 `validate` block-walk (where field refs are already reachable)
+
+**Audit (first task):**
+- [ ] **Design-ref completeness check.**
+- [ ] Scope: **sqlite-first** (the only source with `Schema()` today); a source with no schema is **skipped**, not flagged (over-inclusion bias, as with bound-refs). Confirm `Schema()` returns nil for a not-yet-created table (don't false-positive a pre-seed app).
+- [ ] Pin the comparison: a schema column `row_cap` matches `{{.row_cap}}` *and* `{{.RowCap}}` (apply `snakeToPascal`). **Row fields vs state keys:** a `{{.X}}` inside `{{range .Data}}` is a row field (check against columns); a top-level `{{.Status}}`/`{{.Data}}`/`{{.Error}}`/`{{.Table}}`/`{{.EditingID}}` is a struct-level state key (never a column) — allow-list these. Bias to a safe miss: flag only a ref that matches *neither* a column *nor* a state key *nor* a datatable-component field.
+- [ ] Decide how to associate a block's `{{.Field}}` refs with the block's `lvt-source` (the source whose schema governs them).
+
+**Implementation:**
+- [ ] `validate`: for each block bound to a sqlite source, load `Schema()` columns (+ `snakeToPascal` variants) ∪ the reserved state keys; extract the block's row-field refs; flag a ref matching none, with the available-columns list. Skip blocks whose source exposes no schema.
+- [ ] `CHANGELOG.md`.
+
+**Acceptance criteria:**
+- [ ] **Simplify:** `/simplify` the diff.
+- [ ] **Unit:** `{{.Bogus}}` (no column) flagged with the column list; `{{.RowCap}}` (column `row_cap`) passes; state keys (`.Status`/`.Data`) pass; a non-sqlite / no-schema source is skipped (no false positive); each guard **verified to fail** when violated.
+- [ ] **Integration:** `examples/` **55/55** + skill corpus **10/10** stay green (the false-positive gate).
+- [ ] **E2E:** N/A (validate-only, as with M2 Phase 3) — a broken-field fixture is caught by `validate` before serve; the corrected version is already the passing corpus.
+
+**Learn:** what surprised us / plan drift / feed-forward to **M4**'s Audit / new-or-changed risks.
+
+---
+
+### M4–M5 phases — outline only (expanded at milestone kickoff per convention 9)
 
 The *what* + *why* of each is in § Roadmap; here is only each milestone's **kickoff design checklist** — the sections to write into full phase blocks when that milestone starts (per convention 9):
 
-*(M2 was expanded to full phase blocks at kickoff 2026-07-23 — see § M2 phases above.)*
-
-- **M3** (upstream `livetemplate`): the `WithActionPolicy` hook signature; the introspection surface; how the manifest maps to runtime policy. **Feed-forward from M2 (Phase 5 #2 re-sequenced here):** template **field-name** validation (the snake_case→PascalCase `.RowCap` mapping that renders empty when wrong) depends on source-schema **introspection** — it lands in M3 with its dependency, not M2.
+*(M2 and M3 were expanded to full phase blocks at kickoff — see § M2 phases and § M3 phases above. The M3 upstream `WithActionPolicy` hook was dropped as dead code for tinkerdown; a livetemplate-side hook for its own consumers is separable framework work, not tinkerdown's M3.)*
 - **M4** (upstream `lvt/components` + tinkerdown): the component list + options; how the skill's reference advertises them; the design-token/enforced-component style-guide schema.
 - **M5** (tinkerdown + `client`): the persistence model (stores captured *skills*, not just `app.md`); gallery UX; the external-embed handshake protocol; **substrate extensibility** — writable WASM sources (#216) + custom Go+WASM source types (#222), and how a team-authored source enters the *approved* set.
 
-#### Standing Audit item for milestones that bump `@livetemplate/client` (M2, M3, M5) — artifact provenance
+#### Standing Audit item for milestones that bump `@livetemplate/client` (M2, M5) — artifact provenance
 
 **M0 Phase 0 closed the #295 mechanism, not the class** (see its Learn + § Risks). `make build` now runs `npm ci`, so the committed bundle can no longer be built from stale `node_modules`. What no install-time check can catch is a bundle that is correct-by-construction yet **behaviorally** regressive — a genuine upstream client regression, or a server↔client wire mismatch (livetemplate exports `ClientVersion` precisely because there is no runtime handshake). Only running the live UI catches that, and **CI does not run the live UI**: it excludes the e2e suite twice over (`-tags=ci` *and* `-skip='E2E|e2e'`).
 
@@ -954,7 +1021,7 @@ The *what* + *why* of each is in § Roadmap; here is only each milestone's **kic
 |---|---|---|
 | **M1** (the demo) | none — builds on existing primitives | **No.** This is the breathing room that makes deferring [#297](https://github.com/livetemplate/tinkerdown/issues/297) reasonable rather than negligent. |
 | **M2** `Validate()` API | Go `livetemplate` | **Check `ClientVersion`** — it is a wire contract with no runtime handshake, so a server bump that moves it obliges matching the client (what M0 Phase 0 did: server v0.19.1 → client 0.18.2). A release touching only server-side APIs may leave `ClientVersion` unchanged — `Validate()` is arguably one — in which case this is legitimately a **No**. Read the constant, don't assume. |
-| **M3** `WithActionPolicy` | Go `livetemplate` | **Check `ClientVersion`** — same wire-contract reasoning. |
+| **M3** approved-surface gate + field validation | **none** — tinkerdown-only (kickoff 2026-07-24 dropped the upstream `WithActionPolicy` as dead code) | **N/A.** No upstream bump, no client bump. |
 | **M4** component vocabulary | Go `lvt/components` | **No.** `github.com/livetemplate/lvt/components` is a server-side Go module consumed by `internal/server/websocket.go` and `internal/runtime/state.go`; it appears nowhere in `client/src` or `client/package.json`. Skip this checklist unless M4 also bumps `@livetemplate/client` for some client-side affordance a new component needs. |
 | **M5** embed handshake | `client` | **Certainly** — it ships a client-side feature. |
 
