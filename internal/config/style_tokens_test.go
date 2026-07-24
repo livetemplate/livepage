@@ -58,6 +58,31 @@ func TestLoad_StylingTokensUnknownKeyRejected(t *testing.T) {
 	}
 }
 
+// A known token key with an unsafe value is NOT a config error — ValidateStyleTokens
+// gates keys, not values. The value round-trips into config and is dropped later at
+// render (sanitizeCSSValue), exactly as primary_color/font handle an unsafe value.
+// This locks the key-vs-value split so it can't silently change: Load succeeds, the
+// bad value survives in config, and the render layer (not load) is what omits it.
+func TestLoad_StylingTokensUnsafeValueAccepted(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tinkerdown.yaml")
+	yaml := "title: Site\n" +
+		"type: site\n" +
+		"styling:\n" +
+		"  tokens:\n" +
+		"    accent: \"red; }\"\n" // known key, unsafe value (CSS meta-characters)
+	if err := os.WriteFile(path, []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load should accept a known key regardless of value (values are gated at render): %v", err)
+	}
+	if got := cfg.Styling.Tokens["accent"]; got != "red; }" {
+		t.Errorf("value should round-trip into config unchanged (render sanitizes, not load): got %q", got)
+	}
+}
+
 // Absent styling.tokens is backward-compatible: an empty map, no error.
 func TestLoad_StylingTokensDefaultsEmpty(t *testing.T) {
 	dir := t.TempDir()
