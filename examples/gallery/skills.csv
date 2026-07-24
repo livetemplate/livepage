@@ -1,0 +1,2 @@
+name,description,triggers,path
+pii-access-approval,"Stand up the PII / data-export access-approval console in seconds — a governed request queue with bounded, audited Approve/Deny. A saved, re-runnable workflow; no LLM generation needed.","PII access approval; data-export approval; access request queue; approve access requests; sensitive data export console",skills/pii-access-approval

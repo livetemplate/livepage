@@ -8,7 +8,7 @@ Create custom data sources using WebAssembly.
 sources:
   custom:
     type: wasm
-    module: ./custom.wasm
+    path: ./custom.wasm
 ```
 
 ## Options
@@ -16,8 +16,27 @@ sources:
 | Option | Required | Description |
 |--------|----------|-------------|
 | `type` | Yes | Must be `wasm` |
-| `module` | Yes | Path to WASM module |
-| `config` | No | Configuration passed to module |
+| `path` | Yes | Path to the `.wasm` module file |
+| `options` | No | Init config passed to the module (a map of string values) |
+
+## Read-only vs. writable
+
+Writability is derived from the module itself, not the manifest: a module that
+exports a `write` function (see *Required Interface* below) is **writable** — it
+supports `add`, `update`, and `delete` — while a module that exports only `fetch` is
+**read-only** (list only). A write against a read-only module is refused with a clear
+error, never silently dropped.
+
+A writable WASM source has full parity across both entry points — the live server and
+the CLI:
+
+```bash
+# list (read) works for any WASM source
+tinkerdown cli app.md list custom
+
+# add/update/delete work only if the module exports `write`
+tinkerdown cli app.md add custom --title="New item"
+```
 
 ## Examples
 
@@ -27,8 +46,8 @@ sources:
 sources:
   github_issues:
     type: wasm
-    module: ./sources/github.wasm
-    config:
+    path: ./sources/github.wasm
+    options:
       repo: livetemplate/tinkerdown
 ```
 
@@ -38,8 +57,8 @@ sources:
 sources:
   external_data:
     type: wasm
-    module: ./sources/external-api.wasm
-    config:
+    path: ./sources/external-api.wasm
+    options:
       api_key: ${EXTERNAL_API_KEY}
       resource_id: ${EXTERNAL_RESOURCE_ID}
 ```
@@ -168,7 +187,7 @@ WASM modules run with resource limits:
 sources:
   custom:
     type: wasm
-    module: ./custom.wasm
+    path: ./custom.wasm
     limits:
       memory: 64MB      # Default: 64MB
       timeout: 30s      # Default: 30s
@@ -197,8 +216,8 @@ Browse community-contributed sources:
 sources:
   github_issues:
     type: wasm
-    module: ./sources/github.wasm
-    config:
+    path: ./sources/github.wasm
+    options:
       repo: livetemplate/tinkerdown
       token: ${GITHUB_TOKEN}
     cache:

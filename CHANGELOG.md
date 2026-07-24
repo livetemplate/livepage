@@ -11,6 +11,43 @@ Earlier releases (v0.1.x) are documented in the
 
 ## [Unreleased]
 
+### Fixed — `tinkerdown cli` reaches WASM sources; wasm docs use the real config keys
+
+`tinkerdown cli` now constructs `wasm` sources, so a WASM source has the same CRUD
+surface on the CLI as under `serve`: `list` works for any module, and
+`add`/`update`/`delete` work when the module exports `write` (a read-only module
+refuses a write with a clear error rather than dropping it). `exec` remains
+intentionally out of the CLI CRUD surface (it is a read-oriented, `--allow-exec`-gated
+command runner), now documented in the code rather than a silent fallthrough. The
+WASM source docs and the `wasm-source` template were also corrected: they used a
+non-existent `module:` key (the real key is `path:`) and `config:` (real: `options:`),
+so following them failed to load — plus a new *Read-only vs. writable* section
+documents the `write`-export contract and the CLI parity.
+
+### Added — a saved-skills gallery (`examples/gallery/`)
+
+A discoverable home for captured workflows: the gallery is itself a plain
+Tinkerdown app (an `lvt-source` over a read-only CSV, no custom JavaScript) that
+lists each captured skill with what it stands up and where its stand-up steps
+live. Because no source type reads a directory of `SKILL.md` frontmatter, the
+gallery renders a committed static index (`skills.csv`) rather than scanning
+`skills/` live; a test (`TestSavedSkillsGalleryInSync`) keeps that index in step
+with the captured skills on disk — every `skills/` dir except the
+framework-authoring skills — so a new capture cannot silently go unlisted.
+
+### Changed — a saved skill now carries its house style
+
+`/tinkerdown:save` captures the manifest **whole**, not trimmed to sources +
+actions: the `styling` block (theme + design `tokens`) and any
+`generation.style_guide` → `style-guide.md` travel with the capture, under the
+same bundle-or-point rule as `seed.sql` / `app.md`. So a saved workflow re-runs
+**on-brand** instead of falling back to bare defaults — closing the gap where a
+capture kept a console's data surface but dropped its palette. The PII reference
+skill demonstrates the point case: it points at the committed
+`examples/pii-access-approval/`, whose manifest carries the house style, and a
+test now guards that the style file travels and the manifest still round-trips
+its `styling.tokens` + `generation.style_guide`.
+
 ### Changed — the generation skill now consumes the house style
 
 The `/tinkerdown` generation skill reads a project's house style and authors

@@ -1,0 +1,17 @@
+# The saved-skills gallery — a discoverable home for captured Tinkerdown workflows.
+#
+# In-grain note (M5 Phase 2): no source type reads a directory of SKILL.md
+# frontmatter, so the gallery renders a committed static index (skills.csv) rather
+# than scanning skills/ live. TestSavedSkillsGalleryInSync keeps that index in step
+# with the captured skills on disk. See docs/plans § M5 Phase 2 for the STOP-gate
+# decision that led here.
+
+title: "Saved skills gallery"
+
+sources:
+  # A gallery lists; it never mutates — so the index is read-only. auto-generated
+  # editable controls stay off, and the page binds it purely for display.
+  skills:
+    type: csv
+    file: skills.csv
+    readonly: true
