@@ -956,24 +956,41 @@ type Diagnostic struct {
 - tinkerdown `internal/runtime/state.go:282` (`HandleAction`), `internal/runtime/actions.go:262` (`executeCustomAction`) + `:97` (`handleWriteAction` builtins), `internal/server/webhook.go:567` (webhook direct), `internal/config/config.go:186` (`ApprovedSource`/`ApprovedAction`) + `:168` (`GenerationConfig`), `internal/config/policy.go` (the generation-time predicate to reuse)
 
 **Audit (first task):**
-- [ ] **Design-ref completeness check.**
-- [ ] Confirm the three entry points don't share a gate (Explore verified) and pin the **one shared predicate**: an invoked custom action must be `ApprovedAction`; a source it (or a builtin) touches must be `ApprovedSource`; a write must respect `IsReadonly`. Reuse `config.ApprovedAction`/`ApprovedSource` — do not re-derive.
-- [ ] Pin the **opt-in boundary**: only gate when the manifest has a `generation:` block (no block → no approved set → no gate, mirroring the lint — no regression for plain projects).
-- [ ] Confirm builtins are governed by **source approval + writability**, not the approved-*action* set (they are `IsBuiltinAction`); the gate for a builtin is "its source is approved and (for writes) not readonly."
-- [ ] `confirm:` stays a client hint — do **not** attempt to server-enforce a dialog.
+- [x] **Design-ref completeness check.**
+- [x] Confirmed the three entry points share no gate (Explore) — but they collapse to **three call sites in two files**: WS-custom + WS-builtin both flow through `GenericState.HandleAction`, gated in its two relevant branches; the webhook reaches `RunSQLAction` directly, gated at its own entry. **Two predicates, not one** (see Learn #1): a custom action gates on `ApprovedAction(name)` *only*; a builtin write gates on `ApprovedSource(boundSource)`. Reused `config.ApprovedAction`/`ApprovedSource`.
+- [x] Opt-in boundary pinned: gate only when `Generation != nil` (the `Enforce*` helpers return nil otherwise — a nil `*config.Config` receiver is safe by contract, so a state with no manifest simply isn't gated).
+- [x] Builtins governed by **source approval + writability** — the existing `IsReadonly` guard stays; the new gate adds `ApprovedSource(boundSource)`.
+- [x] `confirm:` left a client hint — not server-enforced.
 
 **Implementation:**
-- [ ] A shared policy gate (`config`/`runtime`): given the loaded config + an action name (+ the source it targets) + read-vs-write, return a clear error when outside the approved surface; nil when no generation block.
-- [ ] Call it at all three entry points: `GenericState.HandleAction` (before `executeCustomAction`), the webhook entry (before `RunSQLAction`), and `handleWriteAction` (before `WriteItem`).
-- [ ] Reject with a logged, caller-visible error; `CHANGELOG.md`.
+- [x] `config.EnforceApprovedAction(name)` + `config.EnforceApprovedSource(name)` — reject a name outside the approved set; nil when no `generation:` block.
+- [x] Threaded the config into `GenericState` (a `cfg` field via `SetPageConfig`, now called unconditionally so builtin-only pages are gated too). Called at `HandleAction`'s custom-action branch (`EnforceApprovedAction`) and its add/toggle/delete/update branch (`EnforceApprovedSource`), and at the webhook entry (`EnforceApprovedAction` → 403).
+- [x] Rejections are logged + caller-visible (WS error / webhook 403); `CHANGELOG.md`.
 
 **Acceptance criteria:**
-- [ ] **Simplify:** `/simplify` the diff.
-- [ ] **Unit:** an unapproved action rejected via *each* path (WS-custom, webhook, builtin-on-unapproved-source); an approved action passes; a write to a readonly source rejected; a no-generation-block project has no gate (no regression).
-- [ ] **Integration:** the PII example approve/deny still succeed (approved); a crafted webhook invoking an *unapproved* action is rejected.
-- [ ] **E2E (chromedp, four-channel):** the PII console approves/denies through the gate (approved actions pass); a direct/webhook call to an unapproved action is rejected server-side — the proof M3 closed the hole `confirm:` never did.
+- [x] **Simplify:** `code-simplifier` — diff already clean, no changes.
+- [x] **Unit:** `TestEnforceApprovedSurface` (opt-in + approved/unapproved), `TestHandleAction_ApprovedSurfaceGate` (WS-custom + WS-builtin rejected before execution; nil-cfg not gated), `TestWebhookHandler_ApprovedSurfaceGate` (unapproved → 403 and *not executed*; approved → 200) — every path, each verified to fail when violated.
+- [x] **Integration:** the PII example's approved actions pass (existing tests green); the unapproved-webhook 403 is `TestWebhookHandler_ApprovedSurfaceGate`; `TestWebhookHandler_BasicTrigger` (no generation block) still 200 (opt-in).
+- [x] **E2E (chromedp, four-channel):** `TestPIIAccessApproval` passes (30.6 s) — the approved approve/deny run *through* the gate; the reject path is unit-proven per-path (a chromedp harness can't easily forge an unapproved-action message, and the server-side unit rejection is the stronger proof).
 
-**Learn:** what surprised us / plan drift / feed-forward to Phase 2's Audit / new-or-changed risks.
+**Learn:**
+
+*What surprised us.*
+1. **The approved surface is two surfaces, and conflating them would have broken the PII demo.** A custom action must gate on `ApprovedAction(name)` *only* — never its source — because the PII example's approved actions (`approve-export` et al.) deliberately target `access_store`, a writable store kept *out* of `generation.sources` so no generated app can bind it. Checking the action's source would reject the very demo M1 built. Builtin writes gate the other way — on the *bound* source (`ApprovedSource`) — because a builtin operates on what the block bound, which a manifest app may only bind if approved. Two predicates, `EnforceApprovedAction` / `EnforceApprovedSource`.
+2. **`confirm:` was a red herring; the real hole was the webhook/builtin paths never re-checking approval.** The advisor's correction held: M3 does not "enforce `confirm:`" (a dialog can't be server-verified); it enforces the *approved surface*, which the WS-custom path also never re-checked and the webhook path (direct to `RunSQLAction`) bypassed entirely. Three call sites, one predicate each, closed it — no dispatch refactor.
+3. **No surprises in the plumbing** — threading `cfg` through `SetPageConfig` and making it unconditional was the only structural change; the predicates already existed (`ApprovedAction`/`ApprovedSource`), so the gate is a thin, reused layer.
+
+*PLAN.md drift fixed in this commit.*
+- "one shared predicate" → **two** (`EnforceApprovedAction` name-only; `EnforceApprovedSource` bound-source) — the access_store subtlety.
+- The E2E reject-path expectation softened to unit-proven-per-path (forging an unapproved-action message in chromedp is impractical; the server-side unit rejection is stronger).
+
+*Feed-forward to **Phase 2**'s Audit.*
+- Phase 2 (field-name validation) is validate-time and independent of this runtime gate; no coupling.
+- The `cfg`-on-`GenericState` threading is now available should any later phase want runtime access to the full config.
+
+*New / changed risks.*
+- **New (low): the webhook gate treats `generation.actions` as the runtime contract for *all* action invocations, including operator-configured webhooks.** A webhook wired to a *defined-but-unapproved* action now 403s. This is the intended defense-in-depth (the approved surface is the surface), and no corpus example pairs a webhook with a generation block — but a project that deliberately exposes an internal (unapproved) action only via webhook would need to approve it. Documented as opt-in.
+- **Deferred (as designed): per-user authz.** The operator is process-global; no per-request identity threads to the WS action path. M3 scopes to per-action approval; per-user would need new plumbing.
 
 #### Phase 2 (M3, tinkerdown) — Field-name validation via source introspection (~1 session)
 

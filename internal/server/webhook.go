@@ -276,6 +276,15 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Runtime approved-surface gate: this path reaches RunSQLAction directly,
+	// bypassing the WS dispatch, so it must re-check that the action is approved —
+	// an external caller may not trigger past the surface the operator approved.
+	if err := h.config.EnforceApprovedAction(webhook.Action); err != nil {
+		h.auditLog(webhookName, webhook.Action, r, false, err.Error(), params)
+		h.writeError(w, http.StatusForbidden, err.Error())
+		return
+	}
+
 	// Execute the action with concurrency control
 	if h.actionHandler != nil {
 		// Create context with timeout for acquiring slot

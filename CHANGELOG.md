@@ -11,6 +11,18 @@ Earlier releases (v0.1.x) are documented in the
 
 ## [Unreleased]
 
+### Added — runtime approved-surface enforcement
+
+When a project declares a `generation:` block, Tinkerdown now enforces the
+approved surface at **runtime**, not only at generation time: a running app — or
+a webhook / crafted-message caller — may only invoke an **approved** action, and
+a builtin write may only touch an **approved** source. The check runs on every
+path a caller can reach (WebSocket custom actions, WebSocket builtin writes, and
+the webhook endpoint, which share no chokepoint), so a caller bypassing the
+browser cannot reach past the surface the operator approved — the server-side
+gate the client-only `confirm:` never was. Projects with no `generation:` block
+are unaffected (approval is opt-in).
+
 ### Changed — `validate` catches unresolved sources and incomplete action params
 
 `tinkerdown validate` now reports two more "passes validate, breaks at serve"
