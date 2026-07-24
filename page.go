@@ -530,7 +530,7 @@ func (p *Page) buildBlocks(codeBlocks []*CodeBlock, sourceFile string) error {
 				}
 			}
 			return NewParseError(sourceFile, blockLine, "Interactive block has no state reference").
-				WithHint("Add a server block with state definition before this interactive block, or specify state=\"block-id\"")
+				WithHint("add lvt-source=\"<name>\" to the block's container so it renders a source's rows (define the source in frontmatter or tinkerdown.yaml). If you used lvt-persist, it is no longer supported — replace it with lvt-source (type: sqlite for a writable store).")
 		}
 
 		if _, ok := p.ServerBlocks[block.StateRef]; !ok {

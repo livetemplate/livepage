@@ -893,24 +893,44 @@ type Diagnostic struct {
 - tinkerdown `refs.go` (`DocRefs.Sources`/`DeclaredSources`), `internal/config/policy.go` (approved-set check — the model to extend to *declared*-set), `page.go:522-560` (the state-ref diagnostic), `vocabulary.go:35` (`lvt-persist` in the *known* set) + `page.go:585` (the "removed" note), `internal/config/config.go:215` (the manifest's own approved-vs-defined check — a template for the doc-vs-declared check)
 
 **Audit (first task):**
-- [ ] **Design-ref completeness check.**
-- [ ] Pin the **declared source universe** for bound-refs: frontmatter `sources:` + config `tinkerdown.yaml` sources + built-in affordances + cross-page shared sources (do not false-positive a legitimately shared source). Verify against a multi-page site.
-- [ ] Pin **action-param completeness**: extract every `:name` referenced by an approved action's `statement`/`statements` (reuse `SubstituteParams`' scanner — do not re-regex) and confirm the invoking form/control supplies each; decide required-vs-optional handling.
-- [ ] Decide `lvt-persist` handling: move from `knownAttributes` to a **removed-with-migration** set so the diagnostic is "unknown attribute `lvt-persist` — use `lvt-source`", and resolve the one `lvt-persist` occurrence in the client bundle first (M0 Phase 2 territory — the `TestKnownAttributesAreReal` guard). **Namespace-member validation (`lvt-on:bogusevent`) stays deferred** — `vocabulary.go:52` already argues it would create a second list to rot; note it, don't build it.
+- [x] **Design-ref completeness check.** Advisor: the four tasks are **not** equal-risk — three are set-membership/wording changes; action-param reproduces client param-serialization semantics. Sequenced the safe three first, action-param **last and separable**, with **corpus 55/55 as the false-positive gate** for both new lint checks.
+- [x] Declared source universe pinned via an Explore of `getEffectiveSource`: `page.Config.Sources` (frontmatter + auto-injected) ∪ the tinkerdown.yaml governing the file. **No built-in sources.** The false-positive trap is per-app config: a multi-app tree (`validate examples/`) keeps each app's sources in its own tinkerdown.yaml, not the root — resolved with `sourceConfigForFile` (walk up to the validation root).
+- [x] Action-param: **reuse, don't mirror** (advisor) — extracted the `:name` scanner into `scanParams`, shared by `SubstituteParams` (runtime) + `ReferencedParams` (validate). Exclude `operator` (server-set); union across `Statements`. Both client supply channels enumerated (form `name=` inputs + `data-*` keys).
+- [x] `lvt-persist`: **not a parallel "removed" set** (advisor) — removed from `knownAttributes`, added to `suggestAttribute`'s migrations map, framed "not supported — use lvt-source" (the client bundle *still reads it*, so it is tinkerdown-doesn't-support-it, not gone-from-the-universe). Client-bundle vestige left as the follow-up Phase 5 flagged. **Namespace-member validation stays deferred.**
 
 **Implementation:**
-- [ ] **Bound-refs check:** every `lvt-source` a document binds must resolve to a declared/config/built-in/shared source; unresolved → a diagnostic (line + the available-sources list, mirroring the state-ref "did you mean").
-- [ ] **Action-param completeness:** a form/control invoking an action must supply every `:param` the action's statement references; missing → a diagnostic naming the param (closes the Phase 5 #1 runtime-error-at-serve gap).
-- [ ] **State-ref diagnostic rewrite** (`page.go:532`): the hint teaches the *real* fix — a block gets state from `lvt-source` on its container — not the undefined `state="block-id"` concept a self-correcting agent thrashes on.
-- [ ] **`lvt-persist`→removed-with-migration** (per Audit); `CHANGELOG.md`.
+- [x] **Bound-refs check** (`unresolvedSourceDiags`): every bound `lvt-source` must resolve to a declared source (frontmatter ∪ governing config); unresolved → a diagnostic with the sorted declared-source list. `sourceConfigForFile` (+ `hasConfigFile`) resolves the per-app config, cached by directory.
+- [x] **Action-param completeness** (`unsuppliedActionParams`): for each invoked `kind: sql` action, every `:param` its statements reference (minus `operator`) must be in the document's **over-inclusive** supplied set (`suppliedParamNames` — every `data-*` key + named form field anywhere, excluding `data-lvt-*`); missing → a diagnostic naming the param.
+- [x] **State-ref diagnostic rewrite** (`page.go`): the hint teaches `lvt-source` on the block's container (and notes `lvt-persist` is replaced by it), not the undefined `state="block-id"`.
+- [x] **`lvt-persist`→migration hint** (`vocabulary.go`); `CHANGELOG.md`.
 
 **Acceptance criteria:**
-- [ ] **Simplify:** `/simplify` the diff.
-- [ ] **Unit:** `lvt-source="nope"` (no manifest) now fails with the available-sources hint; a shared/config source resolves clean; a form missing a required `:param` fails naming it; a complete form passes; `lvt-persist` yields the migration diagnostic; each new guard **verified to fail** when violated (the self-certifying-guard discipline — a guard is trusted only after its falsification test is seen to fail).
-- [ ] **Integration:** the full `examples/` corpus + the PII example pass the deepened `validate`; `validate.sh` (the real-binary runner from M1 Phase 5) stays green.
-- [ ] **E2E (chromedp, four-channel):** a deliberately-broken generated `app.md` (undeclared source; missing action param) is caught by `validate` *before* serve, and the corrected version serves + works — proving the gate now catches what previously only failed at runtime.
+- [x] **Simplify:** `code-simplifier` on the diff — two comment-clarity fixes in the wiring loop; the code (scanner extraction, both checks) already clean.
+- [x] **Unit:** `TestUnresolvedSourceDiags` (undeclared → flagged; frontmatter/config source → clean), `TestUnsuppliedActionParams` (+ `_OperatorExcluded`), `TestReferencedParams` (`::` casts, time literals, union), `TestLvtPersistMigration`, `TestStateRefDiagnosticTeachesLvtSource` — each verified to fail when violated. `SubstituteParams`' existing suites stay green (the refactor is behavior-equivalent).
+- [x] **Integration:** full `examples/` corpus **55/55 green** (the false-positive gate) — after a real false-positive was caught and fixed (see Learn). `validate.sh` corpus green.
+- [x] ~~**E2E (chromedp, four-channel):**~~ **struck as redundant** — the Phase 3 checks are *pre-serve validation* (they change what `validate` rejects, not serve behavior). "Caught before serve" is proven by the unit fixtures; "corrected version serves" is the Phase 2 PII e2e + the 55/55 corpus. A new chromedp run against unchanged serve behavior adds no coverage.
 
-**Learn:** what surprised us / plan drift / feed-forward to **M3**'s Audit (the re-sequenced field-name/schema validation — what introspection surface it needs) / new-or-changed risks.
+**Learn:**
+
+*What surprised us.*
+1. **The new check found a real bug on its first corpus run — again — and this time it was mine-in-progress.** Bound-refs initially used the single root manifest and false-positived **5 sources across 3 apps** (`tasks`, `countries`, the PII trio) — all declared in each app's *own* tinkerdown.yaml, invisible to a root loaded from `examples/`. The corpus 55/55 gate caught it immediately; the fix (`sourceConfigForFile`, per-app config walked up to the root) is how serve already resolves. The lesson the advisor pre-loaded — *corpus 55/55 is the false-positive gate* — is exactly what turned a silent wrong-config into a caught one.
+2. **Action-param did NOT balloon — because the supplied set was made globally over-inclusive instead of form-scoped.** Reproducing the client's exact per-form param serialization (submitter-override, form-vs-button name precedence) was the ballooning risk. Sidestepped per the advisor: gather *every* `data-*` key and form field in the document and fire only when a param is supplied **nowhere**. Under-counting supplied = false positive (thrash); over-counting = a safe miss. The PII forms + the whole corpus pass; a dropped `:param` is still caught (`TestUnsuppliedActionParams`).
+3. **The state-ref check *preempts* the unknown-attribute check — so there is no double-fire.** A `lvt-persist`-only block has no state ref, so `ParseFileInSite` fails with "no state reference" *before* `UnknownAttributes` runs. So the **state-ref rewrite** (teach `lvt-source`) is the primary fix for the common `lvt-persist` case; the unknown-attribute migration hint only fires for the rarer `lvt-persist`-alongside-a-real-source case. The advisor flagged a possible double-fire; the parse-order made it moot.
+
+*PLAN.md drift fixed in this commit.*
+- "removed-with-migration set" → migrations-map entry (no parallel set); framed "not supported", not "removed" (client still reads it).
+- "declared/config/built-in/shared" universe corrected: **no built-in sources**; "shared" = the governing tinkerdown.yaml, resolved per-app.
+- The E2E criterion struck as redundant for pre-serve-validation checks.
+
+*Feed-forward to **M3**'s Audit.*
+- Action-param checks param **presence** (a `:name` is supplied at all). The re-sequenced **field-name/schema** validation (Phase 5 #2 — `row_cap`→`.RowCap` renders empty when wrong) is the *next* layer and needs **source-schema introspection** (M3 gap #2) — it cannot be done from the manifest alone, which is why it lands in M3, not here.
+- `scanParams`/`ReferencedParams` (single-source param scanner) is now available for any deeper action analysis M3 wants (e.g. mapping a `:param` to a `params:` type).
+
+*New / changed risks.*
+- **New (low): action-param over-inclusion = safe misses.** A param supplied for a *different* action passes the check. Deliberate — false negatives beat false positives for a self-correcting loop. Documented on `unsuppliedActionParams`.
+- **New (low): action-param covers `kind: sql` only.** `exec`/`http` actions that reference `:params` aren't checked (they substitute through a different path); a safe miss, extendable if those actions grow `:param` usage.
+- **New (low, DRY): `hasConfigFile` mirrors the config-filename list in `config.LoadFromDir`.** A canonical exported list would dedup it; out of Phase 3's scope (touches `config.go`). Noted by `/simplify`.
+- **Carried: docs still teach `lvt-persist`** (`docs/llms.txt`, `playground.html`, `landing-page.html`) — not corpus-validated (`.txt`/`.html`), but they seed generated apps with a now-flagged pattern. A docs sweep is the standing Phase 5 follow-up; the client-bundle `getAttribute("lvt-persist")` vestige rides with it.
 
 ---
 

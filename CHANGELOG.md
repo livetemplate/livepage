@@ -11,6 +11,30 @@ Earlier releases (v0.1.x) are documented in the
 
 ## [Unreleased]
 
+### Changed — `validate` catches unresolved sources and incomplete action params
+
+`tinkerdown validate` now reports two more "passes validate, breaks at serve"
+classes:
+
+- **Bound references** — a source bound via `lvt-source="…"` that resolves to no
+  declared source (a typo) is reported with the list of declared sources, instead
+  of erroring only at serve as "source not found". The declared universe is the
+  file's frontmatter sources plus the tinkerdown.yaml governing it.
+- **Action-param completeness** — for a `kind: sql` action a form invokes, every
+  `:param` its statement references must be supplied by a form field or a `data-*`
+  attribute (`:operator` is server-set and exempt); a missing one is named,
+  instead of erroring at serve on the first substitution.
+
+The state-ref diagnostic ("interactive block has no state reference") now teaches
+the real fix — add `lvt-source` to the block's container — rather than an
+undefined `state="block-id"`.
+
+### Changed — `lvt-persist` reports a migration hint
+
+Using `lvt-persist` now reports "unknown attribute — use lvt-source" instead of a
+confusing "no state reference": Tinkerdown's server no longer supports the persist
+model (use `lvt-source` with `type: sqlite` for a writable store).
+
 ### Changed — `validate` now checks that every lvt block compiles as a template
 
 `tinkerdown validate` runs each lvt code block through the template parser

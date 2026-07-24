@@ -1,5 +1,9 @@
 ---
 title: "User Dashboard"
+sources:
+  users:
+    type: rest
+    url: https://jsonplaceholder.typicode.com/users
 ---
 
 # User Dashboard

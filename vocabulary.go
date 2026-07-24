@@ -32,7 +32,6 @@ var knownAttributes = map[string]bool{
 	"lvt-empty":     true,
 	"lvt-actions":   true,
 	"lvt-datatable": true,
-	"lvt-persist":   true,
 
 	// Client-owned: events, effects, forms, lifecycle, DOM guards.
 	"lvt-key":          true,
@@ -190,6 +189,7 @@ func suggestAttribute(name string) string {
 		"lvt-modal-open":   "a native <dialog> element",
 		"lvt-modal-close":  "a native <dialog> element",
 		"lvt-filter":       "filter at the source instead (a SQL query, or a computed source)",
+		"lvt-persist":      "lvt-source — lvt-persist is no longer supported here (use type: sqlite for a writable store)",
 	}
 	if to, ok := migrations[name]; ok {
 		return "use " + to

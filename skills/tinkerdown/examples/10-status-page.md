@@ -1,5 +1,14 @@
 ---
 title: "Status Page"
+sources:
+  services:
+    type: exec
+    cmd: ./check-services.sh
+  incidents:
+    type: sqlite
+    db: ./incidents.db
+    table: incidents
+    readonly: false
 ---
 
 # Service Status Page

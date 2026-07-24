@@ -64,62 +64,84 @@ func RunSQLAction(ctx context.Context, executor SQLExecutor, action *config.Acti
 // - Time literals like '12:30:00' (digits after colon)
 // - Postgres casts like value::text (double colon)
 func SubstituteParams(stmt string, data map[string]interface{}) (string, []interface{}, error) {
-	var args []interface{}
-	result := stmt
-
-	// Find all :name patterns and replace with ?
-	// Process in a way that handles overlapping names correctly
-	for {
-		// Find the next :name pattern
-		idx := strings.Index(result, ":")
-		if idx == -1 {
-			break
+	var (
+		b    strings.Builder
+		args []interface{}
+		last int
+		err  error
+	)
+	scanParams(stmt, func(name string, start, end int) {
+		if err != nil {
+			return
 		}
-
-		// Skip double colons (postgres cast syntax like ::text)
-		if idx+1 < len(result) && result[idx+1] == ':' {
-			result = result[:idx] + "\x00DOUBLECOLON\x00" + result[idx+2:]
-			continue
-		}
-
-		// Check if next character is a letter (parameter names must start with letter)
-		if idx+1 >= len(result) {
-			// Colon at end of string, not a parameter
-			result = result[:idx] + "\x00COLON\x00" + result[idx+1:]
-			continue
-		}
-
-		firstChar := result[idx+1]
-		if !((firstChar >= 'a' && firstChar <= 'z') || (firstChar >= 'A' && firstChar <= 'Z')) {
-			// Not a valid parameter (starts with digit, symbol, etc.)
-			// This handles time literals like '12:30:00'
-			result = result[:idx] + "\x00COLON\x00" + result[idx+1:]
-			continue
-		}
-
-		// Extract the parameter name (alphanumeric and underscore)
-		endIdx := idx + 1
-		for endIdx < len(result) {
-			c := result[endIdx]
-			if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' {
-				endIdx++
-			} else {
-				break
-			}
-		}
-
-		paramName := result[idx+1 : endIdx]
-		paramValue, exists := data[paramName]
+		value, exists := data[name]
 		if !exists {
-			return "", nil, fmt.Errorf("undefined parameter %q in SQL statement", paramName)
+			err = fmt.Errorf("undefined parameter %q in SQL statement", name)
+			return
 		}
-		args = append(args, paramValue)
-		result = result[:idx] + "?" + result[endIdx:]
+		b.WriteString(stmt[last:start]) // unchanged text (incl. ::casts, time literals)
+		b.WriteByte('?')
+		args = append(args, value)
+		last = end
+	})
+	if err != nil {
+		return "", nil, err
 	}
+	b.WriteString(stmt[last:])
+	return b.String(), args, nil
+}
 
-	// Restore markers
-	result = strings.ReplaceAll(result, "\x00DOUBLECOLON\x00", "::")
-	result = strings.ReplaceAll(result, "\x00COLON\x00", ":")
+// scanParams walks stmt and calls fn for each :name placeholder, with the name
+// and its [start,end) byte range. It skips :: (postgres casts) and colons not
+// followed by a letter (time literals like '12:30:00', a trailing colon). This
+// is the single definition of "what is a parameter", shared by substitution
+// (SubstituteParams, at runtime) and completeness checking (ReferencedParams,
+// used by `tinkerdown validate`), so the two cannot disagree about which names a
+// statement requires.
+func scanParams(stmt string, fn func(name string, start, end int)) {
+	for i := 0; i < len(stmt); {
+		if stmt[i] != ':' {
+			i++
+			continue
+		}
+		if i+1 < len(stmt) && stmt[i+1] == ':' { // :: postgres cast
+			i += 2
+			continue
+		}
+		if i+1 >= len(stmt) || !isParamNameStart(stmt[i+1]) { // bare colon / time literal
+			i++
+			continue
+		}
+		end := i + 1
+		for end < len(stmt) && isParamNameChar(stmt[end]) {
+			end++
+		}
+		fn(stmt[i+1:end], i, end)
+		i = end
+	}
+}
 
-	return result, args, nil
+func isParamNameStart(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+}
+
+func isParamNameChar(c byte) bool {
+	return isParamNameStart(c) || (c >= '0' && c <= '9') || c == '_'
+}
+
+// ReferencedParams returns the distinct :name parameters referenced across the
+// given statements, in first-seen order — the names a caller must supply for
+// SubstituteParams to succeed.
+func ReferencedParams(statements ...string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, stmt := range statements {
+		scanParams(stmt, func(name string, _, _ int) {
+			if !seen[name] {
+				seen[name] = true
+				out = append(out, name)
+			}
+		})
+	}
+	return out
 }
