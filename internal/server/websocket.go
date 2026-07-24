@@ -248,10 +248,11 @@ func (h *WebSocketHandler) initializeSourceBlocks() {
 				return nil
 			}
 
-			// Configure page-level settings for custom actions
-			if len(pageActions) > 0 {
-				state.SetPageConfig(pageActions, h.lookupSource)
-			}
+			// Configure page-level settings: custom actions, the source registry,
+			// and the project config for the runtime approved-surface gate. Always
+			// set — the gate must run for builtin writes too, not only pages with
+			// custom actions.
+			state.SetPageConfig(h.config, pageActions, h.lookupSource)
 
 			return state
 		}

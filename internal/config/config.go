@@ -198,6 +198,40 @@ func (c *Config) ApprovedAction(name string) bool {
 	return slices.Contains(c.Generation.Actions, name)
 }
 
+// EnforceApprovedAction is the runtime gate for invoking a custom action: it
+// rejects an action outside the approved set, so a running app — or a webhook /
+// crafted-message caller — cannot invoke something the operator never approved,
+// even though the generation-time lint already checked the document. It gates
+// only on the action name, NOT the action's source: an approved action may
+// legitimately target a writable store deliberately kept out of the approved
+// *source* set (unbindable by any generated app). Returns nil when the project
+// declares no generation block — approval is opt-in, mirroring the lint.
+func (c *Config) EnforceApprovedAction(name string) error {
+	if c == nil || c.Generation == nil {
+		return nil
+	}
+	if !c.ApprovedAction(name) {
+		return fmt.Errorf("action %q is not in the approved set for this project", name)
+	}
+	return nil
+}
+
+// EnforceApprovedSource is the runtime gate for a builtin write (add/delete/
+// toggle/update), which operates on the block's *bound* source: it rejects a
+// write to a source outside the approved set. A manifest app can only bind an
+// approved source (the lint enforces that at generation time), so this is
+// defense-in-depth against a document that bound one anyway. Returns nil when the
+// project declares no generation block.
+func (c *Config) EnforceApprovedSource(name string) error {
+	if c == nil || c.Generation == nil {
+		return nil
+	}
+	if !c.ApprovedSource(name) {
+		return fmt.Errorf("source %q is not in the approved set for this project", name)
+	}
+	return nil
+}
+
 // ValidateGeneration checks that every approved name refers to something this project
 // actually declares.
 //

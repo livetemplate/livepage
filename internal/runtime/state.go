@@ -71,6 +71,7 @@ type GenericState struct {
 	// concurrently with action handling.
 	actions  map[string]*config.Action          // Custom actions declared in frontmatter
 	registry func(string) (source.Source, bool) // Lookup function for sources (for SQL actions)
+	cfg      *config.Config                     // Project config, for the runtime approved-surface gate (nil = no gate)
 }
 
 // Arg represents an exec source argument
@@ -204,9 +205,10 @@ func NewGenericStateWithMetadata(name string, cfg config.SourceConfig, siteDir, 
 // SetPageConfig configures page-level settings for custom actions.
 // actions is the map of custom actions declared in frontmatter.
 // registry is a lookup function to find sources by name (for SQL actions).
-func (s *GenericState) SetPageConfig(actions map[string]*config.Action, registry func(string) (source.Source, bool)) {
+func (s *GenericState) SetPageConfig(cfg *config.Config, actions map[string]*config.Action, registry func(string) (source.Source, bool)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.cfg = cfg
 	s.actions = actions
 	s.registry = registry
 }
@@ -303,6 +305,12 @@ func (s *GenericState) HandleAction(action string, data map[string]interface{}) 
 		s.EditingID = ""
 		return nil
 	case "add", "toggle", "delete", "update":
+		// Runtime approved-surface gate: a builtin write operates on the block's
+		// bound source, which a manifest app may only bind if approved.
+		if err := s.cfg.EnforceApprovedSource(s.sourceName); err != nil {
+			s.Error = err.Error()
+			return err
+		}
 		err := s.handleWriteAction(action, data)
 		if err == nil {
 			s.EditingID = ""
@@ -315,6 +323,12 @@ func (s *GenericState) HandleAction(action string, data map[string]interface{}) 
 		// Framework-generated datatable actions (Sort_<col>, NextPage, PrevPage) are
 		// never manifest actions, so they still fall through to handleDatatableAction.
 		if customAction, ok := s.actions[action]; ok {
+			// Runtime approved-surface gate: a running app — or a crafted-message
+			// caller — may only invoke an approved custom action.
+			if err := s.cfg.EnforceApprovedAction(action); err != nil {
+				s.Error = err.Error()
+				return err
+			}
 			return s.executeCustomAction(customAction, data)
 		}
 
