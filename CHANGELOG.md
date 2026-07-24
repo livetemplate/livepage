@@ -11,6 +11,20 @@ Earlier releases (v0.1.x) are documented in the
 
 ## [Unreleased]
 
+### Changed — the generation skill now consumes the house style
+
+The `/tinkerdown` generation skill reads a project's house style and authors
+against it, closing a declared-but-unconsumed gap: `generation.style_guide` (a
+markdown file of house tone/layout/do-don't) was a config field nothing ever
+read. The skill now reads it — plus the `styling` block (`theme` +
+`styling.tokens`) — and carries the on-brand rule into generation: **write
+semantic HTML, never hardcode colours** and let the design tokens skin it, follow
+the project's `style-guide.md`. The token vocabulary is documented in the skill
+`reference.md` (guarded against `KnownStyleTokens` so a new token can't go
+untaught). The whole style block stays optional — with none, generation falls
+back to on-brand defaults. The PII reference app now ships a `style-guide.md` +
+`styling.tokens` demonstrating a governed, on-brand console.
+
 ### Added — declarative design tokens (`styling.tokens`)
 
 A project can now set its on-brand palette declaratively, without writing raw

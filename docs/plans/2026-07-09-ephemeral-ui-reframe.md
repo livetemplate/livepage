@@ -1056,22 +1056,28 @@ type Diagnostic struct {
 - tinkerdown `internal/config/config.go:181` (`GenerationConfig.StyleGuide` — unconsumed), `skills/tinkerdown/SKILL.md` + `reference.md` (the generation context; today advertise only the `lvt-*` vocabulary + "datatable, dropdown")
 
 **Audit (first task):**
-- [ ] **Design-ref completeness check.**
-- [ ] Confirm `style_guide` has no runtime consumer (Explore verified). Decide the read path: the skill loads the manifest's `style_guide` (a `style-guide.md` path) + a **token summary** (the available tokens/theme) and injects both into the generation context.
-- [ ] Decide whether a command surfaces the style guide to the skill (like `validate --summary` for operations) or the skill reads the manifest directly — prefer the smallest that lets the skill see the house style deterministically.
-- [ ] Pin the guidance: generated UIs use **semantic HTML** (skinned on-brand by the tokens) + the house `style-guide.md` patterns, and **do not hardcode colors** (use the tokens) — the anti-off-brand rule, delivered as guidance + tokens, not a lint.
+- [x] **Design-ref completeness check.**
+- [x] Confirmed `style_guide` (`GenerationConfig.StyleGuide`, config.go:181) has **no runtime consumer** — it appears only in its own declaration across all Go. Read path: the skill (which already `cat`s `tinkerdown.yaml` in step 1) also reads `styling` (theme + tokens) + `generation.style_guide`, and `cat`s the style-guide file.
+- [x] **Read-path decision (advisor-confirmed): skill reads the manifest directly + reference.md documents the token vocabulary — no new command.** `attribute_docs_test.go` is explicit precedent that `reference.md` is the LLM's vocabulary surface, guarded against the implementation. A `validate --style` command would be a second reader of what the skill already `cat`s. The token vocabulary is single-sourced by a **forward drift-guard** (`config.KnownStyleTokens` ⊆ reference.md), not re-enumerated by hand.
+- [x] Guidance pinned: **semantic HTML skinned by the tokens + never hardcode colours + follow `style-guide.md`** — the on-brand lever, delivered as guidance + tokens (Phase 1), not a lint.
 
 **Implementation:**
-- [ ] `SKILL.md` (+ `reference.md` if needed): load + inject the manifest's `style_guide` + token summary; add the "semantic HTML + tokens, don't hardcode colors, follow the style-guide" guidance. Keep the style block optional (absent → default tokens).
-- [ ] `CHANGELOG.md`.
+- [x] `SKILL.md`: step 1 reads `styling` + `generation.style_guide` (and `cat`s the file); step 2 carries the "semantic HTML, never hardcode colours, follow the style-guide" rule; Reference list gains "House style". Style block stays optional.
+- [x] `skills/tinkerdown/reference.md`: new **§ House style — design tokens** — the rule + a 14-token table (snake_case key → CSS property → what it skins).
+- [x] **(audit-derived)** The PII reference app ships a `style-guide.md` + `styling.tokens` (real `KnownStyleTokens` keys only — an unknown key fails `ValidateStyleTokens` at load and would break every pii E2E via `serveConsole`), demonstrating a governed, on-brand console and giving the integration test a real manifest.
+- [x] `CHANGELOG.md`.
 
 **Acceptance criteria:**
-- [ ] **Simplify:** prose + asset pass.
-- [ ] **Unit/structural:** a test asserting the skill wires the `style_guide` (mirror `skill_examples_test.go`); the style-guide reference resolves.
-- [ ] **Integration:** a manifest with a `style_guide` → the skill's generation context includes it + the token summary (verifiable deterministically).
-- [ ] **E2E:** N/A (generation-context, as with M1 Phase 3) — the on-brand *rendering* guarantee is Phase 1's tokens (structural); this phase's deliverable is that the skill *sees* the house style, verified by the structural/integration test.
+- [x] **Simplify:** prose pass — the guidance is layered across three surfaces by distinct role (SKILL.md workflow steps 1/2 + reference.md lookup), mirroring how the `lvt-*` vocabulary is already split; not redundant. The one Go file mirrors existing test idioms.
+- [x] **Unit/structural:** `TestSkillWiresHouseStyle` (SKILL.md wires `style_guide` + `styling.tokens` + the semantic-HTML/no-hardcode-colour guidance; reference.md carries the § + token table) + `TestStyleTokensDocumented` (forward drift-guard).
+- [x] **Integration:** `TestPIIManifestHouseStyleConsumable` — `config.LoadFromDir` on the demo exposes `Generation.StyleGuide` (resolves to a real file) + populated `Styling.Tokens`. Honest framing: this proves `StyleGuide` is now *consumable*, not that a Go path consumes it (the skill is instructions; `cat` fails loudly at generation if the file is missing, so no Go validator is needed).
+- [x] **E2E:** N/A (generation-context, as with M1 Phase 3) — the on-brand *rendering* guarantee is Phase 1's tokens (structural, E2E-verified there); this phase's deliverable is that the skill *sees* the house style, verified by the structural/integration tests.
 
-**Learn:** what surprised us / plan drift / feed-forward to **M5**'s Audit / new-or-changed risks.
+**Learn:**
+- **What surprised us.** (1) The drift-guard's shape: a naïve bidirectional token↔doc check would have to scrape token-like words (`accent`, `card_bg`) out of prose — words with no unique signature, unlike `lvt-` — so it would false-match or silently miss. Forward-only (`KnownStyleTokens` ⊆ reference.md) is robust and catches the failure that matters (a token the LLM is never told about); the reverse (phantom docs) is low-harm and deliberately not built. (2) **The generation context contradicted itself:** adding "never hardcode colours" while `reference.md § Tailwind CSS` still demonstrated `bg-blue-500`/`text-gray-800`/`text-white` — worked counter-examples in the same LLM context. A presence-check test (`TestSkillWiresHouseStyle`) can't catch a *contradiction*; fixed the example (Tailwind → layout/spacing only, colour from tokens) in the same commit. Same class as Phase 1's four-channel over-claim: the deliverable must not undercut its own goal.
+- **Plan drift fixed in this commit.** None — the Phase 2 block matched reality (unlike Phase 1's stale block).
+- **Feed-forward to M5's Audit.** House style is now consumed by the skill but is **advisory** (guidance + tokens), never enforced — consistent with the no-lint milestone shape. If M5's save/share gallery renders *saved* generated UIs, the same tokens skin them for free (they cascade from `:root`); a saved skill should capture its manifest's `styling`/`style_guide` so the palette travels with it.
+- **New/changed risks.** None. The `style_guide` file is read by `cat` at generation, so a manifest naming a nonexistent path fails loudly then (not silently) — acceptable without a load-time validator.
 
 ---
 

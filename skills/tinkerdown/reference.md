@@ -344,6 +344,58 @@ Tinkerdown uses Go templates.
 
 ## Styling
 
+### House style — design tokens
+
+**The on-brand default, and the way to style generated UIs.** A project sets its
+palette once in `tinkerdown.yaml`; every page renders against it automatically.
+Write **semantic HTML** and let the tokens skin it — do **not** hardcode colours.
+
+- **Never write a raw colour** (`#3949ab`, `rgb(...)`, a named colour) in generated
+  markup. Hardcoding bypasses the house palette and drifts off-brand.
+- Use semantic elements — `<table>`, `<article>`, `<mark>`, `<strong>`, headings —
+  which inherit the tokens (`--accent`, `--card-bg`, `--text-heading`, …) with no
+  classes and no inline styles.
+- If the project's `generation.style_guide` points at a markdown file, **read it and
+  follow it** (tone, layout conventions, which components to prefer, what to avoid).
+
+A project sets tokens under `styling.tokens`, each key mapped to the CSS custom
+property it drives in the page's `:root`:
+
+```yaml
+# tinkerdown.yaml
+generation:
+  style_guide: style-guide.md   # optional house-style prose the generator follows
+styling:
+  theme: clean                  # light / dark / auto — or a preset
+  tokens:                       # optional; absent → built-in on-brand defaults
+    accent: "#3949ab"
+    card_bg: "#ffffff"
+    text_heading: "#1a237e"
+```
+
+The overridable tokens (snake_case key → CSS custom property):
+
+| Key | CSS property | Skins |
+|-----|--------------|-------|
+| `accent` | `--accent` | Links, primary actions, active accents |
+| `bg_primary` | `--bg-primary` | Page background |
+| `bg_secondary` | `--bg-secondary` | Secondary / gradient background |
+| `text_primary` | `--text-primary` | Body text |
+| `text_secondary` | `--text-secondary` | Muted / secondary text |
+| `text_heading` | `--text-heading` | Headings |
+| `border_color` | `--border-color` | Rules and borders |
+| `card_bg` | `--card-bg` | Card / panel background |
+| `card_border` | `--card-border` | Card border |
+| `card_shadow` | `--card-shadow` | Card shadow |
+| `code_bg` | `--code-bg` | Inline code background |
+| `code_border` | `--code-border` | Inline code border |
+| `pre_bg` | `--pre-bg` | Code-block background |
+| `pre_text` | `--pre-text` | Code-block text |
+
+An unknown token key fails loudly at config load. A token value applies to both
+light and dark themes. Everything below (inline styles, Tailwind) is an escape
+hatch for the rare case tokens cannot express — reach for tokens first.
+
 ### Inline Styles
 
 Include `<style>` in your `lvt` block:
@@ -366,12 +418,15 @@ Include `<style>` in your `lvt` block:
 
 ### Tailwind CSS
 
-Tailwind CSS is included automatically. Use utility classes:
+Tailwind CSS is included automatically. Use utility classes for **layout and
+spacing** — but **not for colour**: in a house-styled project colour comes from the
+design tokens (above), so avoid colour utilities (`bg-blue-500`, `text-gray-800`,
+`text-white`) that would bypass the palette and drift off-brand.
 
 ```html
 <div class="max-w-xl mx-auto p-6">
-    <h1 class="text-2xl font-bold text-gray-800">My App</h1>
-    <button class="bg-blue-500 text-white px-4 py-2 rounded">
+    <h1 class="text-2xl font-bold">My App</h1>
+    <button class="px-4 py-2 rounded">
         Submit
     </button>
 </div>

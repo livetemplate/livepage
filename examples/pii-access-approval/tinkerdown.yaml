@@ -116,6 +116,20 @@ actions:
 generation:
   sources: [access_requests, audit_log, datasets]
   actions: [request-access, approve-export, deny-request]
+  # House style the generator authors against (Phase 2). The style guide is prose
+  # (tone, layout, do/don't); the design tokens below skin the semantic HTML
+  # on-brand by construction, so a generated console conforms without a careful
+  # prompt. Both are optional — absent, generation falls back to PicoCSS defaults.
+  style_guide: style-guide.md
 
 styling:
   theme: clean
+  # Sober compliance-console palette. Keys are the snake_case design tokens
+  # (see skills/tinkerdown/reference.md § House style); each drives the matching
+  # CSS custom property in every page's :root.
+  tokens:
+    accent: "#3949ab"       # indigo — links and primary actions
+    text_heading: "#1a237e" # deep indigo for headings
+    card_bg: "#ffffff"
+    card_border: "#e0e3eb"
+    border_color: "#d5d9e0"
