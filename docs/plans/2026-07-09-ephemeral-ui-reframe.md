@@ -21,7 +21,7 @@ What this reframe ships, most-important first. **M1 is the headline** (makes the
 
 **M0 — foundation:** repositioned narrative (README/SKILL/llms.txt) + upstream version bump to latest (`livetemplate` v0.10→latest, client, components).
 
-**M2–M5 — hardening:** `livetemplate.Validate()` API + policy lint *(M2, upstream + tinkerdown)* · runtime approved-surface enforcement *(M3, tinkerdown; field-name validation deferred — needs a schema source)* · richer `lvt/components` + enforceable design-token style guide *(M4)* · save/share gallery (stores captured skills) + external-embed handshake *(M5)*.
+**M2–M5 — hardening:** `livetemplate.Validate()` API + policy lint *(M2, upstream + tinkerdown)* · runtime approved-surface enforcement *(M3, tinkerdown; field-name validation deferred — needs a schema source)* · house style on-brand by construction — formalized design tokens + wired `style_guide` *(M4, tinkerdown; no lint)* · save/share gallery (stores captured skills) + external-embed handshake *(M5)*.
 
 ---
 
@@ -92,7 +92,7 @@ The brief names four things a team defines once so LLMs can safely generate agai
 
 **How the plan threads the UX style guide:**
 - **M1 (this milestone) — make house style LLM-consumable, coarse enforcement.** The manifest's style block = `theme` + `site_css` **plus a short `style-guide.md`** (house tone, layout conventions, which `lvt/components` to prefer, do/don't) that the `/tinkerdown` skill injects into its generation context so output conforms by construction. **The whole style block is optional** — with none, generation falls back to tinkerdown's sane defaults (PicoCSS semantic styling + default theme), so a team can adopt generation with zero style setup and add house style later. Enforcement in M1 is coarse (the shared `site_css` skins every generated page; the visual-conformance check in Phase 5). *This is a conscious M1 scope: consume the style guide, don't yet mechanically enforce tokens.*
-- **M4 — elevate to an enforceable spec.** Alongside the `lvt/components` enrichment, promote house style to **design tokens + an enforced component set** (the real "style guide object" the exploration found missing), so generated UIs can't drift off-brand even without a careful prompt.
+- **M4 — make house style on-brand by construction** *(re-scoped at kickoff 2026-07-24; see § M4 phases).* Formalize the design-token layer that already exists implicitly (single-source it, define the four undefined tokens, drive it from a `tokens` config) and **wire the declared-but-unconsumed `style_guide`** into generation, so generated UIs can't drift off-brand even without a careful prompt — delivered by **tokens, not an enforced-component lint** (that fights tinkerdown's semantic-HTML-first model; component enrichment deferred).
 
 ---
 
@@ -108,7 +108,7 @@ The brief names four things a team defines once so LLMs can safely generate agai
 | 1 | Generated docs get only a *plain* parse error; the structured, line-numbered parse/reactive-AST diagnostics live in `livetemplate/internal/parse` (unreachable downstream) and the public render path *swallows* them. Allowed-tags, bound-refs and action-param are tinkerdown-owned semantics livetemplate can't see. | **Split** (kickoff 2026-07-23): `livetemplate.Validate(templateText)` exposes the structured parse/AST diagnostics + optional render-determinism [server]; allowlist / bound-refs / action-param stay in tinkerdown `validate` | Deterministic first-pass correctness | **M2** |
 | 2 | No **field-name validation**: a misspelled `{{.Field}}` renders empty. (Action-name/`describes:` metadata already exists in `config.Summarize`.) | **Deferred** (M3 kickoff 2026-07-24): needs a *validate-time schema source* tinkerdown lacks — schema lives only in the runtime DB (gitignored, seed-built). Real fix = parse `CREATE TABLE` from a seed, or a declared `columns:` schema — a new introspection capability, not a lint. | `validate` catches a bad field before serve | **Deferred** (§ Risks) |
 | 3 | Runtime enforcement is generation-time only; a webhook / bypassing caller can invoke outside the approved surface (three action paths, no shared gate) | **Tinkerdown** policy gate at all three paths (kickoff 2026-07-24: an upstream `WithActionPolicy` is dead code — tinkerdown never uses livetemplate dispatch) | Runtime safety (defense in depth) | **M3** |
-| 4 | Primitive library too thin (no charts, badges, cards, stat tiles, alerts, empty-states) | Enrich `lvt/components` [components] | "LLMs rarely need custom HTML" | **M4** |
+| 4 | House style can't be guaranteed on-brand: the design-token layer is duplicated/partial + `style_guide` is a declared-but-unconsumed config field. (The `lvt/components` library is deep — ~29 components — but tinkerdown uses 1; enrichment is optional, not the gap.) | **Tinkerdown** (kickoff 2026-07-24): formalize the tokens + wire `style_guide` into generation — on-brand by construction, no lint | Guaranteed on-brand, no generic LLM aesthetic | **M4** |
 | 5 | External-app embedding is iframe-bridge only | Embed handshake [client] | Sandboxed external embeds | **M5** |
 | 6 | Generation→validate→serve **orchestration** | **Legitimately tinkerdown** (all 3 exploration agents concur) | The skill itself | **M1** |
 
@@ -187,13 +187,13 @@ All follow the Anthropic skill shape already used by `skills/tinkerdown/` (conci
 
 ## Roadmap
 
-Ordered milestones. **M0, M1, M2 and M3 are fully detailed** (full phase blocks); M4–M5 are outline-only and get expanded at their kickoff (see LLM session guide convention 9).
+Ordered milestones. **M0, M1, M2, M3 and M4 are fully detailed** (full phase blocks); M5 is outline-only and gets expanded at its kickoff (see LLM session guide convention 9).
 
 - **M0 — Reframe + upstream bump + a trustworthy vocabulary.** Reposition the narrative (README/SKILL/llms.txt/ai-generation) around ephemeral generated UIs; **bump `livetemplate` + client + components to their latest tags** and absorb behavior changes; **reconcile the `lvt-*` attribute reference with what the client actually implements** (Phase 2 — added after Phase 1's Audit found 8 of 11 sampled attributes stale). *Lights up:* the fast, correct runtime substrate, the honest story, and a vocabulary reference that is safe to hand an LLM — the last being a hard prerequisite for M1, not polish. *(no demo yet)*
 - **M1 — THE DEMO (thin vertical slice).** The five M1 deliverables (see § Deliverables at a glance) on existing primitives. *Lights up:* the target acceptance test — generate a real, friction-removing UI in ~30s — *and* re-run it from a skill in seconds.
 - **M2 — Deterministic validation (upstream `Validate()` + tinkerdown lint).** `livetemplate.Validate(templateText)` exposes the **structured, line-numbered parse / reactive-AST diagnostics** that today live in livetemplate's `internal/parse` (unreachable downstream) and that its public render path silently *swallows* — plus an optional render-determinism check. tinkerdown's `validate` consumes it per lvt block and adds the **tinkerdown-owned** semantic checks livetemplate cannot see: **bound-refs** (a used `lvt-source` must resolve to a declared source), **action-param completeness**, a **state-ref diagnostic that teaches the real `lvt-source` fix**, and the **`lvt-persist`→removed-with-migration** cleanup. *Lights up:* first-pass generation reliability — richer diagnostics for the skill's self-correct loop, and the "validates clean but breaks at serve" gaps M1 kept hitting closed at the gate. *(The attribute allowlist stays in tinkerdown, guarded against the vendored client bundle — livetemplate-Go can't own it, as it never references the client-only `lvt-mod:`/`lvt-nav:`/`lvt-ignore` namespaces. Design expanded at kickoff 2026-07-23 — see § M2 design.)*
 - **M3 — Runtime approved-surface enforcement (tinkerdown).** A server-side policy gate at all three action paths (WS-custom, webhook, builtins) so a running app — or a webhook / crafted-message caller — may only invoke **approved** actions against **approved** sources, respecting readonly: defense-in-depth beyond the *generation-time* lint. *Lights up:* the running app can't exceed the approved surface — the server-side gate `confirm:` never was. *(Kickoff 2026-07-24 re-scoped this **tinkerdown-only** — the planned upstream `WithActionPolicy` would be dead code for tinkerdown, which never routes actions through livetemplate. **Field-name validation was de-scoped** — it needs a validate-time schema source tinkerdown lacks; see § M3 phases and § Risks.)*
-- **M4 — Component vocabulary + enforceable house style (upstream `lvt/components` + tinkerdown).** Charts, badges, cards, stat tiles, alerts, empty-states; **plus** promoting the UX style guide from coarse (`site_css` + `style-guide.md`) to **design tokens + an enforced component set** (the "style guide object" the exploration found missing). *Lights up:* richer generated dashboards with no free-form HTML, guaranteed on-brand.
+- **M4 — House style on-brand by construction (tinkerdown).** Formalize the design-token layer that already exists implicitly (single-source it, define the four undefined tokens, drive it from a `tokens` config) so semantic HTML + PicoCSS renders on-brand **by construction**; and wire the **declared-but-unconsumed** `style_guide` into the generation context. *Lights up:* guaranteed on-brand generated UIs — no generic LLM aesthetic — via tokens, not a rejecting lint. *(Kickoff 2026-07-24 re-scoped this **tinkerdown-only** [tinkerdown consumes 1 of `lvt/components`' ~29 components], **spine-only** [component enrichment deferred, operator decision], and **no enforcement lint** [it fights semantic-HTML-first]; see § M4 phases.)*
 - **M5 — Persist to the malleable substrate (save & share).** This is where **malleability lives**: persist a generated UI to the repo + a gallery + share link by storing the captured **skill** (per convention 13 / M1 Phase 6), not just the `app.md` — so "save" means a re-runnable workflow you evolve, while individual UIs stay ephemeral; plus **substrate extensibility** (teams can add their own approved source types) and the external-app embed handshake. *Lights up:* "throw away the UI, keep + reshape the substrate" (folds issues #223 host read-only apps, #282 review mode, #249 external embed, #216 writable WASM sources, #222 custom Go+WASM sources).
 
 **Open-issue walkthrough.** Triaged into three buckets against this reframe. *(Counts drift: **48 open** at plan authoring, **82** by 2026-07-19 — the repo files `from-review` issues continuously. The named issue→milestone mappings below stay valid; **re-run the triage at M0 kickoff** rather than trusting the totals, same as the version pins.)*
@@ -1002,12 +1002,80 @@ type Diagnostic struct {
 
 ---
 
-### M4–M5 phases — outline only (expanded at milestone kickoff per convention 9)
+### M4 phases — house style on-brand by construction (expanded at kickoff 2026-07-24, per convention 9)
 
-The *what* + *why* of each is in § Roadmap; here is only each milestone's **kickoff design checklist** — the sections to write into full phase blocks when that milestone starts (per convention 9):
+> **Milestone shape (settled at kickoff):** **tinkerdown-only, spine-scoped, no enforcement lint** (operator decision 2026-07-24). The plan filed M4 as "component vocabulary + enforceable house style (upstream `lvt/components` + tinkerdown)"; a direct read (Explore 2026-07-24) reshaped all three parts:
+> - **Tinkerdown-only** (like M3). tinkerdown consumes **exactly one** of `lvt/components`' ~29 components (datatable) and reimplements the rest natively (charts/tabs/status-banners as parser transforms; accordion as raw `<details>`). New components would be tinkerdown-local by default; upstream is opt-in for *reuse*, at a cross-module release cost — not a dependency.
+> - **Spine-scoped.** The verified, in-grain gap is *not* "no components" — it is that `style_guide` is a **declared-but-unconsumed config field** (`GenerationConfig.StyleGuide`, no runtime reader) and the design-token layer already exists but is **duplicated + partial**. M4 builds outward from that; component enrichment is deferred (operator chose spine-only).
+> - **No enforcement lint.** M4 as filed promised "no free-form HTML." A validate lint that rejects hand-written HTML where a component exists fights tinkerdown's core model (semantic-HTML-first, PicoCSS-classless — the "no CSS classes needed" selling point; the FAQ example uses raw `<details>` deliberately). **The vision (guaranteed on-brand, no generic LLM aesthetic) is delivered by tokens-by-construction, not by rejection** — the mechanism was mis-specified, not the intent.
 
-*(M2 and M3 were expanded to full phase blocks at kickoff — see § M2 phases and § M3 phases above. The M3 upstream `WithActionPolicy` hook was dropped as dead code for tinkerdown; a livetemplate-side hook for its own consumers is separable framework work, not tinkerdown's M3.)*
-- **M4** (upstream `lvt/components` + tinkerdown): the component list + options; how the skill's reference advertises them; the design-token/enforced-component style-guide schema.
+**Kickoff Audit findings (Explore of tinkerdown + `lvt/components`, 2026-07-24):**
+
+- **A real token set already exists — implicit, duplicated, partial.** `server.go:1196-1234` defines `:root` + `[data-theme="dark"]` with ~12 custom properties (`--bg-*`, `--text-*`, `--border-color`, `--card-*`, `--accent`) + `--pico-*` overrides. The client CSS consumes them **with the fallback literal re-hardcoded at every use site** (`var(--accent, #0066cc)` in dozens of places), and four consumed tokens (`--bg-hover`, `--badge-bg`, `--highlight-bg`, `--hover-bg`) are **never defined**. M4-Phase-1 is **extract/dedupe/wire this existing set**, not greenfield.
+- **The only author knobs into the token layer are `primary_color` (→ `--accent`) and `font`.** `StylingConfig` (`config.go:676-693`) = `theme`/`primary_color`/`font`/`site_css`/`custom_css`; `theme` maps name→light/dark/auto (`styling.go`, "clean"=light, "minimal" unrecognized→auto). No colors/spacing/typography schema.
+- **`style_guide` is wired to nothing.** `GenerationConfig.StyleGuide` (`config.go:181`) is documented "injected into the generation context" but has **no runtime consumer** — `SKILL.md`/`reference.md` never mention style/tokens; no command marshals it. So "`site_css` + a `style-guide.md`" overstates reality: `site_css` is wired, the style-guide half is a dead field. M4-Phase-2 builds the first style-guide pipeline.
+- **PicoCSS is the classless substrate.** Embedded (`assets.go:22`), applied to semantic HTML; the one upstream component (datatable) renders class-less because tinkerdown imports no style adapter, so `.Styles.X` is empty → `<table class="">` → PicoCSS skins it. The token layer sits on top of this — that is why tokens (not classes) are the right on-brand lever.
+
+#### Phase 1 (M4, tinkerdown) — Design-token system: on-brand by construction (~1 session)
+
+> **Goal at end:** the design tokens the page already renders against become a **formalized, complete, single-sourced schema driven from config** — every consumed token defined (the four currently-undefined ones included), the re-hardcoded per-use fallbacks removed, and a team able to set its palette once. Semantic HTML + PicoCSS then renders on-brand **by construction**, no prompt and no lint required.
+
+**Design refs:**
+- § house-style gap · § M4 design (the token-inventory finding)
+- tinkerdown `internal/server/server.go:1196-1234` (the `:root`/`[data-theme="dark"]` block + its `<head>` injection at `:3121`), `internal/styling/styling.go` (`buildStylingOverrideCSS` — `theme`→light/dark, `primary_color`→`--accent`, `font`), `internal/config/config.go:676-693` (`StylingConfig`), `internal/assets/client/tinkerdown-client.browser.css` (token consumers + the re-hardcoded fallbacks + the undefined `--bg-hover`/`--badge-bg`/`--highlight-bg`/`--hover-bg`)
+
+**Audit (first task):**
+- [ ] **Design-ref completeness check.**
+- [ ] Inventory the full **consumed** token set (grep `var(--` across the client CSS) vs the **defined** set (`server.go:1196-1234`); list the four undefined tokens + everywhere a fallback literal is re-hardcoded. That diff *is* the work.
+- [ ] Design the **token schema**: the semantic set the client already consumes (colors: `--bg-*`, `--text-*`, `--border-color`, `--accent`, `--card-*`, `--code-bg`/`--pre-bg`, + the four undefined), single-sourced in `:root`/`[data-theme=dark]`. Decide the **config surface**: extend `StylingConfig` with a `tokens` block (a team sets values once → drives `:root`), with `theme`/`primary_color`/`font` kept as shortcuts (presets).
+- [ ] Confirm this is **structural** (skins the page regardless of the prompt) — distinct from Phase 2's generation-context wiring.
+
+**Implementation:**
+- [ ] Single-source the token layer: define **all** consumed tokens (add the four undefined) in one `:root`/`[data-theme=dark]` block; remove the per-use re-hardcoded fallbacks in the client CSS (or reduce to one authoritative fallback).
+- [ ] Extend `StylingConfig` with a `tokens` config that sets the `:root` values; `theme`/`primary_color`/`font` remain shortcuts. Default tokens = today's values (no visual change with no config).
+- [ ] `CHANGELOG.md`.
+
+**Acceptance criteria:**
+- [ ] **Simplify:** `/simplify` the diff.
+- [ ] **Unit:** no consumed-but-undefined token remains (a test that fails if the client CSS references a `var(--x)` not defined in the `:root` block); a custom `tokens` config yields the expected `:root` CSS; `theme`/`primary_color` shortcuts drive the right tokens.
+- [ ] **Integration:** the `examples/` corpus renders unchanged under defaults (no style regression — the default token values equal today's).
+- [ ] **E2E (chromedp, four-channel):** a page with a custom `tokens` config renders on-brand — assert the computed CSS custom properties (accent/card/bg) match the config, and screenshot; the default page renders with the default tokens.
+
+**Learn:** what surprised us / plan drift / feed-forward to Phase 2's Audit / new-or-changed risks.
+
+#### Phase 2 (M4, tinkerdown) — Wire the house style into the generation context (~1 session)
+
+> **Goal at end:** the `/tinkerdown` skill **consumes** the manifest's `style_guide` + a summary of the token schema, so generated UIs are authored against the house style — closing the declared-but-unconsumed gap (`style_guide` is a config field the skill never reads). The style block stays **optional**: with none, Phase 1's default tokens already skin the page on-brand.
+
+**Design refs:**
+- Phase 1 (the token schema) · § house-style gap (the style block = `theme` + `site_css` + `style-guide.md`, all optional)
+- tinkerdown `internal/config/config.go:181` (`GenerationConfig.StyleGuide` — unconsumed), `skills/tinkerdown/SKILL.md` + `reference.md` (the generation context; today advertise only the `lvt-*` vocabulary + "datatable, dropdown")
+
+**Audit (first task):**
+- [ ] **Design-ref completeness check.**
+- [ ] Confirm `style_guide` has no runtime consumer (Explore verified). Decide the read path: the skill loads the manifest's `style_guide` (a `style-guide.md` path) + a **token summary** (the available tokens/theme) and injects both into the generation context.
+- [ ] Decide whether a command surfaces the style guide to the skill (like `validate --summary` for operations) or the skill reads the manifest directly — prefer the smallest that lets the skill see the house style deterministically.
+- [ ] Pin the guidance: generated UIs use **semantic HTML** (skinned on-brand by the tokens) + the house `style-guide.md` patterns, and **do not hardcode colors** (use the tokens) — the anti-off-brand rule, delivered as guidance + tokens, not a lint.
+
+**Implementation:**
+- [ ] `SKILL.md` (+ `reference.md` if needed): load + inject the manifest's `style_guide` + token summary; add the "semantic HTML + tokens, don't hardcode colors, follow the style-guide" guidance. Keep the style block optional (absent → default tokens).
+- [ ] `CHANGELOG.md`.
+
+**Acceptance criteria:**
+- [ ] **Simplify:** prose + asset pass.
+- [ ] **Unit/structural:** a test asserting the skill wires the `style_guide` (mirror `skill_examples_test.go`); the style-guide reference resolves.
+- [ ] **Integration:** a manifest with a `style_guide` → the skill's generation context includes it + the token summary (verifiable deterministically).
+- [ ] **E2E:** N/A (generation-context, as with M1 Phase 3) — the on-brand *rendering* guarantee is Phase 1's tokens (structural); this phase's deliverable is that the skill *sees* the house style, verified by the structural/integration test.
+
+**Learn:** what surprised us / plan drift / feed-forward to **M5**'s Audit / new-or-changed risks.
+
+---
+
+### M5 phases — outline only (expanded at milestone kickoff per convention 9)
+
+The *what* + *why* of each is in § Roadmap; here is only the milestone's **kickoff design checklist** — the sections to write into full phase blocks when it starts (per convention 9):
+
+*(M2, M3, M4 were expanded to full phase blocks at kickoff — see § M2/M3/M4 phases above. Re-scopes recorded there: M3's upstream `WithActionPolicy` dropped as dead code + field-name validation deferred; M4 re-scoped tinkerdown-only, spine-only, no enforcement lint — the on-brand vision delivered by tokens, not rejection.)*
 - **M5** (tinkerdown + `client`): the persistence model (stores captured *skills*, not just `app.md`); gallery UX; the external-embed handshake protocol; **substrate extensibility** — writable WASM sources (#216) + custom Go+WASM source types (#222), and how a team-authored source enters the *approved* set.
 
 #### Standing Audit item for milestones that bump `@livetemplate/client` (M2, M5) — artifact provenance
