@@ -11,6 +11,13 @@ Earlier releases (v0.1.x) are documented in the
 
 ## [Unreleased]
 
+## [v0.4.0] - 2026-07-24
+
+The ephemeral-UI reframe (M0–M5): Tinkerdown becomes the tool teams use to let an
+LLM generate contextual, throwaway internal UIs against an **approved surface** —
+governed at generation *and* runtime, on-brand by construction, saveable when a
+workflow recurs. Everything below shipped since v0.3.9.
+
 ### Fixed — `tinkerdown cli` reaches WASM sources; wasm docs use the real config keys
 
 `tinkerdown cli` now constructs `wasm` sources, so a WASM source has the same CRUD

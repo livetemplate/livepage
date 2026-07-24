@@ -1,6 +1,6 @@
 # Tinkerdown
 
-> **v0.2.x — early but tagged. Expect breaking changes between minors.**
+> **v0.4.x — early but tagged. Expect breaking changes between minors.**
 
 **Internal UIs cheap enough to throw away. Describe what you need, get a live app against your real data, delete it when you're done.**
 
@@ -82,6 +82,7 @@ The same primitive scales to other artifacts:
 
 | Artifact | What it looks like |
 |---|---|
+| **Governed approval console** | A request queue where **Approve** runs a bounded, audited export and **Deny** records a decision — generated against an *approved surface*, not freeform. ([examples/pii-access-approval](examples/pii-access-approval)) |
 | **Dashboard / status report** | Frontmatter pulls from PostgreSQL or REST; tables, computed totals, and Mermaid diagrams render inline. ([examples/markdown-data-dashboard](examples/markdown-data-dashboard)) |
 | **Literate doc / runnable explainer** | Prose alongside live widgets, real source cited by line range, and your deployed app embedded inline — the doc *is* the working code. ([Literate Authoring guide](docs/guides/literate-docs.md), [examples/literate-counter-include](examples/literate-counter-include)) |
 | **Triage / standup board** | Action buttons mutate a shared SQLite or PostgreSQL source; every teammate's tab stays in sync over WebSocket. ([examples/standup-bot](examples/standup-bot), [examples/team-tasks](examples/team-tasks)) |
@@ -125,14 +126,14 @@ See the [Literate Authoring guide](docs/guides/literate-docs.md) for the full pr
   {{end}}
   ```
   ````
-- **Tier 4 — WASM sources.** Write a custom data source in TinyGo when built-ins don't fit; the module exports a `fetch` function and runs server-side.
+- **Tier 4 — WASM sources.** Write a custom data source in TinyGo when built-ins don't fit; the module exports a `fetch` function — and, for a writable source, a `write` — and runs server-side, with the same behavior under `tinkerdown serve` and `tinkerdown cli`.
 
 See the [Progressive Complexity Guide](docs/guides/progressive-complexity.md) for full examples and the escape hatches between tiers.
 
 ## Key Features
 
 - **Single-file apps**: Everything in one markdown file with frontmatter
-- **9 data sources**: SQLite, JSON, CSV, REST APIs, PostgreSQL, exec scripts, markdown, WASM, computed
+- **10 data sources**: SQLite, PostgreSQL, REST, GraphQL, JSON, CSV, exec scripts, markdown, WASM, computed
 - **Auto-rendering**: Tables, selects, and lists generated from data
 - **Real-time updates**: WebSocket-powered reactivity
 - **Zero config**: `tinkerdown serve` just works
@@ -166,6 +167,7 @@ sources:
 | `json` | JSON files | [lvt-source-file-test](examples/lvt-source-file-test) |
 | `csv` | CSV files | [lvt-source-file-test](examples/lvt-source-file-test) |
 | `rest` | REST APIs | [lvt-source-rest-test](examples/lvt-source-rest-test) |
+| `graphql` | GraphQL APIs | [lvt-source-graphql-test](examples/lvt-source-graphql-test) |
 | `pg` | PostgreSQL | [lvt-source-pg-test](examples/lvt-source-pg-test) |
 | `exec` | Shell commands | [lvt-source-exec-test](examples/lvt-source-exec-test) |
 | `markdown` | Markdown files | [markdown-data-todo](examples/markdown-data-todo) |
@@ -238,21 +240,26 @@ sources:
 
 See [Configuration Reference](docs/reference/config.md) for when to use each approach.
 
-## AI-Assisted Development
+## Generating apps under policy
 
-Tinkerdown's surface area is small on purpose: a fixed `lvt-*` attribute vocabulary, frontmatter with a small set of well-defined fields, and a single file that contains the whole app. That gives an LLM very few ways to be wrong.
+Tinkerdown's surface area is small on purpose — a fixed `lvt-*` vocabulary, a handful of frontmatter fields, and one file that *is* the whole app — so an LLM has very few ways to be wrong. The `/tinkerdown` skill turns that into a workflow: describe what you need, and the agent authors the markdown, runs `tinkerdown validate` against the real parser, self-corrects on the line-numbered diagnostics until it's clean, then serves it.
 
-Describe what you want, and the agent drafts the markdown:
+What makes it safe to point an LLM at real data is the **approved surface**. A `tinkerdown.yaml` declares a `generation:` block naming exactly which sources and actions an agent may wire up — everything else is off-limits:
 
+```yaml
+generation:
+  sources: [access_requests, audit_log, datasets]         # the only sources a generated app may bind
+  actions: [request-access, approve-export, deny-request] # the only actions it may invoke
+  style_guide: ./style-guide.md                           # house conventions the agent follows
 ```
-Create a task manager with SQLite storage,
-a table showing tasks with title/status/due date,
-a form to add tasks, and delete buttons on each row.
-```
 
-The output is a `.md` file you can read, diff, and hand-edit. No component tree, no build config, no `node_modules` to reason about.
+- **Declared once, enforced twice.** An agent may only use approved names — an unapproved name fails `validate` before anything serves — and the same surface is enforced again at **runtime**: a running app, a webhook, or a crafted message can only invoke an approved action or write an approved source, so a caller bypassing the browser can't reach past what you approved. Projects with no `generation:` block are unaffected — approval is opt-in.
+- **On-brand by construction.** House style is data, not a prompt. `styling.tokens` maps design tokens (`accent`, `card_bg`, …) to your palette and skins the semantic HTML the generator emits; `generation.style_guide` points at a markdown file of conventions the skill reads and follows. Generated UIs match the house style without careful prompting.
+- **Keep it if it recurs.** Generated UIs are ephemeral by default. When one is worth keeping, `/tinkerdown:save` captures the working app — manifest, fixtures, and house style — into a re-runnable skill that stands up again in seconds with no regeneration, listed in a discoverable [gallery](examples/gallery).
 
-See [AI Generation Guide](docs/guides/ai-generation.md) for tips on Claude Code, Cursor, and other agents.
+**Worked example — an access-approval console.** [`examples/pii-access-approval`](examples/pii-access-approval) is a request queue generated against the approved surface above. The app *reads* through read-only sources; every *write* goes through a governed, audited action. **Approve** runs a bounded, server-authoritative export — the row cap comes from the request row, not the client — and appends a durable audit record in a single transaction; **Deny** records a decision without granting access. The manifest is the record of what the console is allowed to do.
+
+The output of all of this is a `.md` file you can read, diff, and hand-edit — no component tree, no build config, no `node_modules`. See the [AI Generation Guide](docs/guides/ai-generation.md) for using it with Claude Code, Cursor, and other agents.
 
 ## Documentation
 
@@ -275,9 +282,6 @@ See [AI Generation Guide](docs/guides/ai-generation.md) for tips on Claude Code,
 - [Configuration (tinkerdown.yaml)](docs/reference/config.md)
 - [lvt-* Attributes](docs/reference/lvt-attributes.md)
 
-**Planning:**
-- [Roadmap](ROADMAP.md)
-
 ## Development
 
 ```bash
@@ -294,7 +298,7 @@ MIT
 
 ## Contributing
 
-Contributions welcome! See [ROADMAP.md](ROADMAP.md) for planned features and current priorities.
+Contributions welcome! Browse the [open issues](https://github.com/livetemplate/tinkerdown/issues) for where help is wanted.
 
 ## Acknowledgements
 
