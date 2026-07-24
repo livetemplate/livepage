@@ -105,7 +105,7 @@ The brief names four things a team defines once so LLMs can safely generate agai
 | # | Gap | Home (fix upstream, not tinkerdown) | Needed for | Milestone |
 |---|-----|------|-----------|-----------|
 | 0 | Old pins hide shipped fixes | Bump `livetemplate`, client, `lvt/components` → latest tags | Ephemeral speed + determinism | **M0** |
-| 1 | No validation API for a generated attribute-doc (allowed tags/`lvt-*`, diff-cleanliness, bound refs) | `livetemplate.Validate(templateText)` [server] | Deterministic first-pass correctness | **M2** |
+| 1 | Generated docs get only a *plain* parse error; the structured, line-numbered parse/reactive-AST diagnostics live in `livetemplate/internal/parse` (unreachable downstream) and the public render path *swallows* them. Allowed-tags, bound-refs and action-param are tinkerdown-owned semantics livetemplate can't see. | **Split** (kickoff 2026-07-23): `livetemplate.Validate(templateText)` exposes the structured parse/AST diagnostics + optional render-determinism [server]; allowlist / bound-refs / action-param stay in tinkerdown `validate` | Deterministic first-pass correctness | **M2** |
 | 2 | No state/source **introspection** (fields + action names as metadata) | Reflective metadata surface [server] | LLM binds to real fields | **M3** |
 | 3 | Permission enforcement is coarse; no per-action/field authz | Declarative `WithActionPolicy` hook [server] | Runtime safety (defense in depth) | **M3** |
 | 4 | Primitive library too thin (no charts, badges, cards, stat tiles, alerts, empty-states) | Enrich `lvt/components` [components] | "LLMs rarely need custom HTML" | **M4** |
@@ -187,11 +187,11 @@ All follow the Anthropic skill shape already used by `skills/tinkerdown/` (conci
 
 ## Roadmap
 
-Ordered milestones. **M0 and M1 are fully detailed** (full phase blocks); M2–M5 are outline-only and get expanded at their kickoff (see LLM session guide convention 9).
+Ordered milestones. **M0, M1 and M2 are fully detailed** (full phase blocks); M3–M5 are outline-only and get expanded at their kickoff (see LLM session guide convention 9).
 
 - **M0 — Reframe + upstream bump + a trustworthy vocabulary.** Reposition the narrative (README/SKILL/llms.txt/ai-generation) around ephemeral generated UIs; **bump `livetemplate` + client + components to their latest tags** and absorb behavior changes; **reconcile the `lvt-*` attribute reference with what the client actually implements** (Phase 2 — added after Phase 1's Audit found 8 of 11 sampled attributes stale). *Lights up:* the fast, correct runtime substrate, the honest story, and a vocabulary reference that is safe to hand an LLM — the last being a hard prerequisite for M1, not polish. *(no demo yet)*
 - **M1 — THE DEMO (thin vertical slice).** The five M1 deliverables (see § Deliverables at a glance) on existing primitives. *Lights up:* the target acceptance test — generate a real, friction-removing UI in ~30s — *and* re-run it from a skill in seconds.
-- **M2 — Deterministic validation (upstream).** `livetemplate.Validate(templateText)` (diff-cleanliness + attribute diagnostics) + tinkerdown **policy lint** in `validate`. *Lights up:* first-pass generation reliability; reject unknown `lvt-*` / non-approved refs before serving.
+- **M2 — Deterministic validation (upstream `Validate()` + tinkerdown lint).** `livetemplate.Validate(templateText)` exposes the **structured, line-numbered parse / reactive-AST diagnostics** that today live in livetemplate's `internal/parse` (unreachable downstream) and that its public render path silently *swallows* — plus an optional render-determinism check. tinkerdown's `validate` consumes it per lvt block and adds the **tinkerdown-owned** semantic checks livetemplate cannot see: **bound-refs** (a used `lvt-source` must resolve to a declared source), **action-param completeness**, a **state-ref diagnostic that teaches the real `lvt-source` fix**, and the **`lvt-persist`→removed-with-migration** cleanup. *Lights up:* first-pass generation reliability — richer diagnostics for the skill's self-correct loop, and the "validates clean but breaks at serve" gaps M1 kept hitting closed at the gate. *(The attribute allowlist stays in tinkerdown, guarded against the vendored client bundle — livetemplate-Go can't own it, as it never references the client-only `lvt-mod:`/`lvt-nav:`/`lvt-ignore` namespaces. Design expanded at kickoff 2026-07-23 — see § M2 design.)*
 - **M3 — Runtime policy + introspection (upstream).** `WithActionPolicy` per-action/field authz + state/source introspection metadata. *Lights up:* defense-in-depth (the running app can't exceed granted access) + LLM binds to real fields.
 - **M4 — Component vocabulary + enforceable house style (upstream `lvt/components` + tinkerdown).** Charts, badges, cards, stat tiles, alerts, empty-states; **plus** promoting the UX style guide from coarse (`site_css` + `style-guide.md`) to **design tokens + an enforced component set** (the "style guide object" the exploration found missing). *Lights up:* richer generated dashboards with no free-form HTML, guaranteed on-brand.
 - **M5 — Persist to the malleable substrate (save & share).** This is where **malleability lives**: persist a generated UI to the repo + a gallery + share link by storing the captured **skill** (per convention 13 / M1 Phase 6), not just the `app.md` — so "save" means a re-runnable workflow you evolve, while individual UIs stay ephemeral; plus **substrate extensibility** (teams can add their own approved source types) and the external-app embed handshake. *Lights up:* "throw away the UI, keep + reshape the substrate" (folds issues #223 host read-only apps, #282 review mode, #249 external embed, #216 writable WASM sources, #222 custom Go+WASM sources).
@@ -753,12 +753,194 @@ Sections marked `[skip on phase execution]` (Appendix A) are historical context 
 
 ---
 
-### M2–M5 phases — outline only (expanded at milestone kickoff per convention 9)
+### M2 phases — deterministic validation (expanded at kickoff 2026-07-23, per convention 9)
+
+> **Milestone shape (settled at kickoff):** cross-repo, **upstream-first** (operator decision 2026-07-23 — keep the upstream `Validate()`, not a tinkerdown-only lint). Three phases: **(1) upstream** `livetemplate.Validate()` + a tagged release; **(2) tinkerdown consumes** it per lvt block; **(3) the tinkerdown-owned semantic gaps** M1's Learn verified. Delivery protocol runs **once per repo** (convention 11): the upstream loop against `../livetemplate`, the downstream loops against tinkerdown.
+
+**Kickoff Audit findings (direct reads 2026-07-23 of `../livetemplate` @ v0.20.1 + tinkerdown `validate.go`/`vocabulary.go`/`page.go`/`websocket.go`; recon report in session log):**
+
+- **The upstream API earns its place because the diagnostics are *unreachable downstream*.** tinkerdown parses each lvt block via `livetemplate.New(blockID, WithParseFiles(tmpFile))` (`websocket.go:505`) and gets only a **plain wrapped `error`**. The structured, line-numbered diagnostics (`ParseError{Phase, NodeType, Expr, Pos, Msg}`, `internal/parse/errors.go:8`) live in an **`internal/`** package tinkerdown cannot import — and the public render path (`Execute`/`ExecuteUpdates`) **silently swallows** first-render AST/eval failures behind an HTML-structure fallback (`template.go:1662-1673`, returns `nil` error). A public `Validate()` built on the internal primitives is the *only* way tinkerdown gets these. This is the load-bearing justification for the upstream-first call.
+- **`Validate` must build on `internal/parse.Parse` + `parse.BuildTree`, NOT `Execute`.** Building on the render surface would produce a hollow validator that never surfaces a diagnostic. The root `livetemplate` package already imports `internal/parse`, so `Validate` can call these directly.
+- **Render-determinism ("diff-cleanliness") needs a zero-value *typed* state instance** — with only a template string, field evaluation errors on nil and triggers the same silent fallback, so the data-free path can only do parse + reactive-AST-build checks (still real: unclosed `{{}}`, unknown funcs, malformed `{{range}}`/`{{if}}`). Faithful SSR-vs-first-tree checking is therefore an **optional `WithSampleData(any)` mode**, not the default. tinkerdown's `validate` has no data at validate-time, so it consumes the **data-free** subset; `WithSampleData` serves other consumers + is the proactive determinism guard the operator wanted. (The whitespace-collapse corruption that motivated "diff-cleanliness" was already *fixed* engine-side in v0.20.0 #467 — so `WithSampleData` is a **regression guard**, not a fix for a live bug; Phase 1 Audit decides ship-vs-defer for the `WithSampleData` half.)
+- **The attribute allowlist stays in tinkerdown.** livetemplate-Go never references the client-only `lvt-mod:`/`lvt-nav:`/`lvt-ignore` namespaces (only `ClientVersion` is exported, `client_assets.go:19`), so an upstream `KnownAttributes` export would itself be a hand-copy that drifts from the client. tinkerdown's `vocabulary.go` + `TestKnownAttributesAreReal` — which guards against the *actual vendored client bundle* — is already the best available source-of-truth. **The kickoff "attribute-allowlist source-of-truth" question resolves to: keep it local.**
+- **The temp-file dance is avoidable — free win.** `livetemplate.New` has no in-memory-string option, but `(*Template).Parse(text)` (`template.go:1186`) and `WithParseFS`+`fstest.MapFS` both parse from memory. Phase 2 drops the `/tmp/lvt-*.tmpl` write at `websocket.go:495-503` (the disk-free path M0 Phase 0 Learn flagged) as it is already touching that call site to route through `Validate`.
+
+**Upstream API surface (Phase 1 builds; final signature is Phase 1 Audit's to confirm against the internal types):**
+
+```go
+// livetemplate.Validate parses templateText through the same reactive-AST pipeline
+// the live renderer uses and returns structured diagnostics — WITHOUT the silent
+// HTML-structure fallback the public render path applies. Data-free: reports parse
+// and AST-build problems (unclosed actions, unknown functions, malformed range/if).
+// WithSampleData additionally exercises the real diff path for render-determinism.
+func Validate(templateText string, opts ...ValidateOption) ([]Diagnostic, error)
+
+type Diagnostic struct {
+    Line, Col int      // converted from ParseError.Pos (a byte offset today)
+    Severity  Severity // error | warning
+    Message   string
+    Hint      string
+}
+// ValidateOption: WithComponentTemplates(...) for component resolution;
+// WithSampleData(any) to enable the render-determinism check.
+```
+
+#### Phase 1 (M2, upstream `../livetemplate`) — the `Validate()` API + a tagged release (~1 session)
+
+> **Goal at end:** `livetemplate.Validate(templateText)` ships in a tagged `../livetemplate` release (**`v0.21.0`**, 2026-07-23), returning structured line diagnostics for parse + composition errors — built on the serve-faithful `ParseFS`/`(*Template).Parse` path (which returns errors directly, unlike the swallowing `Execute`), so a downstream consumer can pin it.
+
+**Design refs:**
+- § M2 design (this section) — the API surface + the "build on internal primitives" finding
+- `../livetemplate`: `internal/parse/api.go:25` (`Parse`), `:62` (`BuildTree`), `internal/parse/errors.go:8` (`ParseError` — note `Pos` is a byte offset), `template.go:1662-1673` (the swallowing fallback to avoid), `template.go:1186` (`(*Template).Parse`), `client_assets.go:19` (`ClientVersion`), `scripts/release.sh` + `CHANGELOG.md` (release mechanics)
+
+**Audit (first task):**
+- [x] **Design-ref completeness check.**
+- [x] Confirm the internal entry points and their error contracts — **superseded by a sharper empirical finding.** The swallow is real, but the API did **not** end up built on raw `internal/parse` (which the root package could import). It builds on `(*Template).Parse` via the `ParseFS` path — see Learn #2/#4. The divergence that matters was proven differently: `tinkerdown validate` passes an **unclosed `{{range}}` in a block as clean** (it never runs livetemplate's parser on block content), so serve degrades with no validate error. That empirical gap — not the `Execute`-swallow abstraction — is the justification.
+- [x] ~~Pin the `Pos`→line/col conversion approach.~~ **Moot for the shipped scope** — the data-free path reads the line from html/template's `template:NAME:LINE:` string, not `ParseError.Pos`. `Pos`→line/col returns with the deferred sample-data mode (which uses the reactive parser's byte offsets).
+- [x] **Decided `WithSampleData`: DEFERRED** (advisor). No consumer this cycle (tinkerdown has no data at validate-time), the render-determinism it would add already shipped engine-side (v0.20.0 #467), and it drags in `Pos`→line/col + the swallow-asymmetry for an unexercised path. `SeverityWarning` is reserved as its home. Shipped the data-free core alone.
+- [x] Confirmed `ClientVersion` unchanged (0.20.0) — server-only API; the release's client-pin guard reported "current". No bundle regeneration (provenance checklist = **No**).
+
+**Implementation:**
+- [x] `Validate(templateText string, opts ...ValidateOption) ([]Diagnostic, error)` + `Diagnostic`/`Severity`/`ValidateOption` in the root package — built on `New`+`WithParseFS`+`(*Template).Parse` (the serve-faithful `ParseFS` path), **not** raw `internal/parse` (Learn #4). `Diagnostic` shipped as `{Line, Severity, Message}` — `Col`/`Hint` dropped after review (Learn #3).
+- [x] `WithValidateComponents(...*TemplateSet)` support (fidelity-guarded: a component-using template validates clean). ~~`WithSampleData(any)`~~ deferred.
+- [x] Unit tests upstream (8): clean; component-resolves (fidelity guard); component-missing-set → diagnostic; unclosed range; unknown function; **framework-builtin-resolves (the unreachable-downstream proof)**; multi-line line number; broken component set → infra error.
+- [x] Curated `CHANGELOG.md` `[Unreleased]` → `### Added` (release model is *promote-curated*, not chglog-generated); **released `v0.21.0`** via `scripts/release.sh` (dry-run first; client-pin guard passed; full suite + build green; tag + GitHub release pushed).
+
+**Acceptance criteria:**
+- [x] **Simplify:** `code-simplifier` on the diff — one improvement (collapsed the component-option loop into the variadic call), rest already clean.
+- [x] **Unit:** 8 tests green in `../livetemplate`; full 22-package suite + pre-commit hook (fmt + golangci-lint + `go test ./...`) green.
+- [x] **Integration:** de-risked against the **real** consumer before the tag — via a local `replace`, tinkerdown's actual `lvt/components` datatable set (with its own `mod`/`colID` funcs) parses clean through `Validate` and detection fires; tinkerdown compiles against the branch. CI's `Test Tinkerdown against Core Changes` also passed on the PR.
+- [x] **E2E:** N/A upstream — live-render path unchanged; existing livetemplate e2e green (incl. Redis/docker, run by the release).
+
+**Learn:**
+
+*What surprised us.*
+1. **`tinkerdown validate` is blind to template *syntax* errors in blocks — the sharper justification the plan's "Execute swallows" framing missed.** An unclosed `{{range}}` in a fence passes `validate` clean, because tinkerdown's parser never runs livetemplate's template parser on block content; it only fails at *serve* (log + skip → broken UI, no validate error). That empirical gap is what `Validate()` closes, and tinkerdown *cannot* close it downstream — the check needs livetemplate's own funcMap.
+2. **The `.Parse` method drops component defs; the `ParseFS`/`ParseFiles` path preserves them.** `parseSources` (used by `ParseFiles`/`ParseFS`) *clones* the component-bearing template (`template.go:1396`) so `{{template "ns:name"}}` resolves; the `.Parse` method builds a *fresh* base template (`:1200`) that would false-positive every component block. Serve uses `ParseFiles`, so validating via `New`+`WithParseFS`(in-memory) is serve-faithful. The advisor flagged this as the blocking risk; the first code action was the fidelity test that proved it both directions.
+3. **The Diagnostic shape was over-built. `html/template` parse errors carry NO column** (verified empirically — even lexer errors like "unterminated quoted string" report only a line), and no check had a hint to add, so `Col` and `Hint` were always empty. Both **dropped pre-release** (the PR review flagged them) → the honest `{Line, Severity, Message}`. A column and hint can be *appended back non-breakingly* when the deferred sample-data mode lands with real positional info — the field-trim and the deferral are the same sequencing decision.
+4. **Built on `.Parse`, not raw `internal/parse` — for fidelity, not access.** `internal/parse.Parse` is a lower layer; `.Parse` runs the *full* serve pipeline (comment-strip, composition-flatten, bracket-expand, wrapper) and returns the parse error directly (unlike `Execute`, which swallows). Validating through the exact path serve parses is worth more than the structured `ParseError` the lower layer would give — which anyway needs data (BuildTree) to be more than a plain parse error.
+
+*PLAN.md drift fixed in this commit.*
+- Goal/Implementation corrected: "structured line/**col** diagnostics … built on **`internal/parse`**" → line-only, built on the `ParseFS`/`.Parse` path. `Diagnostic` = `{Line, Severity, Message}`.
+- `Pos`→line/col conversion struck as moot for the shipped scope (returns with sample-data).
+- The CHANGELOG mechanism is *promote-curated `[Unreleased]`*, not chglog-generated (the plan said "`### Added` entry" — right section, but noting the promotion model).
+
+*Feed-forward to **Phase 2**'s Audit.*
+- **The shipped API is `livetemplate.Validate(content, livetemplate.WithValidateComponents(getComponentTemplates()...))`** — confirmed compiling + working against tinkerdown's real component set. Option name is `WithValidateComponents` (not `WithComponentTemplates`, which is the serve-time `Option`).
+- **`Diagnostic` = `{Line int, Severity Severity, Message string}`** — map onto `fileValidationError` (file + message; prefix the message with the line). No `Col`/`Hint` to thread.
+- **`WithSampleData` did NOT ship** — Phase 2 consumes the data-free syntax/composition diagnostics only (which is all tinkerdown has at validate-time anyway).
+- **Pin `v0.21.0`.** Provenance checklist = **No** (server-only; `ClientVersion` still 0.20.0). Phase 2's Audit re-confirms the constant didn't move.
+- The temp-file drop at `websocket.go:495` is a Phase 2 item — `(*Template).Parse`/`WithParseFS`-from-memory both parse from memory (no `/tmp`).
+
+*New / changed risks.*
+- **New (low): multi-line-HTML-comment line shift.** `StripHTMLComments` drops a comment's newlines before parsing, so a diagnostic below a *multi-line* HTML comment reports a line shifted by the comment's height. Documented in the `Validate` godoc; uncommon in generated blocks. If it bites the skill loop, map the coordinate back.
+- **New (low): no cross-call caching.** `Validate` re-parses supplied component sets per call — fine for pre-serve/dev-time use, not per-keystroke against a large library. Documented.
+
+#### Phase 2 (M2, tinkerdown) — consume `Validate()` per block + drop the temp-file dance (~1 session)
+
+> **Goal at end:** `tinkerdown validate` runs each lvt block's template through `livetemplate.Validate()` and surfaces its structured line + message diagnostics (closing the "block never ran through the parser, so a syntax error was invisible" gap), pinned to `v0.21.0`; the `/tmp/lvt-*.tmpl` write is gone.
+
+**Design refs:**
+- Phase 1 Learn (the shipped `Diagnostic` shape `{Line, Severity, Message}` + tag `v0.21.0`) · § Standing Audit item for `@livetemplate/client` bumps (the provenance checklist — Phase 1 confirmed server-only)
+- tinkerdown `cmd/tinkerdown/commands/validate.go` (the `ParseFileInSite` gate + the per-file checks), `internal/server/websocket.go` (the temp-file workaround → `WithParseFS`-from-memory; `getComponentTemplates`), `page.go:479` (`InteractiveBlock.Content` = the processed template serve parses), `go.mod:11` (the pin)
+
+**Audit (first task):**
+- [x] **Design-ref completeness check** + provenance checklist = **No** (`ClientVersion` still 0.20.0 in v0.21.0; server-only API, no bundle regen).
+- [x] Per-block text is `page.InteractiveBlocks[*].Content` — the **processed** template (post `autoGenerateTableTemplate`, `page.go:479`), exactly what serve parses. `ParseFileInSite` already extracts it; no re-parse.
+- [x] Diagnostic presentation: `[]Diagnostic` → `fileValidationError` as `"line N: message"` (no hint — Phase 1 dropped it), blocks iterated in **sorted-ID order** for stable/converging output.
+- [x] **(added) Component-set access.** `getComponentTemplates` was unexported in `internal/server`; `validate.go` is in `commands`, which **already imports `server`** (serve.go) — so exported it as `ComponentTemplates()` (single source of truth) rather than add a package. Validate must pass it, or every datatable/table block false-positives.
+
+**Implementation:**
+- [x] Bumped `go.mod` to **`v0.21.0`** (`go mod tidy`; the livetemplate org needs `GOPRIVATE` — the sum DB 500s on it — the tag is fetched direct from git).
+- [x] `validate` calls `livetemplate.Validate(block.Content, livetemplate.WithValidateComponents(ComponentTemplates()...))` per interactive block (`validateBlockTemplates`, component sets built once); diagnostics surface alongside the inert/unknown/policy checks and gate `validFiles`.
+- [x] Replaced the `os.WriteFile("/tmp/lvt-*.tmpl")` + `WithParseFiles` at `websocket.go` with `WithParseFS`(in-memory `fstest.MapFS`) — same `parseSources` path (component defs preserved), disk-free, behavior-identical. `os` import dropped.
+- [x] **(added) `split` block helper** (operator decision — the new check surfaced a real bug; see Learn). `blockHelperFuncs` (currently `{"split": strings.Split}`) merged into the `ComponentTemplates()` set's funcs, so it reaches a block's **parse** (set funcs reach the main parse) and its **tree generation** (`getComponentFuncs` merges the set funcs).
+- [x] `CHANGELOG.md` (validate-checks-templates + the `split` helper).
+
+**Acceptance criteria:**
+- [x] **Simplify:** `code-simplifier` on the diff — one comment-accuracy fix, rest already clean.
+- [x] **Unit:** `validate_blocks_test.go` — unclosed `{{range}}` now fails with `line N: unexpected EOF` (was clean); a clean block and a `split`-using block pass; an unknown function is caught. `component_funcs_test.go` — `split` is present in **both** the parse funcMap (`ComponentTemplates().Funcs`) and the tree-gen funcMap (`getComponentFuncs()`).
+- [x] **Integration:** the full `examples/` corpus is **55/55 green** — including the datatable/table blocks (faithfulness: no false positives) and the `split` fix. Changed-package tests green (no regression).
+- [x] **E2E (chromedp, four-channel):** `TestPIIAccessApproval` passes (29.9 s) through the disk-free parse path — WS tree frames + datatable render captured; serve behavior unchanged.
+
+**Learn:**
+
+*What surprised us.*
+1. **The new check found a real, pre-existing latent bug on its first run over the corpus.** `examples/markdown-data-bookmarks` uses `{{split .Tags ", "}}`, but `split` was registered *nowhere* (not a livetemplate builtin, not a datatable func, not in `runtime.TemplateFuncs`). So that block had *always* failed to render at serve (parse error → block logged + skipped → blank), invisible because `validate` never ran the template parser on block content. This is the exact "validates clean but breaks at serve" class M1 kept closing — now closed at the gate. **Operator chose to fix it by adding capability** (`split` as Tinkerdown's first base block helper) rather than degrade the demo.
+2. **Blocks get their non-builtin funcs from a *component set's* Funcs, not from `getComponentFuncs`.** `getComponentFuncs` is applied via `tmpl.Funcs()` *after* `New` (for tree generation), but html/template needs funcs at *parse* — so a func added only there lets nothing parse. Component-set Funcs, by contrast, reach the main block parse (verified: a block calling the datatable set's `{{mod}}` directly validates clean). That is why `blockHelperFuncs` rides `ComponentTemplates()`'s set funcs — one place that feeds *both* parse (the set) and tree-gen (`getComponentFuncs` merges the set funcs). A helper in only one would parse-then-fail or vice versa; a test pins both.
+3. **The `.Parse` method vs `parseSources` distinction (from Phase 1) paid off directly.** Dropping the temp-file dance had to use `WithParseFS` (→ `parseSources`, which clones the component-bearing template), *not* the `.Parse` method (fresh base template, drops components). Serve used `WithParseFiles` (also `parseSources`), so the swap is behavior-identical.
+
+*PLAN.md drift fixed in this commit.*
+- Diagnostic presentation corrected to `line + message` (Phase 1 dropped `hint`); the Goal's "line/hint" struck.
+- The block text is the *processed* `InteractiveBlock.Content`, not the raw fence.
+- `WithComponentTemplates` (serve-time `Option`) vs `WithValidateComponents` (the `Validate` option) disambiguated in the Implementation.
+
+*Feed-forward to **Phase 3**'s Audit.*
+- `validateBlockTemplates` now runs per interactive block; Phase 3's **bound-refs** and **action-param** checks slot in beside it (both operate on the same parsed `Page` + manifest).
+- The **base-helper mechanism** (`blockHelperFuncs` via `ComponentTemplates`) is where any future block helper goes — and it is the single place that keeps parse + tree-gen func sets in sync. Phase 3 should not reintroduce the split-brain by adding a func only to `getComponentFuncs`.
+- `split` is now a *known* function to the parser, so Phase 3's namespace/attribute work need not touch it.
+
+*New / changed risks.*
+- **New (low): the parse/tree-gen func split-brain is latent.** A contributor adding a block helper only to `getComponentFuncs` (the natural-looking place) would produce a block that parses and then fails to render. `blockHelperFuncs`-via-`ComponentTemplates` is the correct pattern; the `component_funcs_test.go` guard catches a helper that lands in only one map.
+- **Resolved: the datatable-component false-positive risk** the Audit flagged — the corpus (55/55, incl. table blocks) confirms `ComponentTemplates()` makes component references resolve in `validate` exactly as at serve.
+
+#### Phase 3 (M2, tinkerdown) — the tinkerdown-owned semantic gaps M1 verified (~1 session)
+
+> **Goal at end:** `validate` closes the "validates clean but breaks at serve" gaps M1's Learn verified: a used `lvt-source` must resolve to a **declared** source; a form invoking an action must supply every `:param` the statement references; the state-ref diagnostic **teaches the real `lvt-source` fix**; and `lvt-persist` reports "removed — use lvt-source" instead of a confusing miss.
+
+**Design refs:**
+- M1 Phase 5 Learn feed-forwards #1 (action-param completeness) + #3 (the "no state reference" diagnostic points at an undefined concept) + #4 (`lvt-persist` stale) · M1 Phase 3 Learn residual (namespace members) · this session's verified **bound-refs gap** (an `lvt-source="nonexistent"` passes `validate` clean; `expr.go:243`/`state.go:107` only error at serve)
+- tinkerdown `refs.go` (`DocRefs.Sources`/`DeclaredSources`), `internal/config/policy.go` (approved-set check — the model to extend to *declared*-set), `page.go:522-560` (the state-ref diagnostic), `vocabulary.go:35` (`lvt-persist` in the *known* set) + `page.go:585` (the "removed" note), `internal/config/config.go:215` (the manifest's own approved-vs-defined check — a template for the doc-vs-declared check)
+
+**Audit (first task):**
+- [x] **Design-ref completeness check.** Advisor: the four tasks are **not** equal-risk — three are set-membership/wording changes; action-param reproduces client param-serialization semantics. Sequenced the safe three first, action-param **last and separable**, with **corpus 55/55 as the false-positive gate** for both new lint checks.
+- [x] Declared source universe pinned via an Explore of `getEffectiveSource`: `page.Config.Sources` (frontmatter + auto-injected) ∪ the tinkerdown.yaml governing the file. **No built-in sources.** The false-positive trap is per-app config: a multi-app tree (`validate examples/`) keeps each app's sources in its own tinkerdown.yaml, not the root — resolved with `sourceConfigForFile` (walk up to the validation root).
+- [x] Action-param: **reuse, don't mirror** (advisor) — extracted the `:name` scanner into `scanParams`, shared by `SubstituteParams` (runtime) + `ReferencedParams` (validate). Exclude `operator` (server-set); union across `Statements`. Both client supply channels enumerated (form `name=` inputs + `data-*` keys).
+- [x] `lvt-persist`: **not a parallel "removed" set** (advisor) — removed from `knownAttributes`, added to `suggestAttribute`'s migrations map, framed "not supported — use lvt-source" (the client bundle *still reads it*, so it is tinkerdown-doesn't-support-it, not gone-from-the-universe). Client-bundle vestige left as the follow-up Phase 5 flagged. **Namespace-member validation stays deferred.**
+
+**Implementation:**
+- [x] **Bound-refs check** (`unresolvedSourceDiags`): every bound `lvt-source` must resolve to a declared source (frontmatter ∪ governing config); unresolved → a diagnostic with the sorted declared-source list. `sourceConfigForFile` (+ `hasConfigFile`) resolves the per-app config, cached by directory.
+- [x] **Action-param completeness** (`unsuppliedActionParams`): for each invoked `kind: sql` action, every `:param` its statements reference (minus `operator`) must be in the document's **over-inclusive** supplied set (`suppliedParamNames` — every `data-*` key + named form field anywhere, excluding `data-lvt-*`); missing → a diagnostic naming the param.
+- [x] **State-ref diagnostic rewrite** (`page.go`): the hint teaches `lvt-source` on the block's container (and notes `lvt-persist` is replaced by it), not the undefined `state="block-id"`.
+- [x] **`lvt-persist`→migration hint** (`vocabulary.go`); `CHANGELOG.md`.
+
+**Acceptance criteria:**
+- [x] **Simplify:** `code-simplifier` on the diff — two comment-clarity fixes in the wiring loop; the code (scanner extraction, both checks) already clean.
+- [x] **Unit:** `TestUnresolvedSourceDiags` (undeclared → flagged; frontmatter/config source → clean), `TestUnsuppliedActionParams` (+ `_OperatorExcluded`), `TestReferencedParams` (`::` casts, time literals, union), `TestLvtPersistMigration`, `TestStateRefDiagnosticTeachesLvtSource` — each verified to fail when violated. `SubstituteParams`' existing suites stay green (the refactor is behavior-equivalent).
+- [x] **Integration:** full `examples/` corpus **55/55 green** (the false-positive gate) — after a real false-positive was caught and fixed (see Learn). `validate.sh` corpus green.
+- [x] ~~**E2E (chromedp, four-channel):**~~ **struck as redundant** — the Phase 3 checks are *pre-serve validation* (they change what `validate` rejects, not serve behavior). "Caught before serve" is proven by the unit fixtures; "corrected version serves" is the Phase 2 PII e2e + the 55/55 corpus. A new chromedp run against unchanged serve behavior adds no coverage.
+
+**Learn:**
+
+*What surprised us.*
+1. **The new check found a real bug on its first corpus run — again — and this time it was mine-in-progress.** Bound-refs initially used the single root manifest and false-positived **5 sources across 3 apps** (`tasks`, `countries`, the PII trio) — all declared in each app's *own* tinkerdown.yaml, invisible to a root loaded from `examples/`. The corpus 55/55 gate caught it immediately; the fix (`sourceConfigForFile`, per-app config walked up to the root) is how serve already resolves. The lesson the advisor pre-loaded — *corpus 55/55 is the false-positive gate* — is exactly what turned a silent wrong-config into a caught one.
+2. **Action-param did NOT balloon — because the supplied set was made globally over-inclusive instead of form-scoped.** Reproducing the client's exact per-form param serialization (submitter-override, form-vs-button name precedence) was the ballooning risk. Sidestepped per the advisor: gather *every* `data-*` key and form field in the document and fire only when a param is supplied **nowhere**. Under-counting supplied = false positive (thrash); over-counting = a safe miss. The PII forms + the whole corpus pass; a dropped `:param` is still caught (`TestUnsuppliedActionParams`).
+3. **The state-ref check *preempts* the unknown-attribute check — so there is no double-fire.** A `lvt-persist`-only block has no state ref, so `ParseFileInSite` fails with "no state reference" *before* `UnknownAttributes` runs. So the **state-ref rewrite** (teach `lvt-source`) is the primary fix for the common `lvt-persist` case; the unknown-attribute migration hint only fires for the rarer `lvt-persist`-alongside-a-real-source case. The advisor flagged a possible double-fire; the parse-order made it moot.
+
+*PLAN.md drift fixed in this commit.*
+- "removed-with-migration set" → migrations-map entry (no parallel set); framed "not supported", not "removed" (client still reads it).
+- "declared/config/built-in/shared" universe corrected: **no built-in sources**; "shared" = the governing tinkerdown.yaml, resolved per-app.
+- The E2E criterion struck as redundant for pre-serve-validation checks.
+
+*Feed-forward to **M3**'s Audit.*
+- Action-param checks param **presence** (a `:name` is supplied at all). The re-sequenced **field-name/schema** validation (Phase 5 #2 — `row_cap`→`.RowCap` renders empty when wrong) is the *next* layer and needs **source-schema introspection** (M3 gap #2) — it cannot be done from the manifest alone, which is why it lands in M3, not here.
+- `scanParams`/`ReferencedParams` (single-source param scanner) is now available for any deeper action analysis M3 wants (e.g. mapping a `:param` to a `params:` type).
+
+*New / changed risks.*
+- **New (low): action-param over-inclusion = safe misses.** A param supplied for a *different* action passes the check. Deliberate — false negatives beat false positives for a self-correcting loop. Documented on `unsuppliedActionParams`.
+- **New (low): action-param covers `kind: sql` only.** `exec`/`http` actions that reference `:params` aren't checked (they substitute through a different path); a safe miss, extendable if those actions grow `:param` usage.
+- **New (low, DRY): `hasConfigFile` mirrors the config-filename list in `config.LoadFromDir`.** A canonical exported list would dedup it; out of Phase 3's scope (touches `config.go`). Noted by `/simplify`.
+- **Carried: docs still teach `lvt-persist`** (`docs/llms.txt`, `playground.html`, `landing-page.html`) — not corpus-validated (`.txt`/`.html`), but they seed generated apps with a now-flagged pattern. A docs sweep is the standing Phase 5 follow-up; the client-bundle `getAttribute("lvt-persist")` vestige rides with it.
+
+---
+
+### M3–M5 phases — outline only (expanded at milestone kickoff per convention 9)
 
 The *what* + *why* of each is in § Roadmap; here is only each milestone's **kickoff design checklist** — the sections to write into full phase blocks when that milestone starts (per convention 9):
 
-- **M2** (upstream `livetemplate` + tinkerdown): the `Validate(templateText)` API surface; the attribute-allowlist source-of-truth; how the skill's loop consumes richer diagnostics.
-- **M3** (upstream `livetemplate`): the `WithActionPolicy` hook signature; the introspection surface; how the manifest maps to runtime policy.
+*(M2 was expanded to full phase blocks at kickoff 2026-07-23 — see § M2 phases above.)*
+
+- **M3** (upstream `livetemplate`): the `WithActionPolicy` hook signature; the introspection surface; how the manifest maps to runtime policy. **Feed-forward from M2 (Phase 5 #2 re-sequenced here):** template **field-name** validation (the snake_case→PascalCase `.RowCap` mapping that renders empty when wrong) depends on source-schema **introspection** — it lands in M3 with its dependency, not M2.
 - **M4** (upstream `lvt/components` + tinkerdown): the component list + options; how the skill's reference advertises them; the design-token/enforced-component style-guide schema.
 - **M5** (tinkerdown + `client`): the persistence model (stores captured *skills*, not just `app.md`); gallery UX; the external-embed handshake protocol; **substrate extensibility** — writable WASM sources (#216) + custom Go+WASM source types (#222), and how a team-authored source enters the *approved* set.
 
@@ -836,7 +1018,7 @@ This plan follows the skeleton's load-bearing parts (LLM session guide, per-phas
 - ~~**[M1] `docs/reference/lvt-attributes.md` is materially out of date.**~~ **Retired — Phase 2 (M0) closed.** ~10 of 35 documented attribute tokens were wrong; all corrected, and the invariant is now held by `TestDocumentedAttributesExist`, which fails the build if any doc surface names an attribute neither the vendored client bundle nor production Go implements. Documentation rot in this area is now a test failure rather than a discovery.
 - **[M1 — quality ceiling, not a correctness bug] The attribute reference is accurate but incomplete: nothing enumerates the client's real surface and diffs it against the docs.** Found in Phase 2's review. `lvt-scroll-away` is live in the shipped bundle — it reads the attribute, validates `top`/`bottom`, and warns on anything else — yet appears in none of the four doc surfaces; `lvt-spy`, `lvt-upload`, `lvt-redact`, `lvt-fx:region-select` and `lvt-fx:auto-click` look the same (six of seven sampled were undocumented). Phase 2's guard walks **docs → implementation** only, so this direction is structurally invisible to it. **Why it is a lower tier than the risk below:** an undocumented-but-real attribute costs the generating agent a capability it never reaches for; a documented-but-absent one makes it emit a page that silently does nothing. Ceiling versus correctness. **For M1 Phase 3:** the reference is safe to use as generation context, but treat its coverage as a floor — if the demo needs a capability the reference omits, check the bundle before concluding it does not exist. A full implementation → docs sweep is its own phase; do not let it expand M1.
 - **[M1 — sharpened by Phase 2; was scoped as an M2 improvement] Nothing in the stack validates attribute *names*.** Proved empirically in Phase 2: a document using `lvt-filter`, `lvt-scroll`, and a literal `lvt-totally-made-up` passes `tinkerdown validate` with **zero errors** — unknown `lvt-*` attributes are emitted as inert HTML. Phase 2's guard closes the *docs → implementation* direction, but the direction M1 depends on is the reverse: **generated app → implementation**, which is entirely unguarded. M1 Phase 3's design has the skill "self-correct on `validate` diagnostics until clean," and a clean pass demonstrably does **not** mean the attributes exist — an agent that hallucinates `lvt-sortable` gets a green validate and a silently dead page. This is the empirical case for M2's `Validate()` attribute diagnostics, and it sits *inside* M1's critical path rather than after it. **M1 Phase 3 must either accept the gap explicitly (documented, with the demo's attributes hand-checked) or pull forward the attribute-allowlist portion of M2.** Do not let "validate is clean" stand in for "the app works."
-- **[all milestones] Committed-artifact provenance.** `internal/assets/client/tinkerdown-client.browser.js` is a *generated file tracked in git*, so it can silently disagree with the lockfile that supposedly produced it — exactly what issue #295 recorded (`node_modules` stale at 0.11.9 vs a 0.14.3 lockfile, so any rebuild reverted shipped fixes). Mitigated in Phase 0 by `make build` running `npm ci` first. **Residual:** CI cannot catch a regression here, because the e2e tests that would are `//go:build !ci` and do not run there — so a local e2e run before committing a rebuilt bundle is the only gate, not a formality. Tracked as [#297](https://github.com/livetemplate/tinkerdown/issues/297) (browser e2e smoke subset in CI), with a standing pre-bump checklist under § M2–M5 phases so the milestone that next regenerates the artifact makes the call deliberately rather than rediscovering this.
+- **[all milestones] Committed-artifact provenance.** `internal/assets/client/tinkerdown-client.browser.js` is a *generated file tracked in git*, so it can silently disagree with the lockfile that supposedly produced it — exactly what issue #295 recorded (`node_modules` stale at 0.11.9 vs a 0.14.3 lockfile, so any rebuild reverted shipped fixes). Mitigated in Phase 0 by `make build` running `npm ci` first. **Residual:** CI cannot catch a regression here, because the e2e tests that would are `//go:build !ci` and do not run there — so a local e2e run before committing a rebuilt bundle is the only gate, not a formality. Tracked as [#297](https://github.com/livetemplate/tinkerdown/issues/297) (browser e2e smoke subset in CI), with a standing pre-bump checklist under § M3–M5 phases so the milestone that next regenerates the artifact makes the call deliberately rather than rediscovering this.
 - **[M1] "30 seconds" is a generation-reliability target, not a framework-latency target.** The framework leg is tens of ms; the budget is spent on the LLM. M1 must treat the generation-context assets (manifest + style guide + attribute reference + few-shot corpus) as first-class — that's what makes generation one-shot.
 - **[M1] Generated-app safety in M1 rests on the manifest + policy lint + proportional operation-summary review + `--allow-exec`, not yet on runtime `WithActionPolicy` (M3).** Acceptable for the demo with a human approver in the loop; M3 hardens it. State this explicitly so M1 isn't mistaken for production-grade authz. **Correction (Phase 4 finding): config `confirm:` is *not* an enforced M1 safety layer** — it is inert (copied into the runtime action but never read or shipped to the client). The M1 click-time affordance is the `data-confirm` HTML attribute authored on the button; enforcing the manifest's `confirm:` *regardless of render path* is precisely what M3's `WithActionPolicy` adds. Until then, `confirm:` in a manifest is a declaration of intent, not a gate.
 - **[cross-repo] Upstream-first milestones (M2–M4) require tagged releases before tinkerdown can pin them** — adds release overhead per **session-guide** convention 11.

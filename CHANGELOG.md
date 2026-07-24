@@ -11,6 +11,47 @@ Earlier releases (v0.1.x) are documented in the
 
 ## [Unreleased]
 
+### Changed — `validate` catches unresolved sources and incomplete action params
+
+`tinkerdown validate` now reports two more "passes validate, breaks at serve"
+classes:
+
+- **Bound references** — a source bound via `lvt-source="…"` that resolves to no
+  declared source (a typo) is reported with the list of declared sources, instead
+  of erroring only at serve as "source not found". The declared universe is the
+  file's frontmatter sources plus the tinkerdown.yaml governing it.
+- **Action-param completeness** — for a `kind: sql` action a form invokes, every
+  `:param` its statement references must be supplied by a form field or a `data-*`
+  attribute (`:operator` is server-set and exempt); a missing one is named,
+  instead of erroring at serve on the first substitution.
+
+The state-ref diagnostic ("interactive block has no state reference") now teaches
+the real fix — add `lvt-source` to the block's container — rather than an
+undefined `state="block-id"`.
+
+### Changed — `lvt-persist` reports a migration hint
+
+Using `lvt-persist` now reports "unknown attribute — use lvt-source" instead of a
+confusing "no state reference": Tinkerdown's server no longer supports the persist
+model (use `lvt-source` with `type: sqlite` for a writable store).
+
+### Changed — `validate` now checks that every lvt block compiles as a template
+
+`tinkerdown validate` runs each lvt code block through the template parser
+(livetemplate `v0.21.0`'s new `Validate`), so a template-syntax or composition
+error inside a block — an unclosed `{{range}}`, an unknown function, an
+unresolved component — is now reported with a line and message instead of
+surfacing only at serve time as a block that silently renders nothing.
+Validation resolves against the same component templates and helper functions
+serve uses, so a block that renders under serve validates clean, and vice versa.
+
+### Added — `split` block helper
+
+Templates in an lvt block can call `{{split "a, b, c" ", "}}` to turn a
+delimited string into a slice (e.g. comma-separated tags into individual values
+for a `{{range}}`) — Tinkerdown's first base block helper, available to every
+block at both parse and render.
+
 ### Added — Atomic multi-statement SQL actions (`statements:`)
 
 A `kind: sql` action may now carry a `statements:` list instead of a single

@@ -8,15 +8,15 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"testing/fstest"
 
 	"github.com/gorilla/websocket"
+	"github.com/livetemplate/livetemplate"
 	"github.com/livetemplate/lvt/components/base"
 	"github.com/livetemplate/lvt/components/datatable"
-	"github.com/livetemplate/livetemplate"
 	"github.com/livetemplate/tinkerdown"
 	"github.com/livetemplate/tinkerdown/internal/config"
 	"github.com/livetemplate/tinkerdown/internal/runtime"
@@ -102,16 +102,16 @@ type CacheMeta struct {
 type WebSocketHandler struct {
 	page           *tinkerdown.Page
 	mu             sync.RWMutex
-	writeMu        sync.Mutex                      // Serializes all writes to the websocket connection
-	instances      map[string]*BlockInstance      // blockID -> instance
-	sourceFiles    map[string][]string            // blockID -> source file paths (for file watching)
+	writeMu        sync.Mutex                // Serializes all writes to the websocket connection
+	instances      map[string]*BlockInstance // blockID -> instance
+	sourceFiles    map[string][]string       // blockID -> source file paths (for file watching)
 	debug          bool
-	server         *Server                        // Reference to server for connection tracking
+	server         *Server                         // Reference to server for connection tracking
 	stateFactories map[string]func() runtime.Store // State factories for lvt-source blocks
 	rootDir        string                          // Site root directory for database path
 	config         *config.Config                  // Site configuration with sources
 	conn           *websocket.Conn                 // Current connection for this handler
-	actionSources  map[string]source.Source       // Cached sources for custom actions
+	actionSources  map[string]source.Source        // Cached sources for custom actions
 }
 
 // BlockInstance represents a running LiveTemplate instance for an interactive block.
@@ -489,22 +489,16 @@ func (h *WebSocketHandler) initializeInstances(conn *websocket.Conn) {
 				return bi.factory()
 			}()
 
-			// Create template from inline content
-			// Since livetemplate.New() requires template files, we use a workaround:
-			// Write content to a temp file, parse it, then delete
-			tmpFile := fmt.Sprintf("/tmp/lvt-%s.tmpl", blockID)
+			// Create the template from the block's inline content through an
+			// in-memory FS — the same ParseFS path serve has always used (New
+			// requires a template source), without staging each block to /tmp.
 			if h.debug {
 				log.Printf("[WS] Block %s template content:\n%s", blockID, block.Content)
 			}
-			if err := os.WriteFile(tmpFile, []byte(block.Content), 0644); err != nil {
-				log.Printf("[WS] Failed to write temp template for block %s: %v", blockID, err)
-				continue
-			}
-			defer os.Remove(tmpFile)
-
+			blockFS := fstest.MapFS{"block.tmpl": {Data: []byte(block.Content)}}
 			tmpl, err := livetemplate.New(blockID,
-				livetemplate.WithComponentTemplates(getComponentTemplates()...),
-				livetemplate.WithParseFiles(tmpFile))
+				livetemplate.WithComponentTemplates(ComponentTemplates()...),
+				livetemplate.WithParseFS(blockFS, "block.tmpl"))
 			if err != nil {
 				log.Printf("[WS] Failed to create template for block %s: %v", blockID, err)
 				continue
@@ -1134,11 +1128,40 @@ func convertTemplateSet(bs *base.TemplateSet) *livetemplate.TemplateSet {
 	}
 }
 
-// getComponentTemplates returns livetemplate.TemplateSet versions of all component templates
-func getComponentTemplates() []*livetemplate.TemplateSet {
-	return []*livetemplate.TemplateSet{
-		convertTemplateSet(datatable.Templates()),
+// blockHelperFuncs are Tinkerdown's base template helpers, available to every
+// lvt block on top of livetemplate's builtins and the component libraries' own
+// funcs. They ride on a component set's Funcs because that is what reaches a
+// block's *parse* (New/Validate) as well as its tree generation — a func added
+// only post-parse via tmpl.Funcs() would be missing at parse, so the block
+// would fail to parse (parse rejects undefined funcs).
+var blockHelperFuncs = template.FuncMap{
+	// split turns a delimited string into a slice — e.g. comma-separated tags
+	// into individual values for a {{range}}.
+	"split": strings.Split,
+}
+
+// ComponentTemplates returns the livetemplate component template sets Tinkerdown
+// ships (the datatable), with Tinkerdown's base block helpers (blockHelperFuncs)
+// merged into the set's funcs. It is exported so both serve (here) and
+// `tinkerdown validate` (which runs each block through livetemplate.Validate)
+// resolve component references and helper funcs against the same set: a block
+// that renders under serve must validate clean, and vice versa.
+func ComponentTemplates() []*livetemplate.TemplateSet {
+	set := convertTemplateSet(datatable.Templates())
+
+	// Copy the component's funcs and add the base helpers on top, rather than
+	// mutating set.Funcs — convertTemplateSet aliases the component library's
+	// shared map.
+	merged := make(template.FuncMap, len(set.Funcs)+len(blockHelperFuncs))
+	for name, fn := range set.Funcs {
+		merged[name] = fn
 	}
+	for name, fn := range blockHelperFuncs {
+		merged[name] = fn
+	}
+	set.Funcs = merged
+
+	return []*livetemplate.TemplateSet{set}
 }
 
 // getComponentFuncs returns all component-specific template functions
@@ -1151,7 +1174,7 @@ func getComponentFuncs() template.FuncMap {
 		},
 	}
 	// Merge all component funcs
-	for _, set := range getComponentTemplates() {
+	for _, set := range ComponentTemplates() {
 		for name, fn := range set.Funcs {
 			funcs[name] = fn
 		}

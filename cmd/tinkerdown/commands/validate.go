@@ -9,12 +9,17 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/chromedp/chromedp"
+	"github.com/livetemplate/livetemplate"
 	"github.com/livetemplate/tinkerdown"
 	"github.com/livetemplate/tinkerdown/internal/config"
+	"github.com/livetemplate/tinkerdown/internal/server"
+	"github.com/livetemplate/tinkerdown/internal/source"
+	"golang.org/x/net/html"
 )
 
 // ValidateCommand implements the validate command.
@@ -86,6 +91,19 @@ func ValidateCommand(args []string) error {
 	var validFiles int
 	var totalErrors int
 	var fileErrors []fileValidationError
+
+	// The component template sets serve renders each block against, built once
+	// and reused for every block's template validation (each Validate call
+	// re-parses whatever sets it is handed).
+	componentSets := server.ComponentTemplates()
+
+	// Per-app config cache for the bound-refs check: a multi-app tree keeps its
+	// sources in each app's own tinkerdown.yaml, not the root the walk started at.
+	// walkRoot bounds the per-file config walk-up — the directory when the target
+	// is a directory, the file's directory when it is a single file (mirroring
+	// configDir), so a single-file validate doesn't read configs above the app.
+	configCache := map[string]*config.Config{}
+	walkRoot := configDir(absDir)
 
 	err = filepath.WalkDir(absDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -161,6 +179,40 @@ func ValidateCommand(args []string) error {
 				totalErrors++
 			}
 
+			// The config governing this file's sources — shared by the bound-refs
+			// and action-param checks below.
+			fileConfig := sourceConfigForFile(path, walkRoot, configCache)
+
+			// Bound refs: does every source the document binds resolve to a declared
+			// one? A typo like lvt-source="reqests" passes every check above but errors
+			// at serve as "source not found".
+			boundRefDiags := unresolvedSourceDiags(page, fileConfig)
+			for _, br := range boundRefDiags {
+				fileErrors = append(fileErrors, fileValidationError{file: relPath, error: br})
+				totalErrors++
+			}
+
+			// Action params: does the document supply every :param its SQL actions
+			// reference (via a form field or data-* attribute)? A missing one errors
+			// at serve on the first :param substitution.
+			paramDiags := unsuppliedActionParams(page, fileConfig)
+			for _, pd := range paramDiags {
+				fileErrors = append(fileErrors, fileValidationError{file: relPath, error: pd})
+				totalErrors++
+			}
+
+			// Templates: does every lvt block compile as a livetemplate template?
+			// The attribute checks above prove the markup is well-formed, not that
+			// the {{...}} template parses — an unclosed {{range}} or an unknown
+			// function renders nothing at serve with no error reported here.
+			// Validate closes that gap, against the same component and function set
+			// serve uses.
+			templateDiags := validateBlockTemplates(page, componentSets)
+			for _, td := range templateDiags {
+				fileErrors = append(fileErrors, fileValidationError{file: relPath, error: td})
+				totalErrors++
+			}
+
 			// Also validate Mermaid diagrams
 			mermaidErrors, err := validateMermaidDiagrams(path)
 			if err != nil {
@@ -176,7 +228,7 @@ func ValidateCommand(args []string) error {
 					error: fmt.Sprintf("Mermaid errors:\n  %s", errorMsg),
 				})
 				totalErrors += len(mermaidErrors)
-			} else if len(violations) == 0 && len(unknown) == 0 && len(inert) == 0 {
+			} else if len(violations) == 0 && len(unknown) == 0 && len(inert) == 0 && len(templateDiags) == 0 && len(boundRefDiags) == 0 && len(paramDiags) == 0 {
 				validFiles++
 				fmt.Printf("✓ %s\n", relPath)
 			}
@@ -471,6 +523,224 @@ func isTransientChromedpError(err error) bool {
 	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "websocket") || strings.Contains(msg, "timeout")
+}
+
+// validateBlockTemplates runs each of the page's lvt blocks through
+// livetemplate.Validate, catching template-syntax and composition errors
+// (unclosed {{range}}, unknown functions, unresolved components) that the
+// attribute and policy checks cannot see and that otherwise surface only at
+// serve time as a block that silently renders nothing. Blocks are checked in
+// stable ID order so a generating agent sees the same diagnostics each run.
+func validateBlockTemplates(page *tinkerdown.Page, componentSets []*livetemplate.TemplateSet) []string {
+	if page == nil {
+		return nil
+	}
+	ids := make([]string, 0, len(page.InteractiveBlocks))
+	for id := range page.InteractiveBlocks {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+
+	var out []string
+	for _, id := range ids {
+		block := page.InteractiveBlocks[id]
+		if block == nil {
+			continue
+		}
+		diags, err := livetemplate.Validate(block.Content, livetemplate.WithValidateComponents(componentSets...))
+		if err != nil {
+			// An infrastructure failure (e.g. a malformed component set) is
+			// Tinkerdown's own problem, not the document's — surface it rather
+			// than silently pass the block.
+			out = append(out, fmt.Sprintf("template validation could not run: %v", err))
+			continue
+		}
+		for _, d := range diags {
+			if d.Line > 0 {
+				out = append(out, fmt.Sprintf("line %d: %s", d.Line, d.Message))
+			} else {
+				out = append(out, d.Message)
+			}
+		}
+	}
+	return out
+}
+
+// unresolvedSourceDiags reports each source a document binds via lvt-source that
+// resolves to no declared source — a typo that passes every other check but
+// errors at serve ("source not found"). The declared universe mirrors serve's
+// getEffectiveSource: the page's own sources (frontmatter + auto-generated,
+// carried on page.Config) plus the sources in the tinkerdown.yaml governing the
+// file. fileConfig may be nil (a document with no governing config), in which
+// case only the page's own sources are declared.
+func unresolvedSourceDiags(page *tinkerdown.Page, fileConfig *config.Config) []string {
+	if page == nil {
+		return nil
+	}
+	declared := map[string]bool{}
+	for name := range page.Config.Sources {
+		declared[name] = true
+	}
+	if fileConfig != nil {
+		for name := range fileConfig.Sources {
+			declared[name] = true
+		}
+	}
+
+	var out []string
+	for _, name := range page.Refs().Sources { // Refs().Sources is already sorted
+		if declared[name] {
+			continue
+		}
+		out = append(out, fmt.Sprintf(
+			"source %q is bound via lvt-source but declared nowhere — it will error at serve as \"source not found\"; declared sources: %s",
+			name, sourceList(declared)))
+	}
+	return out
+}
+
+// sourceConfigForFile returns the tinkerdown.yaml governing a file's sources: the
+// nearest config from the file's directory up to (and including) the validation
+// root. Sources live in a per-app config, so a file in a multi-app tree (e.g.
+// `validate examples/`) must be checked against its own app's config, not the
+// root the walk started at. Cached by the file's directory; nil when no config
+// governs the file.
+func sourceConfigForFile(path, root string, cache map[string]*config.Config) *config.Config {
+	start := filepath.Dir(path)
+	if c, ok := cache[start]; ok {
+		return c
+	}
+	var found *config.Config
+	for dir := start; ; {
+		if hasConfigFile(dir) {
+			if c, err := config.LoadFromDir(dir); err == nil {
+				found = c
+			}
+			break
+		}
+		if dir == root {
+			break
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	cache[start] = found
+	return found
+}
+
+func hasConfigFile(dir string) bool {
+	for _, name := range []string{"tinkerdown.yaml", "lmt.yaml", "livemdtools.yaml"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// unsuppliedActionParams reports each :param a SQL action the document invokes
+// references but that no form or control supplies — a form omitting a required
+// param passes every other check yet errors at serve on the first missing :param
+// substitution (SubstituteParams treats an absent key as fatal). :operator is
+// excluded: it is server-set, never supplied by the client.
+//
+// The supplied set is deliberately over-inclusive — every data-* key and named
+// form field ANYWHERE in the document, not scoped to the specific invoking form.
+// So the check fires only when a param is supplied nowhere at all, which biases
+// it toward a safe miss (a param supplied for a different action) over a false
+// positive (flagging a param the form actually provides).
+func unsuppliedActionParams(page *tinkerdown.Page, fileConfig *config.Config) []string {
+	if page == nil || fileConfig == nil {
+		return nil
+	}
+	supplied := suppliedParamNames(page)
+
+	var out []string
+	for _, actionName := range page.Refs().Actions { // sorted, built-ins already excluded
+		action, ok := fileConfig.Actions[actionName]
+		if !ok || action.Kind != "sql" {
+			continue
+		}
+		stmts := action.Statements
+		if action.Statement != "" {
+			stmts = append([]string{action.Statement}, stmts...)
+		}
+		for _, param := range source.ReferencedParams(stmts...) {
+			if param == "operator" || supplied[param] {
+				continue
+			}
+			out = append(out, fmt.Sprintf(
+				"action %q references :%s but no form field or data-* attribute supplies it (it errors at serve: undefined parameter %q)",
+				actionName, param, param))
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// suppliedParamNames collects every param name a document could hand to an
+// action: named form fields (<input/select/textarea name=X> → X) and data-*
+// attribute keys (data-id → id) anywhere in the markup. data-lvt-* are excluded
+// (client-internal hints, never action params). Over-collection is intentional
+// and safe — see unsuppliedActionParams.
+func suppliedParamNames(page *tinkerdown.Page) map[string]bool {
+	out := map[string]bool{}
+	scan := func(markup string) {
+		if strings.TrimSpace(markup) == "" {
+			return
+		}
+		doc, err := html.Parse(strings.NewReader(markup))
+		if err != nil {
+			return
+		}
+		var walk func(*html.Node)
+		walk = func(n *html.Node) {
+			if n.Type == html.ElementNode {
+				for _, attr := range n.Attr {
+					switch {
+					case strings.HasPrefix(attr.Key, "data-lvt-"):
+						// client-internal, not a param
+					case strings.HasPrefix(attr.Key, "data-"):
+						out[strings.TrimPrefix(attr.Key, "data-")] = true
+					case attr.Key == "name" && (n.Data == "input" || n.Data == "select" || n.Data == "textarea"):
+						out[attr.Val] = true
+					}
+				}
+			}
+			for c := n.FirstChild; c != nil; c = c.NextSibling {
+				walk(c)
+			}
+		}
+		walk(doc)
+	}
+	for _, b := range page.ServerBlocks {
+		if b != nil {
+			scan(b.Content)
+		}
+	}
+	for _, b := range page.InteractiveBlocks {
+		if b != nil {
+			scan(b.Content)
+		}
+	}
+	scan(page.StaticHTML)
+	return out
+}
+
+// sourceList renders a set of source names as a sorted, comma-joined string for
+// a diagnostic hint.
+func sourceList(m map[string]bool) string {
+	if len(m) == 0 {
+		return "(none declared)"
+	}
+	names := make([]string, 0, len(m))
+	for n := range m {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
 }
 
 // pageRefs bridges the parser's view of what a document reaches for to the shape the
