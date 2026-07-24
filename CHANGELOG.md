@@ -11,6 +11,17 @@ Earlier releases (v0.1.x) are documented in the
 
 ## [Unreleased]
 
+### Added — a saved-skills gallery (`examples/gallery/`)
+
+A discoverable home for captured workflows: the gallery is itself a plain
+Tinkerdown app (an `lvt-source` over a read-only CSV, no custom JavaScript) that
+lists each captured skill with what it stands up and where its stand-up steps
+live. Because no source type reads a directory of `SKILL.md` frontmatter, the
+gallery renders a committed static index (`skills.csv`) rather than scanning
+`skills/` live; a test (`TestSavedSkillsGalleryInSync`) keeps that index in step
+with the captured skills on disk — every `skills/` dir except the
+framework-authoring skills — so a new capture cannot silently go unlisted.
+
 ### Changed — a saved skill now carries its house style
 
 `/tinkerdown:save` captures the manifest **whole**, not trimmed to sources +
