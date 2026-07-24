@@ -1161,29 +1161,35 @@ type Diagnostic struct {
 #### Phase 3 (M5, tinkerdown) — #216 disposition: writable-WASM CLI parity + docs (~1 session)
 
 > **Goal at end:** writable WASM has **CLI parity** — the already-implemented `WritableSource` WASM path is *verified running*, `tinkerdown cli`'s CRUD reaches it (the `createCLISource` gap closed, or `exec`/`wasm` omission documented as intentional), the wasm-source template + `docs/sources/wasm.md` reflect writability, and **#216 is closed with an honest disposition** — not left "done in code, unverified."
+>
+> **Settled at execution (2026-07-24) — the write-verification premise was wrong (advisor-confirmed).** The Audit's "verify a write lands" assumed `examples/lvt-source-wasm-test/` was a *writable* path; it is **read-only** — `quotes.wasm` exports `fetch`/`get_result_len`/`free_result` but **no `write`**, so `IsReadonly()` correctly returns true and no write can be exercised. It is the **only** `.wasm` in the repo, there is **no TinyGo** here to build a write-exporting fixture, and standard-Go `wasip1` is ABI-incompatible with the loader's fixed-offset `//export` model (which is *why* the template mandates TinyGo). A committed writable `.wasm` I can't rebuild would be the exact **artifact-provenance trap** #295/#297 already fought. So a *successful* write is **not empirically verifiable in this environment**, in WS *or* CLI — and the plan's "works over WebSocket, just not CLI" premise is itself unbacked (no test exercises a successful write in any transport). The **honest #216 disposition** is therefore: CLI parity gap closed; read path + readonly-guard verified; successful-write needs a **reproducible TinyGo fixture wired into `make`** — a follow-up, not this session. **#216 is not closed here** (an outward action gated on PR signoff); the disposition is presented at signoff.
 
 **Design refs:**
 - [#216](https://github.com/livetemplate/tinkerdown/issues/216) (writable WASM sources, Phase C2)
 - `internal/wasm/source.go` (`WriteItem`/`IsReadonly` — already implement `WritableSource`); `cmd/tinkerdown/commands/cli.go:221-240` (`createCLISource` — omits `wasm`/`exec`); `examples/lvt-source-wasm-test/` (the runnable path); `cmd/tinkerdown/commands/templates/wasm-source/` + `docs/sources/wasm.md` (the residual doc/template surface the issue names)
 
 **Audit (first task):**
-- [ ] **Design-ref completeness check.**
-- [ ] **Verify, don't infer (advisor):** actually *run* the writable-WASM path (`examples/lvt-source-wasm-test/`) over the WS/serve path and confirm a write lands — code existing is not the feature working. Record the result.
-- [ ] Confirm the `createCLISource` gap (`wasm`/`exec` absent) and **decide per type:** `wasm` writable → belongs in CLI CRUD; `exec` is read-oriented — decide whether CLI CRUD over `exec` is meaningful or an intentional omission to *document* rather than fill.
-- [ ] Read #216's stated residual (template + `docs/sources/wasm.md`) and reconcile with what verification finds.
+- [x] **Design-ref completeness check.** Done — `internal/wasm/source.go` (`WriteItem`/`IsReadonly`), `createCLISource`, the example, template, and doc all read.
+- [x] **Verify, don't infer (advisor):** ran it — and found the premise wrong. `examples/lvt-source-wasm-test/` is **read-only** (`quotes.wasm` has no `write` export → `IsReadonly()==true`); it is the only `.wasm` in the repo; **no TinyGo** to build a write-exporting fixture. So a *successful write* cannot be exercised (see Goal note). What **is** verified running: the wasm **read** path via CLI (`tinkerdown cli … list quotes` returns rows) and the **readonly guard** (`WriteItem` refuses with "does not support write operations").
+- [x] Confirm the `createCLISource` gap and decide per type. Confirmed `wasm` + `exec` both absent. **`wasm` → added** (writability derived from the module, so the existing readonly guard applies uniformly). **`exec` → documented intentional omission** (a comment in the switch): it is a read-oriented, `--allow-exec`-gated command runner, not a CRUD store.
+- [x] Read #216's residual (template + doc) and reconcile. Found the doc/template use a **non-existent `module:` key** (the real key is `path:`) and `config:` (real: `options:`) — a load-breaking doc bug, fixed here alongside the writability note.
 
 **Implementation:**
-- [ ] `createCLISource`: add `wasm` (writable) — and `exec` only if the Audit finds it meaningful; otherwise a comment documenting the intentional omission (a silent `default:` error is not documentation).
-- [ ] Update `cmd/tinkerdown/commands/templates/wasm-source/` + `docs/sources/wasm.md` to reflect writability.
-- [ ] `CHANGELOG.md`; close #216 with a comment stating what was verified + fixed.
+- [x] `createCLISource`: added `wasm` → `wasm.NewWasmSource(...)`; `exec` left out with an explanatory comment (not a silent `default:`).
+- [x] Updated `docs/sources/wasm.md` (fixed `module:`→`path:`, `config:`→`options:`; added a **Read-only vs. writable** section documenting the `write`-export contract + CLI parity) and `templates/wasm-source/test-app/tinkerdown.yaml` (`module:`→`path:`).
+- [x] `CHANGELOG.md`. **#216 NOT closed here** — the honest disposition (parity closed; write-landing unverifiable without a TinyGo fixture) is presented at PR signoff, per the delivery protocol.
 
 **Acceptance criteria:**
-- [ ] **Simplify:** `/simplify` the diff.
-- [ ] **Unit:** `createCLISource` returns a writable source for `wasm`; the CRUD path exercises a write.
-- [ ] **Integration:** `tinkerdown cli` add/list against a writable `wasm` source (the `examples/lvt-source-wasm-test` fixture) works end to end.
-- [ ] **E2E:** N/A (CLI) — the browser/WS writable-WASM path is verified in the Audit run.
+- [x] **Simplify:** `/simplify` the diff.
+- [x] **Unit:** `TestCLIWasmSourceReadParityAndReadonlyGuard` — `createCLISource(wasm)` constructs + `Fetch`es (read parity), `IsReadonly()==true` for the no-`write`-export module, and `WriteItem` returns the guard error. Green. (A *successful* write is not unit-testable here — no writable module.)
+- [x] **Integration:** `tinkerdown cli examples/lvt-source-wasm-test list quotes` returns 5 rows end-to-end (the real binary, not inferred). `add` against this read-only module is correctly refused.
+- [x] **E2E:** N/A (CLI). The browser/WS *write* path is **also** unverified (no writable fixture in any transport) — recorded honestly, not claimed.
 
-**Learn:** what surprised us (esp. whether writable WASM actually ran) / plan drift / feed-forward to **any future substrate-extensibility milestone**'s Audit (the build-time source-registration decision #222/#249 defers) / new-or-changed risks.
+**Learn:**
+- **What surprised us (did writable WASM actually run?):** the honest answer is **the read path runs; a successful write was never runnable here** — the plan (and #216's "works in WS, just not CLI") assumed a writable fixture that does not exist. Two footguns surfaced: (1) a test file named `cli_wasm_test.go` is **silently excluded** from non-`wasm` builds — `wasm` is a `GOARCH`, so `*_wasm_test.go` is an implicit build constraint; renamed to `cli_wasmsource_test.go` (caught by `go list -f {{.TestGoFiles}}` showing "[no tests to run]"). (2) the wasm **docs/template used `module:`/`config:` keys that don't exist** (`path:`/`options:` do) — following the docs would fail to load; fixed.
+- **Plan drift fixed (in-commit):** the "verify a write lands" premise + the "writable path exists at `examples/lvt-source-wasm-test/`" assumption were both wrong; recorded the read-only reality + the TinyGo/provenance blocker inline (Goal note + Audit). Also incidental: `gofmt`-cleaned a pre-existing misalignment in `cli.go`'s `cliOptions` struct (the repo's CI does not enforce `gofmt`).
+- **Feed-forward — the write-landing follow-up:** add a **reproducible writable wasm fixture** (a `write`-exporting module built by TinyGo, wired into `make`, never a committed mystery binary) + a test that lands a write over CLI *and* WS. Belongs to a TinyGo-available environment. This is the tracked residual for closing #216. Also unverified-and-left: the wasm doc's `tinkerdown wasm` SDK commands + `limits:`/`cache:` keys (existence not checked — a separate doc-accuracy pass, out of this phase).
+- **New/changed risks:** #216 remains open with an explicit, honest residual rather than a false "verified" close — better than the alternative. The substrate-extensibility gap (#222/#249: registering a *new* source *type* at build time) is untouched and still deferred.
 
 #### Standing Audit item for milestones that bump `@livetemplate/client` (M2, M5) — artifact provenance
 

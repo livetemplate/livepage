@@ -16,6 +16,7 @@ import (
 
 	"github.com/livetemplate/tinkerdown/internal/config"
 	"github.com/livetemplate/tinkerdown/internal/source"
+	"github.com/livetemplate/tinkerdown/internal/wasm"
 )
 
 // defaultTimeout is the default context timeout for CLI operations
@@ -126,11 +127,11 @@ func CLICommand(args []string) error {
 
 // cliOptions holds parsed command-line flags
 type cliOptions struct {
-	format  string                 // Output format: table, json, csv
-	filter  string                 // Filter expression: field=value
-	id      string                 // Item ID for update/delete
-	yes     bool                   // Skip confirmation
-	fields  map[string]interface{} // Field values for add/update
+	format string                 // Output format: table, json, csv
+	filter string                 // Filter expression: field=value
+	id     string                 // Item ID for update/delete
+	yes    bool                   // Skip confirmation
+	fields map[string]interface{} // Field values for add/update
 }
 
 // parseFlags parses command-line flags
@@ -234,6 +235,15 @@ func createCLISource(name string, cfg config.SourceConfig, siteDir, currentFile 
 		return source.NewPostgresSourceWithConfig(name, cfg.Query, cfg.Options, cfg)
 	case "graphql":
 		return source.NewGraphQLSource(name, cfg, siteDir)
+	case "wasm":
+		// WASM has full CLI parity with `serve`: a module that exports `write` gets
+		// add/update/delete, and a read-only one (no `write` export) lists only —
+		// NewWasmSource derives writability from the module (WasmSource.IsReadonly),
+		// so the cliAdd/cliUpdate/cliDelete readonly guard applies uniformly.
+		return wasm.NewWasmSource(name, cfg.Path, siteDir, cfg.Options)
+	// exec is intentionally not constructed here: it is a read-oriented command
+	// runner gated by --allow-exec, not a CRUD store, so it has no place in the
+	// `tinkerdown cli` add/update/delete surface. This omission is deliberate.
 	default:
 		return nil, fmt.Errorf("unsupported source type for CLI: %s", cfg.Type)
 	}

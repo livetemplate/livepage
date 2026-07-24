@@ -11,6 +11,19 @@ Earlier releases (v0.1.x) are documented in the
 
 ## [Unreleased]
 
+### Fixed — `tinkerdown cli` reaches WASM sources; wasm docs use the real config keys
+
+`tinkerdown cli` now constructs `wasm` sources, so a WASM source has the same CRUD
+surface on the CLI as under `serve`: `list` works for any module, and
+`add`/`update`/`delete` work when the module exports `write` (a read-only module
+refuses a write with a clear error rather than dropping it). `exec` remains
+intentionally out of the CLI CRUD surface (it is a read-oriented, `--allow-exec`-gated
+command runner), now documented in the code rather than a silent fallthrough. The
+WASM source docs and the `wasm-source` template were also corrected: they used a
+non-existent `module:` key (the real key is `path:`) and `config:` (real: `options:`),
+so following them failed to load — plus a new *Read-only vs. writable* section
+documents the `write`-export contract and the CLI parity.
+
 ### Added — a saved-skills gallery (`examples/gallery/`)
 
 A discoverable home for captured workflows: the gallery is itself a plain
