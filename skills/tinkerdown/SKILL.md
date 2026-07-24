@@ -45,7 +45,7 @@ reaching for custom JavaScript.
 Follow these steps in order. They exist because each one catches something the next
 cannot.
 
-### 1. Read the approved surface, if there is one
+### 1. Read the approved surface and house style, if there is one
 
 If the project has a `tinkerdown.yaml` with a `generation:` block, it declares the
 sources and actions you may use — and those are the **only** ones you may use:
@@ -59,6 +59,21 @@ Use those names as given. **Do not declare your own `sources:` or `actions:` in 
 document's frontmatter** — a name outside the approved set fails validation, and
 redefining an approved name silently has no effect, because approved definitions are
 pinned and yours will be ignored.
+
+**Read the house style, too.** The same `tinkerdown.yaml` carries the project's
+style: a `styling` block (`theme`, and any `styling.tokens` design-token overrides)
+and an optional `generation.style_guide` pointing at a markdown file. If that field
+is set, read the file it names and follow it:
+
+```bash
+cat style-guide.md   # the path given by generation.style_guide
+```
+
+The style guide describes house tone, layout conventions, which components to prefer,
+and what to avoid. The design tokens (see `reference.md` § House style) skin semantic
+HTML on-brand automatically — so **write semantic HTML and never hardcode colours**;
+let the tokens apply. All of this is optional: with no style block, generation falls
+back to Tinkerdown's on-brand defaults.
 
 No `generation:` block means no approved surface: declare sources in frontmatter as
 normal.
@@ -80,6 +95,14 @@ make and the hardest to spot.
 Use only attributes from `reference.md`. If you need a capability you cannot find
 there, check whether it exists before inventing an attribute for it — a plausible
 invention is the most common way generated pages fail.
+
+**Stay on-brand by construction — write semantic HTML, never hardcode colours.**
+Use semantic elements (`<table>`, `<article>`, `<mark>`, `<strong>`, headings); the
+project's design tokens skin them on-brand automatically. Do **not** write a raw
+colour (`#3949ab`, `rgb(...)`, a named colour) or reach for Tailwind colour classes —
+that bypasses the house palette and drifts off-brand. Follow the project's
+`style-guide.md` (from step 1) for layout, tone, and preferred components. With no
+style block the defaults are already on-brand, so this costs nothing.
 
 **Binding data and actions — three rules that cause most first-try failures:**
 
@@ -236,6 +259,7 @@ See [reference.md](./reference.md) for complete API documentation:
 - Source configuration (pg, rest, csv, json, exec)
 - Template syntax (Go templates)
 - Components (datatable, dropdown)
+- House style (design tokens, style guide)
 
 ## Examples
 

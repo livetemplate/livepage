@@ -11,6 +11,36 @@ Earlier releases (v0.1.x) are documented in the
 
 ## [Unreleased]
 
+### Changed — the generation skill now consumes the house style
+
+The `/tinkerdown` generation skill reads a project's house style and authors
+against it, closing a declared-but-unconsumed gap: `generation.style_guide` (a
+markdown file of house tone/layout/do-don't) was a config field nothing ever
+read. The skill now reads it — plus the `styling` block (`theme` +
+`styling.tokens`) — and carries the on-brand rule into generation: **write
+semantic HTML, never hardcode colours** and let the design tokens skin it, follow
+the project's `style-guide.md`. The token vocabulary is documented in the skill
+`reference.md` (guarded against `KnownStyleTokens` so a new token can't go
+untaught). The whole style block stays optional — with none, generation falls
+back to on-brand defaults. The PII reference app now ships a `style-guide.md` +
+`styling.tokens` demonstrating a governed, on-brand console.
+
+### Added — declarative design tokens (`styling.tokens`)
+
+A project can now set its on-brand palette declaratively, without writing raw
+CSS. `styling.tokens` in `tinkerdown.yaml` maps snake_case design-token names to
+values — e.g. `accent: "#5a67d8"`, `card_bg: "#ffffff"` — and each drives the
+matching CSS custom property (`--accent`, `--card-bg`, …) in every page's
+`:root`, overriding the built-in default via the same mechanism `primary_color`
+already uses for `--accent`. Because the override skins the *semantic* HTML the
+generator emits, a generated UI is on-brand by construction rather than by
+careful prompting. An unknown token key fails loudly at config load (naming the
+key and listing the known tokens) so a typo can't silently skin nothing; token
+values are sanitized against CSS-injection at render. Absent, built-in defaults
+apply — existing projects are unaffected. A token override is a single value that
+applies to **both** light and dark themes (same as `primary_color`); per-theme
+palettes are not yet expressible.
+
 ### Added — runtime approved-surface enforcement
 
 When a project declares a `generation:` block, Tinkerdown now enforces the
