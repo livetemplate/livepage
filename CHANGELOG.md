@@ -11,6 +11,19 @@ Earlier releases (v0.1.x) are documented in the
 
 ## [Unreleased]
 
+### Changed — a saved skill now carries its house style
+
+`/tinkerdown:save` captures the manifest **whole**, not trimmed to sources +
+actions: the `styling` block (theme + design `tokens`) and any
+`generation.style_guide` → `style-guide.md` travel with the capture, under the
+same bundle-or-point rule as `seed.sql` / `app.md`. So a saved workflow re-runs
+**on-brand** instead of falling back to bare defaults — closing the gap where a
+capture kept a console's data surface but dropped its palette. The PII reference
+skill demonstrates the point case: it points at the committed
+`examples/pii-access-approval/`, whose manifest carries the house style, and a
+test now guards that the style file travels and the manifest still round-trips
+its `styling.tokens` + `generation.style_guide`.
+
 ### Changed — the generation skill now consumes the house style
 
 The `/tinkerdown` generation skill reads a project's house style and authors

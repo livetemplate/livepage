@@ -33,9 +33,15 @@ it does not fix a broken one.
 Look back over the conversation for the working UI the user produced and gather:
 
 1. **The `app.md`** — the final, validated document that was served.
-2. **The manifest** — the `tinkerdown.yaml` it ran against (its approved sources and
-   named actions), if there was one. A plain app with sources in frontmatter has no
-   separate manifest; note that.
+2. **The manifest** — the `tinkerdown.yaml` it ran against, captured **whole**, not
+   trimmed to sources + actions. The manifest also carries the **house style** the app
+   rendered under: the `styling` block (theme + design `tokens`) and, if present,
+   `generation.style_guide` pointing at a `style-guide.md`. Keep all of it, so the
+   saved workflow re-runs **on-brand** — a manifest stripped back to sources + actions
+   re-runs on bare PicoCSS defaults, off-brand. The `style-guide.md` is a separate file
+   the yaml only *points* at, so it travels under the same **bundle-or-point** rule as
+   `seed.sql` / `app.md` (below). A plain app with sources in frontmatter has no
+   separate manifest — and so no `styling`/`style_guide` to carry; note that.
 3. **The fixtures / data setup** — the schema + seed (a `seed.sql`, a `.db`, or the
    steps that created the data). Synthetic/sample data, not anything real.
 4. **The stand-up steps** — how it was served: seeding the database, the
@@ -89,8 +95,9 @@ breaks, not the markup. Get these three right:
 **Bundle vs. point — the rule that avoids duplication:**
 
 - **Bundle** the artifacts into `skills/<name>/` (`app.md`, `tinkerdown.yaml`,
-  `seed.sql`) when the UI was generated in a scratch/ephemeral directory that will be
-  thrown away — the skill is then their only home, so copies are not duplication.
+  `seed.sql`, and any `style-guide.md`) when the UI was generated in a
+  scratch/ephemeral directory that will be thrown away — the skill is then their only
+  home, so copies are not duplication.
 - **Point** at the existing path instead (do **not** copy) when the artifacts already
   live at a stable, committed location in the repo (e.g. under `examples/`). Copying a
   committed source of truth just creates two files that must stay identical — which is
@@ -104,6 +111,9 @@ A captured skill nobody trusts is worse than none. Confirm:
 2. Every path the `SKILL.md` references actually exists.
 3. The stand-up steps are complete — a fresh reader could seed and serve from them
    alone, with nothing implicit.
+4. The captured manifest carries the **house style** the app ran on — its `styling`
+   block travels, and any `style-guide.md` it references is bundled or pointed at — so
+   the saved workflow re-runs on-brand, not on defaults.
 
 If validation fails, the underlying app was not actually working — fix that first (or
 tell the user it is not ready to save), rather than capturing a broken artifact.
